@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Toolbar } from "./components/Toolbar";
 import { LayerPanel } from "./components/LayerPanel";
 import { PropertyPanel } from "./components/PropertyPanel";
@@ -6,9 +6,20 @@ import { MeasurementPanel } from "./components/MeasurementPanel";
 import { StatusBar } from "./components/StatusBar";
 import { StartScreen } from "./components/StartScreen";
 import { ResizablePanel } from "./components/ResizablePanel";
+import { LoadingOverlay } from "./components/LoadingOverlay";
 import { CadCanvas } from "./cad-view/CadCanvas";
+import { validateDxfFile } from "./dxf/validateDxfFile";
+import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
 import type { CadLayer, DocumentInfo } from "./types/cad";
 import "./App.css";
+
+const DXF_ERROR_MESSAGE =
+  "DXFの解析に失敗しました。\n\n考えられる原因：\n・ASCII DXFではない\n・ファイルが破損している\n・未対応形式";
+
+type LoadingProgress = {
+  stage: DxfLoadingStage;
+  entityCount: number | null;
+};
 
 export default function App() {
   const [fileInfo, setFileInfo] = useState<DocumentInfo | null>(null);
@@ -16,35 +27,98 @@ export default function App() {
   const [isMeasurementMode, setIsMeasurementMode] = useState(false);
   const [layers, setLayers] = useState<CadLayer[]>([]);
 
+  const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
+  const [loadStartedAt, setLoadStartedAt] = useState<number | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+
   const [leftWidth, setLeftWidth] = useState(200);
   const [rightWidth, setRightWidth] = useState(240);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
+  const openFileInputRef = useRef<HTMLInputElement>(null);
+
   const isDocumentOpen = fileInfo !== null;
 
-  const handleFileSelected = useCallback((file: File) => {
-    if (!file.name.toLowerCase().endsWith(".dxf")) {
-      setErrorMessage(
-        "DXFの解析に失敗しました。\n\n考えられる原因：\n・ASCII DXFではない\n・ファイルが破損している\n・未対応形式",
-      );
-      return;
-    }
-    setErrorMessage(null);
-    setFileInfo({ fileName: file.name, fileSizeBytes: file.size });
-    setLayers([]);
+  const terminateWorker = useCallback(() => {
+    workerRef.current?.terminate();
+    workerRef.current = null;
   }, []);
 
+  const startDxfLoad = useCallback((file: File) => {
+    terminateWorker();
+    setErrorMessage(null);
+    setLoadStartedAt(Date.now());
+    setLoadingProgress({ stage: "reading", entityCount: null });
+
+    const worker = new Worker(new URL("./dxf/dxf.worker.ts", import.meta.url), { type: "module" });
+    workerRef.current = worker;
+
+    worker.onmessage = (event: MessageEvent<DxfWorkerResponse>) => {
+      const message = event.data;
+      if (message.type === "progress") {
+        setLoadingProgress({ stage: message.stage, entityCount: message.entityCount });
+      } else if (message.type === "success") {
+        console.log("[App] DXF parse succeeded", { entityCount: message.entityCount, elapsedMs: message.elapsedMs });
+        setLoadingProgress(null);
+        setLoadStartedAt(null);
+        setFileInfo({ fileName: file.name, fileSizeBytes: file.size });
+        setLayers([]);
+        terminateWorker();
+      } else if (message.type === "error") {
+        console.error("[App] DXF parse failed", message.message);
+        setLoadingProgress(null);
+        setLoadStartedAt(null);
+        setErrorMessage(DXF_ERROR_MESSAGE);
+        terminateWorker();
+      }
+    };
+
+    worker.onerror = (event) => {
+      console.error("[App] DXF worker crashed", event.message);
+      setLoadingProgress(null);
+      setLoadStartedAt(null);
+      setErrorMessage(DXF_ERROR_MESSAGE);
+      terminateWorker();
+    };
+
+    const request: DxfWorkerRequest = { type: "parse", file };
+    worker.postMessage(request);
+  }, [terminateWorker]);
+
+  const handleFileSelected = useCallback(
+    async (file: File) => {
+      const result = await validateDxfFile(file);
+      if (!result.valid) {
+        setErrorMessage(DXF_ERROR_MESSAGE);
+        return;
+      }
+      startDxfLoad(file);
+    },
+    [startDxfLoad],
+  );
+
   const handleCloseDocument = useCallback(() => {
+    terminateWorker();
     setFileInfo(null);
     setLayers([]);
     setIsMeasurementMode(false);
-  }, []);
+  }, [terminateWorker]);
 
   const handleOpenFileRequest = useCallback(() => {
-    // Phase2で実ファイルダイアログに置き換えるまでは開始画面へ戻す暫定動作
-    handleCloseDocument();
-  }, [handleCloseDocument]);
+    openFileInputRef.current?.click();
+  }, []);
+
+  const handleOpenFileInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) {
+        handleFileSelected(file);
+      }
+    },
+    [handleFileSelected],
+  );
 
   const handleToggleMeasurementMode = useCallback(() => {
     setIsMeasurementMode((prev) => !prev);
@@ -85,12 +159,34 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isDocumentOpen, isMeasurementMode, handleFitDrawing, handleToggleMeasurementMode, handleOpenFileRequest]);
 
+  useEffect(() => {
+    return () => terminateWorker();
+  }, [terminateWorker]);
+
   if (!isDocumentOpen) {
-    return <StartScreen recentFiles={[]} errorMessage={errorMessage} onFileSelected={handleFileSelected} />;
+    return (
+      <>
+        <StartScreen recentFiles={[]} errorMessage={errorMessage} onFileSelected={handleFileSelected} />
+        {loadingProgress && loadStartedAt !== null && (
+          <LoadingOverlay
+            stage={loadingProgress.stage}
+            entityCount={loadingProgress.entityCount}
+            startedAt={loadStartedAt}
+          />
+        )}
+      </>
+    );
   }
 
   return (
     <div className="app-cad-layout">
+      <input
+        ref={openFileInputRef}
+        type="file"
+        accept=".dxf"
+        style={{ display: "none" }}
+        onChange={handleOpenFileInputChange}
+      />
       <Toolbar
         isDocumentOpen={isDocumentOpen}
         isMeasurementMode={isMeasurementMode}
@@ -129,6 +225,9 @@ export default function App() {
         </ResizablePanel>
       </div>
       <StatusBar fileInfo={fileInfo} cursorWorld={null} />
+      {loadingProgress && loadStartedAt !== null && (
+        <LoadingOverlay stage={loadingProgress.stage} entityCount={loadingProgress.entityCount} startedAt={loadStartedAt} />
+      )}
     </div>
   );
 }
