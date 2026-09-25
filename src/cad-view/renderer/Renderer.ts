@@ -8,6 +8,7 @@ export type RenderParams = {
   model: CadModel;
   camera: Camera;
   visibleLayerNames: ReadonlySet<string>;
+  selectedEntityId: string | null;
 };
 
 export interface Renderer {

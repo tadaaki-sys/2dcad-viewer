@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toolbar } from "./components/Toolbar";
 import { LayerPanel } from "./components/LayerPanel";
 import { PropertyPanel } from "./components/PropertyPanel";
@@ -29,7 +29,13 @@ export default function App() {
   const [layers, setLayers] = useState<CadLayer[]>([]);
   const [cadModel, setCadModel] = useState<CadModel | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point2D | null>(null);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
+
+  const selectedEntity = useMemo(
+    () => cadModel?.entities.find((entity) => entity.id === selectedEntityId) ?? null,
+    [cadModel, selectedEntityId],
+  );
 
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
   const [loadStartedAt, setLoadStartedAt] = useState<number | null>(null);
@@ -72,6 +78,7 @@ export default function App() {
         setFileInfo({ fileName: file.name, fileSizeBytes: file.size });
         setLayers(message.cadModel.layers);
         setCadModel(message.cadModel);
+        setSelectedEntityId(null);
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);
@@ -112,6 +119,7 @@ export default function App() {
     setLayers([]);
     setCadModel(null);
     setCursorWorld(null);
+    setSelectedEntityId(null);
     setIsMeasurementMode(false);
   }, [terminateWorker]);
 
@@ -150,6 +158,10 @@ export default function App() {
     }
   }, []);
 
+  const handleEntitySelect = useCallback((entityId: string | null) => {
+    setSelectedEntityId(entityId);
+  }, []);
+
   const handleToggleLayerVisibility = useCallback((layerName: string) => {
     setLayers((prev) =>
       prev.map((layer) => (layer.name === layerName ? { ...layer, visible: !layer.visible } : layer)),
@@ -160,6 +172,7 @@ export default function App() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         if (isMeasurementMode) setIsMeasurementMode(false);
+        setSelectedEntityId(null);
       } else if (event.key === "o" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         if (isDocumentOpen) handleOpenFileRequest();
@@ -222,7 +235,15 @@ export default function App() {
         </ResizablePanel>
 
         <div className="app-cad-layout__canvas-area">
-          <CadCanvas ref={cadCanvasRef} model={cadModel} layers={layers} onCursorMove={handleCursorMove} />
+          <CadCanvas
+            ref={cadCanvasRef}
+            model={cadModel}
+            layers={layers}
+            selectedEntityId={selectedEntityId}
+            selectionEnabled={!isMeasurementMode}
+            onEntitySelect={handleEntitySelect}
+            onCursorMove={handleCursorMove}
+          />
         </div>
 
         <ResizablePanel
@@ -233,7 +254,7 @@ export default function App() {
           onCollapsedChange={setRightCollapsed}
         >
           <div className="app-cad-layout__right-content">
-            <PropertyPanel />
+            <PropertyPanel entity={selectedEntity} />
             <MeasurementPanel />
           </div>
         </ResizablePanel>

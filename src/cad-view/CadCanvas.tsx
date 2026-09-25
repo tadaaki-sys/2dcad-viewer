@@ -3,9 +3,11 @@ import type { CadLayer, CadModel, Point2D } from "../types/cad";
 import { Camera } from "./camera/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { Renderer } from "./renderer/Renderer";
+import { findEntityAtPoint } from "./selection/Selection";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const WHEEL_ZOOM_INTENSITY = 0.0015;
+const SELECTION_TOLERANCE_PX = 6;
 
 export type CadCanvasHandle = {
   fitToDrawing: () => void;
@@ -14,6 +16,9 @@ export type CadCanvasHandle = {
 type CadCanvasProps = {
   model: CadModel | null;
   layers: CadLayer[];
+  selectedEntityId: string | null;
+  selectionEnabled: boolean;
+  onEntitySelect: (entityId: string | null) => void;
   onCursorMove?: (worldPoint: Point2D | null) => void;
 };
 
@@ -38,7 +43,7 @@ function getCanvasRelativePoint(canvas: HTMLCanvasElement, clientX: number, clie
 }
 
 export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function CadCanvas(
-  { model, layers, onCursorMove },
+  { model, layers, selectedEntityId, selectionEnabled, onEntitySelect, onCursorMove },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,8 +56,15 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     [layers],
   );
 
-  const stateRef = useRef({ model, visibleLayerNames, onCursorMove });
-  stateRef.current = { model, visibleLayerNames, onCursorMove };
+  const stateRef = useRef({
+    model,
+    visibleLayerNames,
+    selectedEntityId,
+    selectionEnabled,
+    onEntitySelect,
+    onCursorMove,
+  });
+  stateRef.current = { model, visibleLayerNames, selectedEntityId, selectionEnabled, onEntitySelect, onCursorMove };
 
   function draw() {
     const canvas = canvasRef.current;
@@ -64,7 +76,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, container.clientWidth, container.clientHeight);
 
-    const { model: currentModel, visibleLayerNames: currentVisible } = stateRef.current;
+    const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityId: currentSelectedId } =
+      stateRef.current;
     if (!currentModel) return;
 
     rendererRef.current.render({
@@ -74,6 +87,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       model: currentModel,
       camera: cameraRef.current,
       visibleLayerNames: currentVisible,
+      selectedEntityId: currentSelectedId,
     });
   }
 
@@ -103,6 +117,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleLayerNames]);
+
+  useEffect(() => {
+    draw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEntityId]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -162,10 +181,24 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       stateRef.current.onCursorMove?.(null);
     }
 
+    function handleClick(event: MouseEvent) {
+      const { model: currentModel, visibleLayerNames: currentVisible, selectionEnabled: currentSelectionEnabled } =
+        stateRef.current;
+      if (!currentSelectionEnabled || !currentModel) return;
+
+      const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
+      const worldPoint = cameraRef.current.screenToWorld(screenPoint);
+      const toleranceWorld = SELECTION_TOLERANCE_PX / cameraRef.current.scale;
+
+      const hitEntity = findEntityAtPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+      stateRef.current.onEntitySelect(hitEntity?.id ?? null);
+    }
+
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseleave", handleMouseLeave);
+    canvas.addEventListener("click", handleClick);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseup", handleWindowMouseUp);
 
@@ -174,6 +207,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseleave", handleMouseLeave);
+      canvas.removeEventListener("click", handleClick);
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
     };

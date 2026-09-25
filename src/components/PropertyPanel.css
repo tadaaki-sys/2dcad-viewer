@@ -15,3 +15,26 @@
   color: var(--color-text-muted);
   padding: 0 4px;
 }
+
+.property-panel__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.property-panel__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.property-panel__row-label {
+  color: var(--color-text-muted);
+}
+
+.property-panel__row-value {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
