@@ -241,6 +241,7 @@ export default function App() {
             layers={layers}
             selectedEntityIds={selectedEntityIds}
             selectionEnabled={!isMeasurementMode}
+            measurementModeEnabled={isMeasurementMode}
             onSelectionChange={handleSelectionChange}
             onCursorMove={handleCursorMove}
           />

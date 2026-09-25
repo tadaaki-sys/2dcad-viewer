@@ -4,6 +4,7 @@ import { Camera } from "./camera/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
 import { findEntitiesInBox, findEntitiesNearPoint } from "./selection/Selection";
+import { findSnapPoint } from "./snap/SnapEngine";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -11,6 +12,7 @@ const WHEEL_ZOOM_INTENSITY = 0.0015;
 const SELECTION_TOLERANCE_PX = 6;
 const DRAG_THRESHOLD_PX = 4;
 const SAME_SPOT_TOLERANCE_PX = 3;
+const SNAP_TOLERANCE_PX = 10;
 
 type OverlapCycleState = {
   screenPoint: Point2D;
@@ -35,6 +37,7 @@ type CadCanvasProps = {
   layers: CadLayer[];
   selectedEntityIds: ReadonlySet<string>;
   selectionEnabled: boolean;
+  measurementModeEnabled: boolean;
   onSelectionChange: (entityIds: ReadonlySet<string>) => void;
   onCursorMove?: (worldPoint: Point2D | null) => void;
 };
@@ -60,7 +63,7 @@ function getCanvasRelativePoint(canvas: HTMLCanvasElement, clientX: number, clie
 }
 
 export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function CadCanvas(
-  { model, layers, selectedEntityIds, selectionEnabled, onSelectionChange, onCursorMove },
+  { model, layers, selectedEntityIds, selectionEnabled, measurementModeEnabled, onSelectionChange, onCursorMove },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -80,10 +83,19 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     visibleLayerNames,
     selectedEntityIds,
     selectionEnabled,
+    measurementModeEnabled,
     onSelectionChange,
     onCursorMove,
   });
-  stateRef.current = { model, visibleLayerNames, selectedEntityIds, selectionEnabled, onSelectionChange, onCursorMove };
+  stateRef.current = {
+    model,
+    visibleLayerNames,
+    selectedEntityIds,
+    selectionEnabled,
+    measurementModeEnabled,
+    onSelectionChange,
+    onCursorMove,
+  };
 
   function draw() {
     const canvas = canvasRef.current;
@@ -314,10 +326,20 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function handleMouseMove(event: MouseEvent) {
-      const { onCursorMove: currentOnCursorMove } = stateRef.current;
+      const { onCursorMove: currentOnCursorMove, model: currentModel, visibleLayerNames: currentVisible, measurementModeEnabled: currentMeasurementModeEnabled } =
+        stateRef.current;
       if (!currentOnCursorMove) return;
       const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
-      currentOnCursorMove(cameraRef.current.screenToWorld(screenPoint));
+      const worldPoint = cameraRef.current.screenToWorld(screenPoint);
+
+      if (currentMeasurementModeEnabled && currentModel) {
+        const toleranceWorld = SNAP_TOLERANCE_PX / cameraRef.current.scale;
+        const snap = findSnapPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+        currentOnCursorMove(snap ? snap.point : worldPoint);
+        return;
+      }
+
+      currentOnCursorMove(worldPoint);
     }
 
     function handleMouseLeave() {

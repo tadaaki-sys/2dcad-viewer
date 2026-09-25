@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distance, pointToSegmentDistance, polylineLength, segmentsIntersect } from "./geometry";
+import { distance, intersectSegments, pointToSegmentDistance, polylineLength, segmentsIntersect } from "./geometry";
 
 describe("distance", () => {
   it("computes euclidean distance between two points", () => {
@@ -45,6 +45,23 @@ describe("segmentsIntersect", () => {
 
   it("returns false when segments would cross only if extended beyond their endpoints", () => {
     expect(segmentsIntersect({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 10 }, { x: 1, y: 9 })).toBe(false);
+  });
+});
+
+describe("intersectSegments", () => {
+  it("returns the exact intersection point for a crossing X shape", () => {
+    expect(intersectSegments({ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 10, y: 0 })).toEqual({
+      x: 5,
+      y: 5,
+    });
+  });
+
+  it("returns null for segments that do not cross", () => {
+    expect(intersectSegments({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 5 }, { x: 10, y: 5 })).toBeNull();
+  });
+
+  it("returns null for parallel segments", () => {
+    expect(intersectSegments({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 1 }, { x: 10, y: 1 })).toBeNull();
   });
 });
 

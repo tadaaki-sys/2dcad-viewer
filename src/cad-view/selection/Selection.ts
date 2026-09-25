@@ -1,4 +1,5 @@
 import { pointToSegmentDistance, segmentsIntersect } from "../../utils/geometry";
+import { getEntityPoints, getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 
 export type SelectionBox = {
@@ -63,22 +64,6 @@ export function findEntityAtPoint(
   toleranceWorld: number,
 ): CadEntity | null {
   return findEntitiesNearPoint(entities, visibleLayerNames, point, toleranceWorld)[0] ?? null;
-}
-
-function getEntityPoints(entity: CadEntity): Point2D[] {
-  return entity.type === "LINE" ? [entity.start, entity.end] : entity.vertices;
-}
-
-function getEntitySegments(entity: CadEntity): Array<[Point2D, Point2D]> {
-  const points = getEntityPoints(entity);
-  const segments: Array<[Point2D, Point2D]> = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    segments.push([points[i], points[i + 1]]);
-  }
-  if (entity.type !== "LINE" && entity.closed && points.length > 2) {
-    segments.push([points[points.length - 1], points[0]]);
-  }
-  return segments;
 }
 
 function isPointInBox(point: Point2D, box: SelectionBox): boolean {
