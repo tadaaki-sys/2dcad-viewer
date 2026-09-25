@@ -24,6 +24,22 @@ export function pointToSegmentDistance(point: Point2D, segStart: Point2D, segEnd
   return distance(point, closestPoint);
 }
 
+/** 2つの線分(端点含む)が交差しているかを判定する。平行な場合はfalse(完全重複ケースは扱わない) */
+export function segmentsIntersect(p1: Point2D, p2: Point2D, p3: Point2D, p4: Point2D): boolean {
+  const d1x = p2.x - p1.x;
+  const d1y = p2.y - p1.y;
+  const d2x = p4.x - p3.x;
+  const d2y = p4.y - p3.y;
+
+  const denom = d1x * d2y - d1y * d2x;
+  if (denom === 0) return false;
+
+  const t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / denom;
+  const u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / denom;
+
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+}
+
 export function polylineLength(vertices: Point2D[], closed: boolean): number {
   let total = 0;
   for (let i = 0; i < vertices.length - 1; i++) {

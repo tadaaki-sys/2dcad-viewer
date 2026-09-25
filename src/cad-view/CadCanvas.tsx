@@ -2,12 +2,14 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "rea
 import type { CadLayer, CadModel, Point2D } from "../types/cad";
 import { Camera } from "./camera/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
-import type { Renderer } from "./renderer/Renderer";
-import { findEntityAtPoint } from "./selection/Selection";
+import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
+import { findEntitiesInBox, findEntityAtPoint } from "./selection/Selection";
 
 const MIDDLE_MOUSE_BUTTON = 1;
+const LEFT_MOUSE_BUTTON = 0;
 const WHEEL_ZOOM_INTENSITY = 0.0015;
 const SELECTION_TOLERANCE_PX = 6;
+const DRAG_THRESHOLD_PX = 4;
 
 export type CadCanvasHandle = {
   fitToDrawing: () => void;
@@ -16,9 +18,9 @@ export type CadCanvasHandle = {
 type CadCanvasProps = {
   model: CadModel | null;
   layers: CadLayer[];
-  selectedEntityId: string | null;
+  selectedEntityIds: ReadonlySet<string>;
   selectionEnabled: boolean;
-  onEntitySelect: (entityId: string | null) => void;
+  onSelectionChange: (entityIds: ReadonlySet<string>) => void;
   onCursorMove?: (worldPoint: Point2D | null) => void;
 };
 
@@ -43,13 +45,14 @@ function getCanvasRelativePoint(canvas: HTMLCanvasElement, clientX: number, clie
 }
 
 export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function CadCanvas(
-  { model, layers, selectedEntityId, selectionEnabled, onEntitySelect, onCursorMove },
+  { model, layers, selectedEntityIds, selectionEnabled, onSelectionChange, onCursorMove },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef(new Camera());
   const rendererRef = useRef<Renderer>(new CanvasRenderer());
+  const dragSelectionBoxRef = useRef<DragSelectionBox | null>(null);
 
   const visibleLayerNames = useMemo(
     () => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)),
@@ -59,12 +62,12 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const stateRef = useRef({
     model,
     visibleLayerNames,
-    selectedEntityId,
+    selectedEntityIds,
     selectionEnabled,
-    onEntitySelect,
+    onSelectionChange,
     onCursorMove,
   });
-  stateRef.current = { model, visibleLayerNames, selectedEntityId, selectionEnabled, onEntitySelect, onCursorMove };
+  stateRef.current = { model, visibleLayerNames, selectedEntityIds, selectionEnabled, onSelectionChange, onCursorMove };
 
   function draw() {
     const canvas = canvasRef.current;
@@ -76,7 +79,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, container.clientWidth, container.clientHeight);
 
-    const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityId: currentSelectedId } =
+    const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelectedIds } =
       stateRef.current;
     if (!currentModel) return;
 
@@ -87,7 +90,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       model: currentModel,
       camera: cameraRef.current,
       visibleLayerNames: currentVisible,
-      selectedEntityId: currentSelectedId,
+      selectedEntityIds: currentSelectedIds,
+      dragSelectionBox: dragSelectionBoxRef.current,
     });
   }
 
@@ -121,7 +125,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   useEffect(() => {
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEntityId]);
+  }, [selectedEntityIds]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -148,26 +152,124 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     let isPanning = false;
     let lastPanPoint: Point2D | null = null;
 
+    let leftDragStartClient: Point2D | null = null;
+    let isBoxDragging = false;
+
+    function applySingleClickSelection(event: MouseEvent) {
+      const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected } =
+        stateRef.current;
+      if (!currentModel) return;
+
+      const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
+      const worldPoint = cameraRef.current.screenToWorld(screenPoint);
+      const toleranceWorld = SELECTION_TOLERANCE_PX / cameraRef.current.scale;
+      const hitEntity = findEntityAtPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+
+      if (event.ctrlKey || event.metaKey) {
+        if (!hitEntity) return; // Ctrl+空白クリックは選択状態を変えない
+        const next = new Set(currentSelected);
+        if (next.has(hitEntity.id)) {
+          next.delete(hitEntity.id);
+        } else {
+          next.add(hitEntity.id);
+        }
+        stateRef.current.onSelectionChange(next);
+      } else {
+        stateRef.current.onSelectionChange(hitEntity ? new Set([hitEntity.id]) : new Set());
+      }
+    }
+
+    function applyBoxSelection(event: MouseEvent) {
+      if (!leftDragStartClient) return;
+      const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected } =
+        stateRef.current;
+      if (!currentModel) return;
+
+      const startScreen = getCanvasRelativePoint(canvas!, leftDragStartClient.x, leftDragStartClient.y);
+      const endScreen = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
+      const startWorld = cameraRef.current.screenToWorld(startScreen);
+      const endWorld = cameraRef.current.screenToWorld(endScreen);
+
+      const box = {
+        min: { x: Math.min(startWorld.x, endWorld.x), y: Math.min(startWorld.y, endWorld.y) },
+        max: { x: Math.max(startWorld.x, endWorld.x), y: Math.max(startWorld.y, endWorld.y) },
+      };
+      const mode = startScreen.x <= endScreen.x ? "window" : "crossing";
+      const hitEntities = findEntitiesInBox(currentModel.entities, currentVisible, box, mode);
+      const hitIds = hitEntities.map((entity) => entity.id);
+
+      if (event.ctrlKey || event.metaKey) {
+        stateRef.current.onSelectionChange(new Set([...currentSelected, ...hitIds]));
+      } else {
+        stateRef.current.onSelectionChange(new Set(hitIds));
+      }
+    }
+
     function handleMouseDown(event: MouseEvent) {
-      if (event.button !== MIDDLE_MOUSE_BUTTON) return;
-      event.preventDefault();
-      isPanning = true;
-      lastPanPoint = { x: event.clientX, y: event.clientY };
+      if (event.button === MIDDLE_MOUSE_BUTTON) {
+        event.preventDefault();
+        isPanning = true;
+        lastPanPoint = { x: event.clientX, y: event.clientY };
+        return;
+      }
+      if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.selectionEnabled) {
+        leftDragStartClient = { x: event.clientX, y: event.clientY };
+        isBoxDragging = false;
+      }
     }
 
     function handleWindowMouseMove(event: MouseEvent) {
-      if (!isPanning || !lastPanPoint) return;
-      const dx = event.clientX - lastPanPoint.x;
-      const dy = event.clientY - lastPanPoint.y;
-      lastPanPoint = { x: event.clientX, y: event.clientY };
-      cameraRef.current.pan(dx, dy);
-      draw();
+      if (isPanning && lastPanPoint) {
+        const dx = event.clientX - lastPanPoint.x;
+        const dy = event.clientY - lastPanPoint.y;
+        lastPanPoint = { x: event.clientX, y: event.clientY };
+        cameraRef.current.pan(dx, dy);
+        draw();
+        return;
+      }
+
+      if (leftDragStartClient) {
+        const dx = event.clientX - leftDragStartClient.x;
+        const dy = event.clientY - leftDragStartClient.y;
+        if (!isBoxDragging && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+          isBoxDragging = true;
+        }
+        if (isBoxDragging) {
+          const startScreen = getCanvasRelativePoint(canvas!, leftDragStartClient.x, leftDragStartClient.y);
+          const currentScreen = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
+          dragSelectionBoxRef.current = {
+            screenMin: {
+              x: Math.min(startScreen.x, currentScreen.x),
+              y: Math.min(startScreen.y, currentScreen.y),
+            },
+            screenMax: {
+              x: Math.max(startScreen.x, currentScreen.x),
+              y: Math.max(startScreen.y, currentScreen.y),
+            },
+            mode: startScreen.x <= currentScreen.x ? "window" : "crossing",
+          };
+          draw();
+        }
+      }
     }
 
     function handleWindowMouseUp(event: MouseEvent) {
-      if (event.button !== MIDDLE_MOUSE_BUTTON) return;
-      isPanning = false;
-      lastPanPoint = null;
+      if (event.button === MIDDLE_MOUSE_BUTTON) {
+        isPanning = false;
+        lastPanPoint = null;
+        return;
+      }
+      if (event.button === LEFT_MOUSE_BUTTON && leftDragStartClient) {
+        if (isBoxDragging) {
+          applyBoxSelection(event);
+        } else {
+          applySingleClickSelection(event);
+        }
+        leftDragStartClient = null;
+        isBoxDragging = false;
+        dragSelectionBoxRef.current = null;
+        draw();
+      }
     }
 
     function handleMouseMove(event: MouseEvent) {
@@ -181,24 +283,10 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       stateRef.current.onCursorMove?.(null);
     }
 
-    function handleClick(event: MouseEvent) {
-      const { model: currentModel, visibleLayerNames: currentVisible, selectionEnabled: currentSelectionEnabled } =
-        stateRef.current;
-      if (!currentSelectionEnabled || !currentModel) return;
-
-      const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
-      const worldPoint = cameraRef.current.screenToWorld(screenPoint);
-      const toleranceWorld = SELECTION_TOLERANCE_PX / cameraRef.current.scale;
-
-      const hitEntity = findEntityAtPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
-      stateRef.current.onEntitySelect(hitEntity?.id ?? null);
-    }
-
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseleave", handleMouseLeave);
-    canvas.addEventListener("click", handleClick);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseup", handleWindowMouseUp);
 
@@ -207,7 +295,6 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseleave", handleMouseLeave);
-      canvas.removeEventListener("click", handleClick);
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
     };

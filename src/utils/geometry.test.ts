@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distance, pointToSegmentDistance, polylineLength } from "./geometry";
+import { distance, pointToSegmentDistance, polylineLength, segmentsIntersect } from "./geometry";
 
 describe("distance", () => {
   it("computes euclidean distance between two points", () => {
@@ -23,6 +23,28 @@ describe("pointToSegmentDistance", () => {
 
   it("falls back to point distance for a degenerate zero-length segment", () => {
     expect(pointToSegmentDistance({ x: 3, y: 4 }, { x: 0, y: 0 }, { x: 0, y: 0 })).toBe(5);
+  });
+});
+
+describe("segmentsIntersect", () => {
+  it("detects a simple crossing X shape", () => {
+    expect(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }, { x: 10, y: 0 })).toBe(true);
+  });
+
+  it("returns false for segments that do not cross", () => {
+    expect(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 5 }, { x: 10, y: 5 })).toBe(false);
+  });
+
+  it("returns false for parallel segments", () => {
+    expect(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 1 }, { x: 10, y: 1 })).toBe(false);
+  });
+
+  it("treats a touching endpoint as an intersection", () => {
+    expect(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 })).toBe(true);
+  });
+
+  it("returns false when segments would cross only if extended beyond their endpoints", () => {
+    expect(segmentsIntersect({ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 10 }, { x: 1, y: 9 })).toBe(false);
   });
 });
 

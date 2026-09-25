@@ -29,12 +29,12 @@ export default function App() {
   const [layers, setLayers] = useState<CadLayer[]>([]);
   const [cadModel, setCadModel] = useState<CadModel | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point2D | null>(null);
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<string>>(new Set());
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
 
-  const selectedEntity = useMemo(
-    () => cadModel?.entities.find((entity) => entity.id === selectedEntityId) ?? null,
-    [cadModel, selectedEntityId],
+  const selectedEntities = useMemo(
+    () => cadModel?.entities.filter((entity) => selectedEntityIds.has(entity.id)) ?? [],
+    [cadModel, selectedEntityIds],
   );
 
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
@@ -78,7 +78,7 @@ export default function App() {
         setFileInfo({ fileName: file.name, fileSizeBytes: file.size });
         setLayers(message.cadModel.layers);
         setCadModel(message.cadModel);
-        setSelectedEntityId(null);
+        setSelectedEntityIds(new Set());
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);
@@ -119,7 +119,7 @@ export default function App() {
     setLayers([]);
     setCadModel(null);
     setCursorWorld(null);
-    setSelectedEntityId(null);
+    setSelectedEntityIds(new Set());
     setIsMeasurementMode(false);
   }, [terminateWorker]);
 
@@ -158,8 +158,8 @@ export default function App() {
     }
   }, []);
 
-  const handleEntitySelect = useCallback((entityId: string | null) => {
-    setSelectedEntityId(entityId);
+  const handleSelectionChange = useCallback((entityIds: ReadonlySet<string>) => {
+    setSelectedEntityIds(entityIds);
   }, []);
 
   const handleToggleLayerVisibility = useCallback((layerName: string) => {
@@ -172,7 +172,7 @@ export default function App() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         if (isMeasurementMode) setIsMeasurementMode(false);
-        setSelectedEntityId(null);
+        setSelectedEntityIds(new Set());
       } else if (event.key === "o" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         if (isDocumentOpen) handleOpenFileRequest();
@@ -239,9 +239,9 @@ export default function App() {
             ref={cadCanvasRef}
             model={cadModel}
             layers={layers}
-            selectedEntityId={selectedEntityId}
+            selectedEntityIds={selectedEntityIds}
             selectionEnabled={!isMeasurementMode}
-            onEntitySelect={handleEntitySelect}
+            onSelectionChange={handleSelectionChange}
             onCursorMove={handleCursorMove}
           />
         </div>
@@ -254,7 +254,7 @@ export default function App() {
           onCollapsedChange={setRightCollapsed}
         >
           <div className="app-cad-layout__right-content">
-            <PropertyPanel entity={selectedEntity} />
+            <PropertyPanel entities={selectedEntities} />
             <MeasurementPanel />
           </div>
         </ResizablePanel>
