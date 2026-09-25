@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
-import type { CadLayer, CadModel, Point2D } from "../types/cad";
+import type { CadLayer, CadModel, Measurement, Point2D } from "../types/cad";
 import { Camera } from "./camera/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
@@ -38,7 +38,9 @@ type CadCanvasProps = {
   selectedEntityIds: ReadonlySet<string>;
   selectionEnabled: boolean;
   measurementModeEnabled: boolean;
+  measurement: Measurement | null;
   onSelectionChange: (entityIds: ReadonlySet<string>) => void;
+  onMeasurementComplete: (measurement: Measurement) => void;
   onCursorMove?: (worldPoint: Point2D | null) => void;
 };
 
@@ -63,7 +65,17 @@ function getCanvasRelativePoint(canvas: HTMLCanvasElement, clientX: number, clie
 }
 
 export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function CadCanvas(
-  { model, layers, selectedEntityIds, selectionEnabled, measurementModeEnabled, onSelectionChange, onCursorMove },
+  {
+    model,
+    layers,
+    selectedEntityIds,
+    selectionEnabled,
+    measurementModeEnabled,
+    measurement,
+    onSelectionChange,
+    onMeasurementComplete,
+    onCursorMove,
+  },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -72,6 +84,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const rendererRef = useRef<Renderer>(new CanvasRenderer());
   const dragSelectionBoxRef = useRef<DragSelectionBox | null>(null);
   const overlapCycleRef = useRef<OverlapCycleState | null>(null);
+  const pendingMeasurementPointRef = useRef<Point2D | null>(null);
 
   const visibleLayerNames = useMemo(
     () => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)),
@@ -84,7 +97,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
+    measurement,
     onSelectionChange,
+    onMeasurementComplete,
     onCursorMove,
   });
   stateRef.current = {
@@ -93,7 +108,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
+    measurement,
     onSelectionChange,
+    onMeasurementComplete,
     onCursorMove,
   };
 
@@ -107,8 +124,12 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, container.clientWidth, container.clientHeight);
 
-    const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelectedIds } =
-      stateRef.current;
+    const {
+      model: currentModel,
+      visibleLayerNames: currentVisible,
+      selectedEntityIds: currentSelectedIds,
+      measurement: currentMeasurement,
+    } = stateRef.current;
     if (!currentModel) return;
 
     rendererRef.current.render({
@@ -120,6 +141,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       visibleLayerNames: currentVisible,
       selectedEntityIds: currentSelectedIds,
       dragSelectionBox: dragSelectionBoxRef.current,
+      measurement: currentMeasurement,
+      pendingMeasurementPoint: pendingMeasurementPointRef.current,
     });
   }
 
@@ -142,6 +165,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     fitToModel();
     draw();
     overlapCycleRef.current = null;
+    pendingMeasurementPointRef.current = null;
     // 新しい図面が読み込まれた時のみ再Fitする(レイヤー表示切替では現在の表示範囲を維持する)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
@@ -149,6 +173,19 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   useEffect(() => {
     overlapCycleRef.current = null;
   }, [selectionEnabled]);
+
+  useEffect(() => {
+    if (!measurementModeEnabled) {
+      pendingMeasurementPointRef.current = null;
+      draw();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measurementModeEnabled]);
+
+  useEffect(() => {
+    draw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measurement]);
 
   useEffect(() => {
     draw();
@@ -187,6 +224,35 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
     let leftDragStartClient: Point2D | null = null;
     let isBoxDragging = false;
+
+    function computeWorldPointWithSnap(clientX: number, clientY: number): Point2D {
+      const screenPoint = getCanvasRelativePoint(canvas!, clientX, clientY);
+      const worldPoint = cameraRef.current.screenToWorld(screenPoint);
+      const { model: currentModel, visibleLayerNames: currentVisible, measurementModeEnabled: currentMeasurementModeEnabled } =
+        stateRef.current;
+      if (currentMeasurementModeEnabled && currentModel) {
+        const toleranceWorld = SNAP_TOLERANCE_PX / cameraRef.current.scale;
+        const snap = findSnapPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+        if (snap) return snap.point;
+      }
+      return worldPoint;
+    }
+
+    function handleMeasurementClick(event: MouseEvent) {
+      const point = computeWorldPointWithSnap(event.clientX, event.clientY);
+      const pendingPoint = pendingMeasurementPointRef.current;
+      if (pendingPoint === null) {
+        pendingMeasurementPointRef.current = point;
+      } else {
+        pendingMeasurementPointRef.current = null;
+        stateRef.current.onMeasurementComplete({
+          id: crypto.randomUUID(),
+          pointA: pendingPoint,
+          pointB: point,
+        });
+      }
+      draw();
+    }
 
     function applySingleClickSelection(event: MouseEvent) {
       const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected } =
@@ -265,6 +331,10 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         lastPanPoint = { x: event.clientX, y: event.clientY };
         return;
       }
+      if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.measurementModeEnabled) {
+        handleMeasurementClick(event);
+        return;
+      }
       if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.selectionEnabled) {
         leftDragStartClient = { x: event.clientX, y: event.clientY };
         isBoxDragging = false;
@@ -326,20 +396,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function handleMouseMove(event: MouseEvent) {
-      const { onCursorMove: currentOnCursorMove, model: currentModel, visibleLayerNames: currentVisible, measurementModeEnabled: currentMeasurementModeEnabled } =
-        stateRef.current;
+      const { onCursorMove: currentOnCursorMove } = stateRef.current;
       if (!currentOnCursorMove) return;
-      const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
-      const worldPoint = cameraRef.current.screenToWorld(screenPoint);
-
-      if (currentMeasurementModeEnabled && currentModel) {
-        const toleranceWorld = SNAP_TOLERANCE_PX / cameraRef.current.scale;
-        const snap = findSnapPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
-        currentOnCursorMove(snap ? snap.point : worldPoint);
-        return;
-      }
-
-      currentOnCursorMove(worldPoint);
+      currentOnCursorMove(computeWorldPointWithSnap(event.clientX, event.clientY));
     }
 
     function handleMouseLeave() {

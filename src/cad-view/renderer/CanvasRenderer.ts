@@ -1,4 +1,6 @@
-import type { CadEntity } from "../../types/cad";
+import type { CadEntity, Measurement, Point2D } from "../../types/cad";
+import { computeMeasurementDistances } from "../measurement/Measurement";
+import { formatMm } from "../../utils/format";
 import type { Camera } from "../camera/Camera";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 
@@ -7,6 +9,9 @@ const HIGHLIGHT_LINE_WIDTH_PX = 2.5;
 const HIGHLIGHT_COLOR = "#ffff00";
 const WINDOW_BOX_COLOR = "#4a90e2";
 const CROSSING_BOX_COLOR = "#50c878";
+const MEASUREMENT_COLOR = "#ff8c00";
+const MEASUREMENT_MARKER_RADIUS_PX = 4;
+const MEASUREMENT_FONT = "11px sans-serif";
 
 function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: CadEntity): void {
   ctx.beginPath();
@@ -47,6 +52,63 @@ function drawDragSelectionBox(ctx: CanvasRenderingContext2D, box: DragSelectionB
   ctx.restore();
 }
 
+function drawMeasurementMarker(ctx: CanvasRenderingContext2D, screenPoint: Point2D): void {
+  const r = MEASUREMENT_MARKER_RADIUS_PX;
+  ctx.beginPath();
+  ctx.moveTo(screenPoint.x - r, screenPoint.y);
+  ctx.lineTo(screenPoint.x + r, screenPoint.y);
+  ctx.moveTo(screenPoint.x, screenPoint.y - r);
+  ctx.lineTo(screenPoint.x, screenPoint.y + r);
+  ctx.stroke();
+}
+
+function drawMeasurementLabel(ctx: CanvasRenderingContext2D, screenPoint: Point2D, text: string): void {
+  ctx.fillText(text, screenPoint.x + 4, screenPoint.y - 4);
+}
+
+function midpoint(a: Point2D, b: Point2D): Point2D {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function drawMeasurement(ctx: CanvasRenderingContext2D, camera: Camera, measurement: Measurement): void {
+  const { pointA, pointB } = measurement;
+  const distances = computeMeasurementDistances(pointA, pointB);
+  const screenA = camera.worldToScreen(pointA);
+  const screenB = camera.worldToScreen(pointB);
+  const screenCorner = camera.worldToScreen({ x: pointB.x, y: pointA.y });
+
+  ctx.save();
+  ctx.strokeStyle = MEASUREMENT_COLOR;
+  ctx.fillStyle = MEASUREMENT_COLOR;
+  ctx.font = MEASUREMENT_FONT;
+  ctx.lineWidth = LINE_WIDTH_PX;
+
+  // 水平・垂直の補助線(破線)
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(screenA.x, screenA.y);
+  ctx.lineTo(screenCorner.x, screenCorner.y);
+  ctx.moveTo(screenCorner.x, screenCorner.y);
+  ctx.lineTo(screenB.x, screenB.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 直線距離(実線)
+  ctx.beginPath();
+  ctx.moveTo(screenA.x, screenA.y);
+  ctx.lineTo(screenB.x, screenB.y);
+  ctx.stroke();
+
+  drawMeasurementMarker(ctx, screenA);
+  drawMeasurementMarker(ctx, screenB);
+
+  drawMeasurementLabel(ctx, midpoint(screenA, screenCorner), formatMm(distances.horizontal));
+  drawMeasurementLabel(ctx, midpoint(screenCorner, screenB), formatMm(distances.vertical));
+  drawMeasurementLabel(ctx, midpoint(screenA, screenB), formatMm(distances.direct));
+
+  ctx.restore();
+}
+
 export class CanvasRenderer implements Renderer {
   render({
     ctx,
@@ -57,6 +119,8 @@ export class CanvasRenderer implements Renderer {
     visibleLayerNames,
     selectedEntityIds,
     dragSelectionBox,
+    measurement,
+    pendingMeasurementPoint,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, viewportWidth, viewportHeight);
@@ -89,6 +153,17 @@ export class CanvasRenderer implements Renderer {
 
     if (dragSelectionBox) {
       drawDragSelectionBox(ctx, dragSelectionBox);
+    }
+
+    if (measurement) {
+      drawMeasurement(ctx, camera, measurement);
+    }
+
+    if (pendingMeasurementPoint) {
+      ctx.save();
+      ctx.strokeStyle = MEASUREMENT_COLOR;
+      drawMeasurementMarker(ctx, camera.worldToScreen(pendingMeasurementPoint));
+      ctx.restore();
     }
   }
 }

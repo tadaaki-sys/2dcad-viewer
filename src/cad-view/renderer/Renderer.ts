@@ -1,4 +1,4 @@
-import type { CadModel, Point2D } from "../../types/cad";
+import type { CadModel, Measurement, Point2D } from "../../types/cad";
 import type { Camera } from "../camera/Camera";
 
 export type DragSelectionBox = {
@@ -16,6 +16,8 @@ export type RenderParams = {
   visibleLayerNames: ReadonlySet<string>;
   selectedEntityIds: ReadonlySet<string>;
   dragSelectionBox: DragSelectionBox | null;
+  measurement: Measurement | null;
+  pendingMeasurementPoint: Point2D | null;
 };
 
 export interface Renderer {

@@ -52,3 +52,9 @@ export type CadModel = {
   bounds: CadBounds | null;
   stats: CadModelStats;
 };
+
+export type Measurement = {
+  id: string;
+  pointA: Point2D;
+  pointB: Point2D;
+};

@@ -16,3 +16,25 @@
   color: var(--color-text-muted);
   padding: 0 4px;
 }
+
+.measurement-panel__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.measurement-panel__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.measurement-panel__row-label {
+  color: var(--color-text-muted);
+}
+
+.measurement-panel__row-value {
+  text-align: right;
+}

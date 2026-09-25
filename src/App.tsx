@@ -11,7 +11,7 @@ import { CadCanvas } from "./cad-view/CadCanvas";
 import type { CadCanvasHandle } from "./cad-view/CadCanvas";
 import { validateDxfFile } from "./dxf/validateDxfFile";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
-import type { CadLayer, CadModel, DocumentInfo, Point2D } from "./types/cad";
+import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
 import "./App.css";
 
 const DXF_ERROR_MESSAGE =
@@ -30,6 +30,7 @@ export default function App() {
   const [cadModel, setCadModel] = useState<CadModel | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point2D | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<string>>(new Set());
+  const [measurement, setMeasurement] = useState<Measurement | null>(null);
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
 
   const selectedEntities = useMemo(
@@ -79,6 +80,7 @@ export default function App() {
         setLayers(message.cadModel.layers);
         setCadModel(message.cadModel);
         setSelectedEntityIds(new Set());
+        setMeasurement(null);
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);
@@ -120,6 +122,7 @@ export default function App() {
     setCadModel(null);
     setCursorWorld(null);
     setSelectedEntityIds(new Set());
+    setMeasurement(null);
     setIsMeasurementMode(false);
   }, [terminateWorker]);
 
@@ -160,6 +163,10 @@ export default function App() {
 
   const handleSelectionChange = useCallback((entityIds: ReadonlySet<string>) => {
     setSelectedEntityIds(entityIds);
+  }, []);
+
+  const handleMeasurementComplete = useCallback((newMeasurement: Measurement) => {
+    setMeasurement(newMeasurement);
   }, []);
 
   const handleToggleLayerVisibility = useCallback((layerName: string) => {
@@ -242,7 +249,9 @@ export default function App() {
             selectedEntityIds={selectedEntityIds}
             selectionEnabled={!isMeasurementMode}
             measurementModeEnabled={isMeasurementMode}
+            measurement={measurement}
             onSelectionChange={handleSelectionChange}
+            onMeasurementComplete={handleMeasurementComplete}
             onCursorMove={handleCursorMove}
           />
         </div>
@@ -256,7 +265,7 @@ export default function App() {
         >
           <div className="app-cad-layout__right-content">
             <PropertyPanel entities={selectedEntities} />
-            <MeasurementPanel />
+            <MeasurementPanel measurement={measurement} />
           </div>
         </ResizablePanel>
       </div>
