@@ -59,11 +59,14 @@ export default function App() {
       if (message.type === "progress") {
         setLoadingProgress({ stage: message.stage, entityCount: message.entityCount });
       } else if (message.type === "success") {
-        console.log("[App] DXF parse succeeded", { entityCount: message.entityCount, elapsedMs: message.elapsedMs });
+        console.log("[App] DXF parse succeeded", {
+          elapsedMs: message.elapsedMs,
+          stats: message.cadModel.stats,
+        });
         setLoadingProgress(null);
         setLoadStartedAt(null);
         setFileInfo({ fileName: file.name, fileSizeBytes: file.size });
-        setLayers([]);
+        setLayers(message.cadModel.layers);
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);

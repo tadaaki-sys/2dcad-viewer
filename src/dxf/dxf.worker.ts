@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import DxfParser from "dxf-parser";
+import { convertToCadModel } from "./DxfParserAdapter";
 import type {
   DxfWorkerErrorMessage,
   DxfWorkerProgressMessage,
@@ -23,17 +24,19 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
     postProgress("parsing", null);
     const parser = new DxfParser();
     const raw = parser.parseSync(text);
-    const entityCount = raw?.entities?.length ?? 0;
+    if (!raw) {
+      throw new Error("DXFの解析結果が空です");
+    }
 
-    postProgress("converting", entityCount);
-    // 内部CADモデルへの変換はPhase3のDxfParserAdapterで実装する
-    console.log("[dxf.worker] raw parse result", raw);
+    postProgress("converting", raw.entities?.length ?? null);
+    const cadModel = convertToCadModel(raw);
+    console.log("[dxf.worker] converted CadModel stats", cadModel.stats);
 
-    postProgress("preparing", entityCount);
+    postProgress("preparing", cadModel.stats.totalEntityCount);
 
     const successMessage: DxfWorkerSuccessMessage = {
       type: "success",
-      entityCount,
+      cadModel,
       elapsedMs: performance.now() - startedAt,
     };
     ctx.postMessage(successMessage);

@@ -1,3 +1,5 @@
+import type { CadModel } from "../types/cad";
+
 export type DxfLoadingStage = "reading" | "parsing" | "converting" | "preparing";
 
 export type DxfWorkerRequest = {
@@ -13,7 +15,7 @@ export type DxfWorkerProgressMessage = {
 
 export type DxfWorkerSuccessMessage = {
   type: "success";
-  entityCount: number;
+  cadModel: CadModel;
   elapsedMs: number;
 };
 
