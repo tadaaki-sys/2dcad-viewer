@@ -1,0 +1,23 @@
+.app-cad-layout {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-cad-layout__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.app-cad-layout__canvas-area {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg-canvas);
+}
+
+.app-cad-layout__right-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}

@@ -1,0 +1,41 @@
+:root {
+  color-scheme: dark;
+  --color-bg-app: #202124;
+  --color-bg-panel: #262626;
+  --color-bg-canvas: #000000;
+  --color-border: #3a3a3a;
+  --color-text: #e0e0e0;
+  --color-text-muted: #8a8a8a;
+  --color-accent: #4a90e2;
+  --toolbar-height: 44px;
+  --statusbar-height: 26px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg-app);
+  color: var(--color-text);
+  font-family: "Segoe UI", "Yu Gothic UI", sans-serif;
+  font-size: 13px;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.app-root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}

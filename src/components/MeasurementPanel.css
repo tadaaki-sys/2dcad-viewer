@@ -1,0 +1,18 @@
+.measurement-panel {
+  padding: 12px 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.measurement-panel__title {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.measurement-panel__empty {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 0 4px;
+}
