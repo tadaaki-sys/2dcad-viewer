@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findEntitiesInBox, findEntityAtPoint } from "./Selection";
+import { findEntitiesInBox, findEntitiesNearPoint, findEntityAtPoint } from "./Selection";
 import type { CadEntity } from "../../types/cad";
 
 const line: CadEntity = {
@@ -63,6 +63,48 @@ describe("findEntityAtPoint", () => {
     // point is closer to `line` (y=0, distance 0.5) than `nearLine` (y=2, distance 1.5)
     const result = findEntityAtPoint([line, nearLine], allVisible, { x: 5, y: 0.5 }, 5);
     expect(result?.id).toBe("line-1");
+  });
+});
+
+describe("findEntitiesNearPoint", () => {
+  it("returns overlapping candidates ordered from nearest to farthest", () => {
+    const near: CadEntity = {
+      id: "near",
+      type: "LINE",
+      layer: "A",
+      color: "#ffffff",
+      start: { x: 0, y: 0.5 },
+      end: { x: 10, y: 0.5 },
+    };
+    const middle: CadEntity = {
+      id: "middle",
+      type: "LINE",
+      layer: "A",
+      color: "#ffffff",
+      start: { x: 0, y: 2 },
+      end: { x: 10, y: 2 },
+    };
+    const far: CadEntity = {
+      id: "far",
+      type: "LINE",
+      layer: "A",
+      color: "#ffffff",
+      start: { x: 0, y: 4 },
+      end: { x: 10, y: 4 },
+    };
+
+    const result = findEntitiesNearPoint([far, near, middle], allVisible, { x: 5, y: 0 }, 5);
+    expect(result.map((e) => e.id)).toEqual(["near", "middle", "far"]);
+  });
+
+  it("returns an empty array when nothing is within tolerance", () => {
+    const result = findEntitiesNearPoint([line], allVisible, { x: 100, y: 100 }, 1);
+    expect(result).toEqual([]);
+  });
+
+  it("excludes entities on hidden layers from the candidate list", () => {
+    const result = findEntitiesNearPoint(allEntities, new Set(["A"]), { x: 20.2, y: 5 }, 1);
+    expect(result.map((e) => e.id)).toEqual([]);
   });
 });
 

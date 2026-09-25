@@ -3,13 +3,28 @@ import type { CadLayer, CadModel, Point2D } from "../types/cad";
 import { Camera } from "./camera/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
-import { findEntitiesInBox, findEntityAtPoint } from "./selection/Selection";
+import { findEntitiesInBox, findEntitiesNearPoint } from "./selection/Selection";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
 const WHEEL_ZOOM_INTENSITY = 0.0015;
 const SELECTION_TOLERANCE_PX = 6;
 const DRAG_THRESHOLD_PX = 4;
+const SAME_SPOT_TOLERANCE_PX = 3;
+
+type OverlapCycleState = {
+  screenPoint: Point2D;
+  candidateIds: string[];
+  index: number;
+};
+
+function idsEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
 
 export type CadCanvasHandle = {
   fitToDrawing: () => void;
@@ -53,6 +68,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const cameraRef = useRef(new Camera());
   const rendererRef = useRef<Renderer>(new CanvasRenderer());
   const dragSelectionBoxRef = useRef<DragSelectionBox | null>(null);
+  const overlapCycleRef = useRef<OverlapCycleState | null>(null);
 
   const visibleLayerNames = useMemo(
     () => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)),
@@ -113,9 +129,14 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   useEffect(() => {
     fitToModel();
     draw();
+    overlapCycleRef.current = null;
     // 新しい図面が読み込まれた時のみ再Fitする(レイヤー表示切替では現在の表示範囲を維持する)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
+
+  useEffect(() => {
+    overlapCycleRef.current = null;
+  }, [selectionEnabled]);
 
   useEffect(() => {
     draw();
@@ -163,9 +184,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
       const worldPoint = cameraRef.current.screenToWorld(screenPoint);
       const toleranceWorld = SELECTION_TOLERANCE_PX / cameraRef.current.scale;
-      const hitEntity = findEntityAtPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+      const candidates = findEntitiesNearPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
 
       if (event.ctrlKey || event.metaKey) {
+        overlapCycleRef.current = null; // Ctrl+Clickは巡回選択とは独立した操作として扱う
+        const hitEntity = candidates[0] ?? null;
         if (!hitEntity) return; // Ctrl+空白クリックは選択状態を変えない
         const next = new Set(currentSelected);
         if (next.has(hitEntity.id)) {
@@ -174,13 +197,31 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
           next.add(hitEntity.id);
         }
         stateRef.current.onSelectionChange(next);
-      } else {
-        stateRef.current.onSelectionChange(hitEntity ? new Set([hitEntity.id]) : new Set());
+        return;
       }
+
+      if (candidates.length === 0) {
+        overlapCycleRef.current = null;
+        stateRef.current.onSelectionChange(new Set());
+        return;
+      }
+
+      const candidateIds = candidates.map((entity) => entity.id);
+      const previous = overlapCycleRef.current;
+      const isSameSpotAsLastClick =
+        previous !== null &&
+        Math.hypot(screenPoint.x - previous.screenPoint.x, screenPoint.y - previous.screenPoint.y) <=
+          SAME_SPOT_TOLERANCE_PX &&
+        idsEqual(previous.candidateIds, candidateIds);
+
+      const nextIndex = isSameSpotAsLastClick ? (previous!.index + 1) % candidates.length : 0;
+      overlapCycleRef.current = { screenPoint, candidateIds, index: nextIndex };
+      stateRef.current.onSelectionChange(new Set([candidateIds[nextIndex]]));
     }
 
     function applyBoxSelection(event: MouseEvent) {
       if (!leftDragStartClient) return;
+      overlapCycleRef.current = null;
       const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected } =
         stateRef.current;
       if (!currentModel) return;

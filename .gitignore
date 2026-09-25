@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 実DXFファイル(ユーザーの業務データ)はリポジトリに含めない
+*.dxf
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
