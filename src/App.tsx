@@ -9,6 +9,7 @@ import { ResizablePanel } from "./components/ResizablePanel";
 import { LoadingOverlay } from "./components/LoadingOverlay";
 import { CadCanvas } from "./cad-view/CadCanvas";
 import type { CadCanvasHandle } from "./cad-view/CadCanvas";
+import { PerformanceOverlay } from "./components/PerformanceOverlay";
 import { validateDxfFile } from "./dxf/validateDxfFile";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
 import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
@@ -32,6 +33,7 @@ export default function App() {
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<string>>(new Set());
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedMeasurementId, setSelectedMeasurementId] = useState<string | null>(null);
+  const [parseTimeMs, setParseTimeMs] = useState<number | null>(null);
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
 
   const selectedEntities = useMemo(
@@ -83,6 +85,7 @@ export default function App() {
         setSelectedEntityIds(new Set());
         setMeasurements([]);
         setSelectedMeasurementId(null);
+        setParseTimeMs(message.elapsedMs);
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);
@@ -289,6 +292,17 @@ export default function App() {
             onMeasurementSelect={handleMeasurementSelect}
             onCursorMove={handleCursorMove}
           />
+          {import.meta.env.DEV && (
+            <PerformanceOverlay
+              cadCanvasRef={cadCanvasRef}
+              parseTimeMs={parseTimeMs}
+              entityCount={
+                cadModel
+                  ? { total: cadModel.stats.totalEntityCount, supported: cadModel.stats.supportedEntityCount }
+                  : null
+              }
+            />
+          )}
         </div>
 
         <ResizablePanel

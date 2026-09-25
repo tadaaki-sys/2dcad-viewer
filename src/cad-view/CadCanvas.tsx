@@ -29,9 +29,18 @@ function idsEqual(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
+export type CadCanvasPerformanceStats = {
+  renderMs: number;
+  fps: number | null;
+  lastSelectionMs: number | null;
+};
+
 export type CadCanvasHandle = {
   fitToDrawing: () => void;
+  getPerformanceStats: () => CadCanvasPerformanceStats;
 };
+
+const FPS_IDLE_GAP_MS = 500;
 
 type CadCanvasProps = {
   model: CadModel | null;
@@ -90,6 +99,12 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const dragSelectionBoxRef = useRef<DragSelectionBox | null>(null);
   const overlapCycleRef = useRef<OverlapCycleState | null>(null);
   const pendingMeasurementPointRef = useRef<Point2D | null>(null);
+  const perfRef = useRef<CadCanvasPerformanceStats & { lastDrawAt: number }>({
+    renderMs: 0,
+    fps: null,
+    lastSelectionMs: null,
+    lastDrawAt: 0,
+  });
 
   const visibleLayerNames = useMemo(
     () => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)),
@@ -127,6 +142,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
+    const renderStart = performance.now();
     const ctx = resizeCanvasToContainer(canvas, container);
     if (!ctx) return;
 
@@ -155,6 +171,25 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       selectedMeasurementId: currentSelectedMeasurementId,
       pendingMeasurementPoint: pendingMeasurementPointRef.current,
     });
+
+    const renderEnd = performance.now();
+    const perf = perfRef.current;
+    const delta = perf.lastDrawAt > 0 ? renderEnd - perf.lastDrawAt : Infinity;
+    perf.renderMs = renderEnd - renderStart;
+    perf.fps = delta < FPS_IDLE_GAP_MS ? 1000 / delta : null;
+    perf.lastDrawAt = renderEnd;
+  }
+
+  const rafIdRef = useRef<number | null>(null);
+
+  // Pan/Zoom/ドラッグ選択などマウス移動に連動する高頻度描画は、
+  // 1フレームに1回へ間引く(大規模DXFでのPan/Zoom FPS低下対策。実測に基づく最小限の最適化)
+  function requestDraw() {
+    if (rafIdRef.current !== null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      draw();
+    });
   }
 
   function fitToModel() {
@@ -169,6 +204,10 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     fitToDrawing() {
       fitToModel();
       draw();
+    },
+    getPerformanceStats() {
+      const { renderMs, fps, lastSelectionMs } = perfRef.current;
+      return { renderMs, fps, lastSelectionMs };
     },
   }));
 
@@ -227,7 +266,23 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       const cursorPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
       const factor = Math.exp(-event.deltaY * WHEEL_ZOOM_INTENSITY);
       cameraRef.current.zoomAt(cursorPoint, factor);
-      draw();
+      requestDraw();
+    }
+
+    let cursorRafId: number | null = null;
+    let pendingCursorPoint: Point2D | null | undefined;
+
+    // カーソル座標コールバック(StatusBar表示用)もPan中は毎mousemoveごとのReact再描画を招くため、
+    // 描画と同様に1フレームに1回へ間引く(実測に基づく最小限の最適化)
+    function scheduleCursorUpdate(point: Point2D | null) {
+      pendingCursorPoint = point;
+      if (cursorRafId !== null) return;
+      cursorRafId = requestAnimationFrame(() => {
+        cursorRafId = null;
+        if (pendingCursorPoint !== undefined) {
+          stateRef.current.onCursorMove?.(pendingCursorPoint);
+        }
+      });
     }
 
     let isPanning = false;
@@ -376,7 +431,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         const dy = event.clientY - lastPanPoint.y;
         lastPanPoint = { x: event.clientX, y: event.clientY };
         cameraRef.current.pan(dx, dy);
-        draw();
+        requestDraw();
         return;
       }
 
@@ -400,7 +455,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
             },
             mode: startScreen.x <= currentScreen.x ? "window" : "crossing",
           };
-          draw();
+          requestDraw();
         }
       }
     }
@@ -412,11 +467,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         return;
       }
       if (event.button === LEFT_MOUSE_BUTTON && leftDragStartClient) {
+        const selectionStart = performance.now();
         if (isBoxDragging) {
           applyBoxSelection(event);
         } else {
           applySingleClickSelection(event);
         }
+        perfRef.current.lastSelectionMs = performance.now() - selectionStart;
         leftDragStartClient = null;
         isBoxDragging = false;
         dragSelectionBoxRef.current = null;
@@ -425,13 +482,12 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function handleMouseMove(event: MouseEvent) {
-      const { onCursorMove: currentOnCursorMove } = stateRef.current;
-      if (!currentOnCursorMove) return;
-      currentOnCursorMove(computeWorldPointWithSnap(event.clientX, event.clientY));
+      if (!stateRef.current.onCursorMove) return;
+      scheduleCursorUpdate(computeWorldPointWithSnap(event.clientX, event.clientY));
     }
 
     function handleMouseLeave() {
-      stateRef.current.onCursorMove?.(null);
+      scheduleCursorUpdate(null);
     }
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });

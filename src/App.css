@@ -11,6 +11,7 @@
 }
 
 .app-cad-layout__canvas-area {
+  position: relative;
   flex: 1;
   min-width: 0;
   background: var(--color-bg-canvas);
