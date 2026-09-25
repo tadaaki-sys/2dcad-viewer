@@ -49,4 +49,45 @@ describe("Camera", () => {
     expect(Number.isFinite(camera.offsetX)).toBe(true);
     expect(Number.isFinite(camera.offsetY)).toBe(true);
   });
+
+  it("keeps the world point under the cursor fixed on screen when zooming", () => {
+    const camera = new Camera();
+    camera.scale = 2;
+    camera.offsetX = 10;
+    camera.offsetY = 20;
+
+    const cursorScreenPoint = { x: 150, y: 80 };
+    const worldPointBefore = camera.screenToWorld(cursorScreenPoint);
+
+    camera.zoomAt(cursorScreenPoint, 3);
+
+    expect(camera.scale).toBeCloseTo(6, 9);
+    const screenPointAfter = camera.worldToScreen(worldPointBefore);
+    expect(screenPointAfter.x).toBeCloseTo(cursorScreenPoint.x, 9);
+    expect(screenPointAfter.y).toBeCloseTo(cursorScreenPoint.y, 9);
+  });
+
+  it("clamps zoom scale within a sane min/max range", () => {
+    const camera = new Camera();
+    camera.scale = 1;
+
+    camera.zoomAt({ x: 0, y: 0 }, 1e-12);
+    expect(camera.scale).toBeGreaterThan(0);
+    expect(Number.isFinite(camera.scale)).toBe(true);
+
+    camera.zoomAt({ x: 0, y: 0 }, 1e12);
+    expect(Number.isFinite(camera.scale)).toBe(true);
+  });
+
+  it("pans by translating the screen-space offset directly", () => {
+    const camera = new Camera();
+    camera.scale = 2;
+    camera.offsetX = 10;
+    camera.offsetY = 20;
+
+    camera.pan(5, -8);
+
+    expect(camera.offsetX).toBe(15);
+    expect(camera.offsetY).toBe(12);
+  });
 });

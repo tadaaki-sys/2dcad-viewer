@@ -8,9 +8,10 @@ import { StartScreen } from "./components/StartScreen";
 import { ResizablePanel } from "./components/ResizablePanel";
 import { LoadingOverlay } from "./components/LoadingOverlay";
 import { CadCanvas } from "./cad-view/CadCanvas";
+import type { CadCanvasHandle } from "./cad-view/CadCanvas";
 import { validateDxfFile } from "./dxf/validateDxfFile";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
-import type { CadLayer, CadModel, DocumentInfo } from "./types/cad";
+import type { CadLayer, CadModel, DocumentInfo, Point2D } from "./types/cad";
 import "./App.css";
 
 const DXF_ERROR_MESSAGE =
@@ -27,6 +28,8 @@ export default function App() {
   const [isMeasurementMode, setIsMeasurementMode] = useState(false);
   const [layers, setLayers] = useState<CadLayer[]>([]);
   const [cadModel, setCadModel] = useState<CadModel | null>(null);
+  const [cursorWorld, setCursorWorld] = useState<Point2D | null>(null);
+  const cadCanvasRef = useRef<CadCanvasHandle>(null);
 
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
   const [loadStartedAt, setLoadStartedAt] = useState<number | null>(null);
@@ -108,6 +111,7 @@ export default function App() {
     setFileInfo(null);
     setLayers([]);
     setCadModel(null);
+    setCursorWorld(null);
     setIsMeasurementMode(false);
   }, [terminateWorker]);
 
@@ -131,7 +135,11 @@ export default function App() {
   }, []);
 
   const handleFitDrawing = useCallback(() => {
-    // Camera実装はPhase5で対応
+    cadCanvasRef.current?.fitToDrawing();
+  }, []);
+
+  const handleCursorMove = useCallback((worldPoint: Point2D | null) => {
+    setCursorWorld(worldPoint);
   }, []);
 
   const handleToggleFullscreen = useCallback(() => {
@@ -214,7 +222,7 @@ export default function App() {
         </ResizablePanel>
 
         <div className="app-cad-layout__canvas-area">
-          <CadCanvas model={cadModel} layers={layers} />
+          <CadCanvas ref={cadCanvasRef} model={cadModel} layers={layers} onCursorMove={handleCursorMove} />
         </div>
 
         <ResizablePanel
@@ -230,7 +238,7 @@ export default function App() {
           </div>
         </ResizablePanel>
       </div>
-      <StatusBar fileInfo={fileInfo} cursorWorld={null} />
+      <StatusBar fileInfo={fileInfo} cursorWorld={cursorWorld} />
       {loadingProgress && loadStartedAt !== null && (
         <LoadingOverlay stage={loadingProgress.stage} entityCount={loadingProgress.entityCount} startedAt={loadStartedAt} />
       )}

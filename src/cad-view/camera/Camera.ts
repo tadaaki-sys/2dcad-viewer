@@ -1,6 +1,8 @@
 import type { CadBounds, Point2D } from "../../types/cad";
 
 const DEFAULT_FIT_MARGIN_RATIO = 0.05;
+const MIN_SCALE = 1e-6;
+const MAX_SCALE = 1e6;
 
 export class Camera {
   scale = 1;
@@ -45,5 +47,21 @@ export class Camera {
     this.scale = scale;
     this.offsetX = viewportWidth / 2 - centerWorldX * scale;
     this.offsetY = viewportHeight / 2 + centerWorldY * scale;
+  }
+
+  /** カーソル位置(screenPoint)の直下のワールド座標を固定したままscaleにfactorを掛けてズームする */
+  zoomAt(screenPoint: Point2D, factor: number): void {
+    const worldPointUnderCursor = this.screenToWorld(screenPoint);
+    const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.scale * factor));
+
+    this.scale = nextScale;
+    this.offsetX = screenPoint.x - worldPointUnderCursor.x * nextScale;
+    this.offsetY = screenPoint.y + worldPointUnderCursor.y * nextScale;
+  }
+
+  /** スクリーン座標系での平行移動量だけビューをパンする */
+  pan(deltaScreenX: number, deltaScreenY: number): void {
+    this.offsetX += deltaScreenX;
+    this.offsetY += deltaScreenY;
   }
 }
