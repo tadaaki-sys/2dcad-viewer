@@ -233,6 +233,18 @@ describe("DxfParserAdapter", () => {
     expect(model.bounds).toEqual({ min: { x: -10, y: 0 }, max: { x: 10, y: 30 } });
   });
 
+  it("includes layers referenced only by entities, not declared in the LAYER table", () => {
+    // 多くのDXFはデフォルトレイヤー"0"をLAYERテーブルに明記しない。
+    // レイヤーパネルに現れないと該当Entityが永久に非表示になってしまうため、必ず一覧に含める。
+    const dxf = buildDxf(
+      ["0", "LINE", "8", "0", "10", "0.0", "20", "0.0", "11", "10.0", "21", "0.0"].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.layers).toEqual([{ name: "0", color: "#ffffff", visible: true }]);
+  });
+
   it("returns null bounds when there are no supported entities", () => {
     const dxf = buildDxf(["0", "CIRCLE", "8", "0", "10", "0.0", "20", "0.0", "40", "1.0"].join("\n"));
 

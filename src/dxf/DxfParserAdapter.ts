@@ -18,23 +18,26 @@ export function parseDxfText(text: string): CadModel {
 
 export function convertToCadModel(raw: IDxf): CadModel {
   const layerColorByName = buildLayerColorMap(raw);
-  const layers = buildLayers(raw, layerColorByName);
 
   const modelSpaceEntities = (raw.entities ?? []).filter((entity) => !entity.inPaperSpace);
 
   const entities: CadEntity[] = [];
   const unsupportedBreakdown: Record<string, number> = {};
+  const usedLayerNames = new Set<string>();
   let nextId = 0;
 
   for (const entity of modelSpaceEntities) {
     const converted = convertEntity(entity, layerColorByName, () => `e${nextId++}`);
     if (converted) {
       entities.push(converted);
+      usedLayerNames.add(converted.layer);
     } else {
       const type = entity.type ?? "UNKNOWN";
       unsupportedBreakdown[type] = (unsupportedBreakdown[type] ?? 0) + 1;
     }
   }
+
+  const layers = buildLayers(raw, layerColorByName, usedLayerNames);
 
   const totalEntityCount = modelSpaceEntities.length;
   const supportedEntityCount = entities.length;
@@ -57,9 +60,11 @@ function buildLayerColorMap(raw: IDxf): Map<string, string> {
   return map;
 }
 
-function buildLayers(raw: IDxf, layerColorByName: Map<string, string>): CadLayer[] {
-  const rawLayers = raw.tables?.layer?.layers ?? {};
-  const layers: CadLayer[] = Object.keys(rawLayers).map((name) => ({
+function buildLayers(raw: IDxf, layerColorByName: Map<string, string>, usedLayerNames: Set<string>): CadLayer[] {
+  const rawLayerNames = Object.keys(raw.tables?.layer?.layers ?? {});
+  const allLayerNames = new Set([...rawLayerNames, ...usedLayerNames]);
+
+  const layers: CadLayer[] = Array.from(allLayerNames).map((name) => ({
     name,
     color: layerColorByName.get(name) ?? DEFAULT_COLOR,
     visible: true,

@@ -10,7 +10,7 @@ import { LoadingOverlay } from "./components/LoadingOverlay";
 import { CadCanvas } from "./cad-view/CadCanvas";
 import { validateDxfFile } from "./dxf/validateDxfFile";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
-import type { CadLayer, DocumentInfo } from "./types/cad";
+import type { CadLayer, CadModel, DocumentInfo } from "./types/cad";
 import "./App.css";
 
 const DXF_ERROR_MESSAGE =
@@ -26,6 +26,7 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMeasurementMode, setIsMeasurementMode] = useState(false);
   const [layers, setLayers] = useState<CadLayer[]>([]);
+  const [cadModel, setCadModel] = useState<CadModel | null>(null);
 
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
   const [loadStartedAt, setLoadStartedAt] = useState<number | null>(null);
@@ -67,6 +68,7 @@ export default function App() {
         setLoadStartedAt(null);
         setFileInfo({ fileName: file.name, fileSizeBytes: file.size });
         setLayers(message.cadModel.layers);
+        setCadModel(message.cadModel);
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);
@@ -105,6 +107,7 @@ export default function App() {
     terminateWorker();
     setFileInfo(null);
     setLayers([]);
+    setCadModel(null);
     setIsMeasurementMode(false);
   }, [terminateWorker]);
 
@@ -211,7 +214,7 @@ export default function App() {
         </ResizablePanel>
 
         <div className="app-cad-layout__canvas-area">
-          <CadCanvas />
+          <CadCanvas model={cadModel} layers={layers} />
         </div>
 
         <ResizablePanel
