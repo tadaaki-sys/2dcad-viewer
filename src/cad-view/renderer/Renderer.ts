@@ -16,7 +16,8 @@ export type RenderParams = {
   visibleLayerNames: ReadonlySet<string>;
   selectedEntityIds: ReadonlySet<string>;
   dragSelectionBox: DragSelectionBox | null;
-  measurement: Measurement | null;
+  measurements: readonly Measurement[];
+  selectedMeasurementId: string | null;
   pendingMeasurementPoint: Point2D | null;
 };
 

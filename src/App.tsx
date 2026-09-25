@@ -30,7 +30,8 @@ export default function App() {
   const [cadModel, setCadModel] = useState<CadModel | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point2D | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<string>>(new Set());
-  const [measurement, setMeasurement] = useState<Measurement | null>(null);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [selectedMeasurementId, setSelectedMeasurementId] = useState<string | null>(null);
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
 
   const selectedEntities = useMemo(
@@ -80,7 +81,8 @@ export default function App() {
         setLayers(message.cadModel.layers);
         setCadModel(message.cadModel);
         setSelectedEntityIds(new Set());
-        setMeasurement(null);
+        setMeasurements([]);
+        setSelectedMeasurementId(null);
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);
@@ -122,7 +124,8 @@ export default function App() {
     setCadModel(null);
     setCursorWorld(null);
     setSelectedEntityIds(new Set());
-    setMeasurement(null);
+    setMeasurements([]);
+    setSelectedMeasurementId(null);
     setIsMeasurementMode(false);
   }, [terminateWorker]);
 
@@ -142,7 +145,11 @@ export default function App() {
   );
 
   const handleToggleMeasurementMode = useCallback(() => {
-    setIsMeasurementMode((prev) => !prev);
+    setIsMeasurementMode((prev) => {
+      const next = !prev;
+      if (next) setSelectedMeasurementId(null);
+      return next;
+    });
   }, []);
 
   const handleFitDrawing = useCallback(() => {
@@ -166,7 +173,21 @@ export default function App() {
   }, []);
 
   const handleMeasurementComplete = useCallback((newMeasurement: Measurement) => {
-    setMeasurement(newMeasurement);
+    setMeasurements((prev) => [...prev, newMeasurement]);
+  }, []);
+
+  const handleMeasurementSelect = useCallback((measurementId: string | null) => {
+    setSelectedMeasurementId(measurementId);
+  }, []);
+
+  const handleDeleteMeasurement = useCallback((measurementId: string) => {
+    setMeasurements((prev) => prev.filter((m) => m.id !== measurementId));
+    setSelectedMeasurementId((prev) => (prev === measurementId ? null : prev));
+  }, []);
+
+  const handleDeleteAllMeasurements = useCallback(() => {
+    setMeasurements([]);
+    setSelectedMeasurementId(null);
   }, []);
 
   const handleToggleLayerVisibility = useCallback((layerName: string) => {
@@ -180,6 +201,10 @@ export default function App() {
       if (event.key === "Escape") {
         if (isMeasurementMode) setIsMeasurementMode(false);
         setSelectedEntityIds(new Set());
+        setSelectedMeasurementId(null);
+      } else if ((event.key === "Delete" || event.key === "Backspace") && selectedMeasurementId) {
+        event.preventDefault();
+        handleDeleteMeasurement(selectedMeasurementId);
       } else if (event.key === "o" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         if (isDocumentOpen) handleOpenFileRequest();
@@ -191,7 +216,15 @@ export default function App() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDocumentOpen, isMeasurementMode, handleFitDrawing, handleToggleMeasurementMode, handleOpenFileRequest]);
+  }, [
+    isDocumentOpen,
+    isMeasurementMode,
+    selectedMeasurementId,
+    handleFitDrawing,
+    handleToggleMeasurementMode,
+    handleOpenFileRequest,
+    handleDeleteMeasurement,
+  ]);
 
   useEffect(() => {
     return () => terminateWorker();
@@ -249,9 +282,11 @@ export default function App() {
             selectedEntityIds={selectedEntityIds}
             selectionEnabled={!isMeasurementMode}
             measurementModeEnabled={isMeasurementMode}
-            measurement={measurement}
+            measurements={measurements}
+            selectedMeasurementId={selectedMeasurementId}
             onSelectionChange={handleSelectionChange}
             onMeasurementComplete={handleMeasurementComplete}
+            onMeasurementSelect={handleMeasurementSelect}
             onCursorMove={handleCursorMove}
           />
         </div>
@@ -265,7 +300,13 @@ export default function App() {
         >
           <div className="app-cad-layout__right-content">
             <PropertyPanel entities={selectedEntities} />
-            <MeasurementPanel measurement={measurement} />
+            <MeasurementPanel
+              measurements={measurements}
+              selectedMeasurementId={selectedMeasurementId}
+              onSelectMeasurement={handleMeasurementSelect}
+              onDeleteMeasurement={handleDeleteMeasurement}
+              onDeleteAllMeasurements={handleDeleteAllMeasurements}
+            />
           </div>
         </ResizablePanel>
       </div>

@@ -70,7 +70,12 @@ function midpoint(a: Point2D, b: Point2D): Point2D {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
-function drawMeasurement(ctx: CanvasRenderingContext2D, camera: Camera, measurement: Measurement): void {
+function drawMeasurement(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  measurement: Measurement,
+  isSelected: boolean,
+): void {
   const { pointA, pointB } = measurement;
   const distances = computeMeasurementDistances(pointA, pointB);
   const screenA = camera.worldToScreen(pointA);
@@ -81,7 +86,7 @@ function drawMeasurement(ctx: CanvasRenderingContext2D, camera: Camera, measurem
   ctx.strokeStyle = MEASUREMENT_COLOR;
   ctx.fillStyle = MEASUREMENT_COLOR;
   ctx.font = MEASUREMENT_FONT;
-  ctx.lineWidth = LINE_WIDTH_PX;
+  ctx.lineWidth = isSelected ? HIGHLIGHT_LINE_WIDTH_PX : LINE_WIDTH_PX;
 
   // 水平・垂直の補助線(破線)
   ctx.setLineDash([4, 3]);
@@ -119,7 +124,8 @@ export class CanvasRenderer implements Renderer {
     visibleLayerNames,
     selectedEntityIds,
     dragSelectionBox,
-    measurement,
+    measurements,
+    selectedMeasurementId,
     pendingMeasurementPoint,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
@@ -155,8 +161,8 @@ export class CanvasRenderer implements Renderer {
       drawDragSelectionBox(ctx, dragSelectionBox);
     }
 
-    if (measurement) {
-      drawMeasurement(ctx, camera, measurement);
+    for (const measurement of measurements) {
+      drawMeasurement(ctx, camera, measurement, measurement.id === selectedMeasurementId);
     }
 
     if (pendingMeasurementPoint) {

@@ -5,6 +5,7 @@ import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
 import { findEntitiesInBox, findEntitiesNearPoint } from "./selection/Selection";
 import { findSnapPoint } from "./snap/SnapEngine";
+import { findMeasurementAtPoint } from "./measurement/Measurement";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -38,9 +39,11 @@ type CadCanvasProps = {
   selectedEntityIds: ReadonlySet<string>;
   selectionEnabled: boolean;
   measurementModeEnabled: boolean;
-  measurement: Measurement | null;
+  measurements: readonly Measurement[];
+  selectedMeasurementId: string | null;
   onSelectionChange: (entityIds: ReadonlySet<string>) => void;
   onMeasurementComplete: (measurement: Measurement) => void;
+  onMeasurementSelect: (measurementId: string | null) => void;
   onCursorMove?: (worldPoint: Point2D | null) => void;
 };
 
@@ -71,9 +74,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
-    measurement,
+    measurements,
+    selectedMeasurementId,
     onSelectionChange,
     onMeasurementComplete,
+    onMeasurementSelect,
     onCursorMove,
   },
   ref,
@@ -97,9 +102,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
-    measurement,
+    measurements,
+    selectedMeasurementId,
     onSelectionChange,
     onMeasurementComplete,
+    onMeasurementSelect,
     onCursorMove,
   });
   stateRef.current = {
@@ -108,9 +115,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
-    measurement,
+    measurements,
+    selectedMeasurementId,
     onSelectionChange,
     onMeasurementComplete,
+    onMeasurementSelect,
     onCursorMove,
   };
 
@@ -128,7 +137,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       model: currentModel,
       visibleLayerNames: currentVisible,
       selectedEntityIds: currentSelectedIds,
-      measurement: currentMeasurement,
+      measurements: currentMeasurements,
+      selectedMeasurementId: currentSelectedMeasurementId,
     } = stateRef.current;
     if (!currentModel) return;
 
@@ -141,7 +151,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       visibleLayerNames: currentVisible,
       selectedEntityIds: currentSelectedIds,
       dragSelectionBox: dragSelectionBoxRef.current,
-      measurement: currentMeasurement,
+      measurements: currentMeasurements,
+      selectedMeasurementId: currentSelectedMeasurementId,
       pendingMeasurementPoint: pendingMeasurementPointRef.current,
     });
   }
@@ -185,7 +196,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   useEffect(() => {
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [measurement]);
+  }, [measurements, selectedMeasurementId]);
 
   useEffect(() => {
     draw();
@@ -255,16 +266,17 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function applySingleClickSelection(event: MouseEvent) {
-      const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected } =
+      const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected, measurements: currentMeasurements } =
         stateRef.current;
-      if (!currentModel) return;
 
       const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
       const worldPoint = cameraRef.current.screenToWorld(screenPoint);
       const toleranceWorld = SELECTION_TOLERANCE_PX / cameraRef.current.scale;
-      const candidates = findEntitiesNearPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
 
       if (event.ctrlKey || event.metaKey) {
+        stateRef.current.onMeasurementSelect(null);
+        if (!currentModel) return;
+        const candidates = findEntitiesNearPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
         overlapCycleRef.current = null; // Ctrl+Clickは巡回選択とは独立した操作として扱う
         const hitEntity = candidates[0] ?? null;
         if (!hitEntity) return; // Ctrl+空白クリックは選択状態を変えない
@@ -277,6 +289,22 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         stateRef.current.onSelectionChange(next);
         return;
       }
+
+      // Entity選択より先に、Measurement Overlayへのヒットを優先判定する
+      const hitMeasurement = findMeasurementAtPoint(currentMeasurements, worldPoint, toleranceWorld);
+      if (hitMeasurement) {
+        overlapCycleRef.current = null;
+        stateRef.current.onSelectionChange(new Set());
+        stateRef.current.onMeasurementSelect(hitMeasurement.id);
+        return;
+      }
+      stateRef.current.onMeasurementSelect(null);
+
+      if (!currentModel) {
+        stateRef.current.onSelectionChange(new Set());
+        return;
+      }
+      const candidates = findEntitiesNearPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
 
       if (candidates.length === 0) {
         overlapCycleRef.current = null;
@@ -300,6 +328,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     function applyBoxSelection(event: MouseEvent) {
       if (!leftDragStartClient) return;
       overlapCycleRef.current = null;
+      stateRef.current.onMeasurementSelect(null);
       const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected } =
         stateRef.current;
       if (!currentModel) return;

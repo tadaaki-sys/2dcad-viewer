@@ -3,12 +3,33 @@
   border-top: 1px solid var(--color-border);
 }
 
+.measurement-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
 .measurement-panel__title {
   font-size: 11px;
   color: var(--color-text-muted);
   text-transform: uppercase;
-  margin-bottom: 8px;
-  padding: 0 4px;
+}
+
+.measurement-panel__delete-all-button {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  border-radius: 3px;
+  font-size: 10px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.measurement-panel__delete-all-button:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
 }
 
 .measurement-panel__empty {
@@ -17,24 +38,49 @@
   padding: 0 4px;
 }
 
-.measurement-panel__rows {
+.measurement-panel__list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 4px;
+  gap: 6px;
 }
 
-.measurement-panel__row {
+.measurement-panel__item {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
+  padding: 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
 }
 
-.measurement-panel__row-label {
+.measurement-panel__item:hover {
+  background: #303030;
+}
+
+.measurement-panel__item--selected {
+  border-color: #ff8c00;
+  background: rgba(255, 140, 0, 0.1);
+}
+
+.measurement-panel__item-values {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.measurement-panel__item-delete {
+  background: none;
+  border: none;
   color: var(--color-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
 }
 
-.measurement-panel__row-value {
-  text-align: right;
+.measurement-panel__item-delete:hover {
+  color: #ff5555;
 }
