@@ -77,9 +77,16 @@ export function StartScreen({ recentFiles, errorMessage, onFileSelected }: Start
         ) : (
           <ul className="start-screen__recent-list">
             {recentFiles.map((entry) => (
-              <li key={entry.fileName + entry.lastViewedAt} className="start-screen__recent-item">
-                <span>{entry.fileName}</span>
-                <span className="start-screen__recent-item-date">{entry.lastViewedAt}</span>
+              <li key={entry.fileName + entry.lastViewedAt}>
+                <button
+                  type="button"
+                  className="start-screen__recent-item"
+                  onClick={handleBrowseClick}
+                  title="クリックするとファイル選択ダイアログが開きます(同じファイルを選び直してください)"
+                >
+                  <span>{entry.fileName}</span>
+                  <span className="start-screen__recent-item-date">{entry.lastViewedAt}</span>
+                </button>
               </li>
             ))}
           </ul>

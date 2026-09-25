@@ -10,6 +10,7 @@ import { LoadingOverlay } from "./components/LoadingOverlay";
 import { CadCanvas } from "./cad-view/CadCanvas";
 import type { CadCanvasHandle } from "./cad-view/CadCanvas";
 import { PerformanceOverlay } from "./components/PerformanceOverlay";
+import { useRecentFiles } from "./hooks/useRecentFiles";
 import { validateDxfFile } from "./dxf/validateDxfFile";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
 import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
@@ -35,6 +36,7 @@ export default function App() {
   const [selectedMeasurementId, setSelectedMeasurementId] = useState<string | null>(null);
   const [parseTimeMs, setParseTimeMs] = useState<number | null>(null);
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
+  const { recentFiles, addRecentFile } = useRecentFiles();
 
   const selectedEntities = useMemo(
     () => cadModel?.entities.filter((entity) => selectedEntityIds.has(entity.id)) ?? [],
@@ -80,6 +82,7 @@ export default function App() {
         setLoadingProgress(null);
         setLoadStartedAt(null);
         setFileInfo({ fileName: file.name, fileSizeBytes: file.size });
+        addRecentFile(file.name);
         setLayers(message.cadModel.layers);
         setCadModel(message.cadModel);
         setSelectedEntityIds(new Set());
@@ -106,7 +109,7 @@ export default function App() {
 
     const request: DxfWorkerRequest = { type: "parse", file };
     worker.postMessage(request);
-  }, [terminateWorker]);
+  }, [terminateWorker, addRecentFile]);
 
   const handleFileSelected = useCallback(
     async (file: File) => {
@@ -236,7 +239,7 @@ export default function App() {
   if (!isDocumentOpen) {
     return (
       <>
-        <StartScreen recentFiles={[]} errorMessage={errorMessage} onFileSelected={handleFileSelected} />
+        <StartScreen recentFiles={recentFiles} errorMessage={errorMessage} onFileSelected={handleFileSelected} />
         {loadingProgress && loadStartedAt !== null && (
           <LoadingOverlay
             stage={loadingProgress.stage}
@@ -324,7 +327,7 @@ export default function App() {
           </div>
         </ResizablePanel>
       </div>
-      <StatusBar fileInfo={fileInfo} cursorWorld={cursorWorld} />
+      <StatusBar fileInfo={fileInfo} cursorWorld={cursorWorld} stats={cadModel?.stats ?? null} />
       {loadingProgress && loadStartedAt !== null && (
         <LoadingOverlay stage={loadingProgress.stage} entityCount={loadingProgress.entityCount} startedAt={loadStartedAt} />
       )}

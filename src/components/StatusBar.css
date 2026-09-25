@@ -1,4 +1,5 @@
 .status-bar {
+  position: relative;
   height: var(--statusbar-height);
   display: flex;
   align-items: center;
@@ -10,6 +11,57 @@
   color: var(--color-text-muted);
 }
 
+.status-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .status-bar__coords {
   font-variant-numeric: tabular-nums;
+}
+
+.status-bar__unsupported-button {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: #e2a33d;
+  border-radius: 3px;
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status-bar__unsupported-button:hover {
+  border-color: #e2a33d;
+}
+
+.status-bar__unsupported-popover {
+  position: absolute;
+  bottom: calc(var(--statusbar-height) + 4px);
+  left: 10px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--color-text);
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+
+.status-bar__unsupported-popover-title {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.status-bar__unsupported-popover-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 1px 0;
 }
