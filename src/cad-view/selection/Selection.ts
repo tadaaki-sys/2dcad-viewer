@@ -9,21 +9,11 @@ export type SelectionBox = {
 
 export type BoxSelectionMode = "window" | "crossing";
 
+/** どのEntity種別でも、構成する線分(CIRCLE/ARCはテッセレーション済み)への最短距離で判定する */
 function distanceFromEntity(entity: CadEntity, point: Point2D): number {
-  if (entity.type === "LINE") {
-    return pointToSegmentDistance(point, entity.start, entity.end);
-  }
-
-  const vertices = entity.vertices;
   let minDistance = Infinity;
-  for (let i = 0; i < vertices.length - 1; i++) {
-    minDistance = Math.min(minDistance, pointToSegmentDistance(point, vertices[i], vertices[i + 1]));
-  }
-  if (entity.closed && vertices.length > 2) {
-    minDistance = Math.min(
-      minDistance,
-      pointToSegmentDistance(point, vertices[vertices.length - 1], vertices[0]),
-    );
+  for (const [a, b] of getEntitySegments(entity)) {
+    minDistance = Math.min(minDistance, pointToSegmentDistance(point, a, b));
   }
   return minDistance;
 }

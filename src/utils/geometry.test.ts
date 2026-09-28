@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { distance, intersectSegments, pointToSegmentDistance, polylineLength, segmentsIntersect } from "./geometry";
+import {
+  distance,
+  intersectSegments,
+  normalizeArcSpan,
+  pointOnArc,
+  pointToSegmentDistance,
+  polylineLength,
+  segmentsIntersect,
+} from "./geometry";
 
 describe("distance", () => {
   it("computes euclidean distance between two points", () => {
@@ -62,6 +70,36 @@ describe("intersectSegments", () => {
 
   it("returns null for parallel segments", () => {
     expect(intersectSegments({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 1 }, { x: 10, y: 1 })).toBeNull();
+  });
+});
+
+describe("normalizeArcSpan", () => {
+  it("returns the simple positive difference when end is after start", () => {
+    expect(normalizeArcSpan(0, Math.PI / 2)).toBeCloseTo(Math.PI / 2, 9);
+  });
+
+  it("wraps around when end angle is numerically before start angle", () => {
+    // DXF arc from 300deg to 30deg sweeps CCW through 0deg, a 90deg span
+    const span = normalizeArcSpan((300 * Math.PI) / 180, (30 * Math.PI) / 180);
+    expect(span).toBeCloseTo(Math.PI / 2, 9);
+  });
+
+  it("treats identical start/end angles as a full turn", () => {
+    expect(normalizeArcSpan(1.2, 1.2)).toBeCloseTo(Math.PI * 2, 9);
+  });
+});
+
+describe("pointOnArc", () => {
+  it("computes the point at a given angle around the center", () => {
+    const p = pointOnArc({ x: 10, y: 20 }, 5, 0);
+    expect(p.x).toBeCloseTo(15, 9);
+    expect(p.y).toBeCloseTo(20, 9);
+  });
+
+  it("computes the point at 90 degrees", () => {
+    const p = pointOnArc({ x: 0, y: 0 }, 2, Math.PI / 2);
+    expect(p.x).toBeCloseTo(0, 9);
+    expect(p.y).toBeCloseTo(2, 9);
   });
 });
 

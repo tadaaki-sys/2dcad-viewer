@@ -1,5 +1,5 @@
 import type { CadEntity } from "../types/cad";
-import { polylineLength, distance } from "../utils/geometry";
+import { polylineLength, distance, normalizeArcSpan } from "../utils/geometry";
 import { formatMm } from "../utils/format";
 import "./PropertyPanel.css";
 
@@ -9,8 +9,15 @@ type PropertyPanelProps = {
 
 type Row = { label: string; value: string };
 
+function radiansToDegrees(radians: number): number {
+  return (radians * 180) / Math.PI;
+}
+
 function entityLength(entity: CadEntity): number {
-  return entity.type === "LINE" ? distance(entity.start, entity.end) : polylineLength(entity.vertices, entity.closed);
+  if (entity.type === "LINE") return distance(entity.start, entity.end);
+  if (entity.type === "CIRCLE") return 2 * Math.PI * entity.radius;
+  if (entity.type === "ARC") return entity.radius * normalizeArcSpan(entity.startAngle, entity.endAngle);
+  return polylineLength(entity.vertices, entity.closed);
 }
 
 function buildSingleEntityRows(entity: CadEntity): Row[] {
@@ -24,6 +31,19 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
       { label: "Start X/Y", value: `${formatMm(entity.start.x)}, ${formatMm(entity.start.y)}` },
       { label: "End X/Y", value: `${formatMm(entity.end.x)}, ${formatMm(entity.end.y)}` },
       { label: "Length", value: formatMm(entityLength(entity)) },
+    );
+  } else if (entity.type === "CIRCLE") {
+    rows.push(
+      { label: "Center X/Y", value: `${formatMm(entity.center.x)}, ${formatMm(entity.center.y)}` },
+      { label: "Radius", value: formatMm(entity.radius) },
+      { label: "Circumference", value: formatMm(entityLength(entity)) },
+    );
+  } else if (entity.type === "ARC") {
+    rows.push(
+      { label: "Center X/Y", value: `${formatMm(entity.center.x)}, ${formatMm(entity.center.y)}` },
+      { label: "Radius", value: formatMm(entity.radius) },
+      { label: "Start/End Angle", value: `${radiansToDegrees(entity.startAngle).toFixed(1)}°, ${radiansToDegrees(entity.endAngle).toFixed(1)}°` },
+      { label: "Arc Length", value: formatMm(entityLength(entity)) },
     );
   } else {
     rows.push(

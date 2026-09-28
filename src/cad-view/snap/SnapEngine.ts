@@ -1,4 +1,4 @@
-import { distance, intersectSegments } from "../../utils/geometry";
+import { distance, intersectSegments, normalizeArcSpan, pointOnArc } from "../../utils/geometry";
 import { getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 
@@ -16,6 +16,14 @@ type CandidateGenerator = (
   toleranceWorld: number,
 ) => SnapCandidate[];
 
+/** CIRCLEには自然な「端点」概念がないため候補を出さない。ARCは始点/終点の厳密座標を2点返す */
+function endpointsOf(entity: CadEntity): Point2D[] {
+  if (entity.type === "LINE") return [entity.start, entity.end];
+  if (entity.type === "CIRCLE") return [];
+  if (entity.type === "ARC") return [pointOnArc(entity.center, entity.radius, entity.startAngle), pointOnArc(entity.center, entity.radius, entity.endAngle)];
+  return entity.vertices;
+}
+
 function collectEndpointCandidates(
   entities: readonly CadEntity[],
   visibleLayerNames: ReadonlySet<string>,
@@ -25,8 +33,7 @@ function collectEndpointCandidates(
   const results: SnapCandidate[] = [];
   for (const entity of entities) {
     if (!visibleLayerNames.has(entity.layer)) continue;
-    const points = entity.type === "LINE" ? [entity.start, entity.end] : entity.vertices;
-    for (const point of points) {
+    for (const point of endpointsOf(entity)) {
       if (distance(point, worldPoint) <= toleranceWorld) {
         results.push({ point, type: "endpoint" });
       }
@@ -44,6 +51,18 @@ function collectMidpointCandidates(
   const results: SnapCandidate[] = [];
   for (const entity of entities) {
     if (!visibleLayerNames.has(entity.layer)) continue;
+
+    // CIRCLEには自然な中点がないため候補を出さない。ARCは弧の中央角度の厳密な1点のみ(テッセレーション頂点は使わない)
+    if (entity.type === "CIRCLE") continue;
+    if (entity.type === "ARC") {
+      const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
+      const midpoint = pointOnArc(entity.center, entity.radius, entity.startAngle + span / 2);
+      if (distance(midpoint, worldPoint) <= toleranceWorld) {
+        results.push({ point: midpoint, type: "midpoint" });
+      }
+      continue;
+    }
+
     for (const [a, b] of getEntitySegments(entity)) {
       const midpoint: Point2D = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       if (distance(midpoint, worldPoint) <= toleranceWorld) {

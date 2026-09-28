@@ -177,3 +177,65 @@ describe("findEntitiesInBox", () => {
     expect(windowResult).toEqual([]);
   });
 });
+
+describe("findEntityAtPoint - CIRCLE/ARC", () => {
+  const circle: CadEntity = {
+    id: "circle-1",
+    type: "CIRCLE",
+    layer: "A",
+    color: "#ffffff",
+    center: { x: 0, y: 0 },
+    radius: 10,
+  };
+
+  const arc: CadEntity = {
+    id: "arc-1",
+    type: "ARC",
+    layer: "A",
+    color: "#ffffff",
+    center: { x: 100, y: 0 },
+    radius: 10,
+    startAngle: 0,
+    endAngle: Math.PI, // 上半分(0〜180度)
+  };
+
+  const visible = new Set(["A"]);
+
+  it("hits the rim of a CIRCLE but not its empty interior", () => {
+    const onRim = findEntityAtPoint([circle], visible, { x: 10, y: 0.2 }, 1);
+    expect(onRim?.id).toBe("circle-1");
+
+    const atCenter = findEntityAtPoint([circle], visible, { x: 0, y: 0 }, 1);
+    expect(atCenter).toBeNull();
+  });
+
+  it("hits a point on the ARC's swept range", () => {
+    // 90度(上)はstartAngle=0からendAngle=180度の範囲内
+    const hit = findEntityAtPoint([arc], visible, { x: 100, y: 10.2 }, 1);
+    expect(hit?.id).toBe("arc-1");
+  });
+
+  it("does not hit the circle's rim outside the ARC's swept range", () => {
+    // 270度(下)はARCの範囲外(0〜180度)なのでヒットしない
+    const miss = findEntityAtPoint([arc], visible, { x: 100, y: -10 }, 1);
+    expect(miss).toBeNull();
+  });
+
+  it("selects a CIRCLE fully inside a window box", () => {
+    const box = { min: { x: -15, y: -15 }, max: { x: 15, y: 15 } };
+    const result = findEntitiesInBox([circle], visible, box, "window");
+    expect(result.map((e) => e.id)).toEqual(["circle-1"]);
+  });
+
+  it("does not select a CIRCLE via window box when it pokes outside", () => {
+    const box = { min: { x: -5, y: -15 }, max: { x: 15, y: 15 } };
+    const result = findEntitiesInBox([circle], visible, box, "window");
+    expect(result).toEqual([]);
+  });
+
+  it("selects a CIRCLE via crossing box when only partially overlapping", () => {
+    const box = { min: { x: -5, y: -15 }, max: { x: 15, y: 15 } };
+    const result = findEntitiesInBox([circle], visible, box, "crossing");
+    expect(result.map((e) => e.id)).toEqual(["circle-1"]);
+  });
+});

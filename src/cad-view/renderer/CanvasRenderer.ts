@@ -1,6 +1,7 @@
 import type { CadEntity, Measurement, Point2D } from "../../types/cad";
 import { computeMeasurementDistances } from "../measurement/Measurement";
 import { formatMm } from "../../utils/format";
+import { normalizeArcSpan, pointOnArc } from "../../utils/geometry";
 import type { Camera } from "../camera/Camera";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 
@@ -13,6 +14,55 @@ const MEASUREMENT_COLOR = "#ff8c00";
 const MEASUREMENT_MARKER_RADIUS_PX = 4;
 const MEASUREMENT_FONT = "11px sans-serif";
 
+// ズーム倍率に応じた円/弧の分割数(画面上で1segmentがおおよそこのpx幅に収まるようにする)
+const ARC_SEGMENT_TARGET_PX = 3;
+const MIN_ARC_SEGMENTS_PER_FULL_CIRCLE = 12;
+const MAX_ARC_SEGMENTS_PER_FULL_CIRCLE = 128;
+
+function computeAdaptiveSegmentCount(radiusWorld: number, spanRadians: number, camera: Camera): number {
+  const screenRadius = Math.abs(radiusWorld * camera.scale);
+  const fullCircleSegments = Math.min(
+    MAX_ARC_SEGMENTS_PER_FULL_CIRCLE,
+    Math.max(MIN_ARC_SEGMENTS_PER_FULL_CIRCLE, Math.ceil((2 * Math.PI * screenRadius) / ARC_SEGMENT_TARGET_PX)),
+  );
+  const fraction = Math.min(1, spanRadians / (Math.PI * 2));
+  return Math.max(2, Math.round(fullCircleSegments * fraction));
+}
+
+function tracePolylinePath(ctx: CanvasRenderingContext2D, camera: Camera, vertices: Point2D[], closed: boolean): void {
+  vertices.forEach((vertex, index) => {
+    const screenPoint = camera.worldToScreen(vertex);
+    if (index === 0) {
+      ctx.moveTo(screenPoint.x, screenPoint.y);
+    } else {
+      ctx.lineTo(screenPoint.x, screenPoint.y);
+    }
+  });
+  if (closed) {
+    ctx.closePath();
+  }
+}
+
+function traceArcPath(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  center: Point2D,
+  radius: number,
+  startAngle: number,
+  span: number,
+): void {
+  const segmentCount = computeAdaptiveSegmentCount(radius, span, camera);
+  for (let i = 0; i <= segmentCount; i++) {
+    const worldPoint = pointOnArc(center, radius, startAngle + (span * i) / segmentCount);
+    const screenPoint = camera.worldToScreen(worldPoint);
+    if (i === 0) {
+      ctx.moveTo(screenPoint.x, screenPoint.y);
+    } else {
+      ctx.lineTo(screenPoint.x, screenPoint.y);
+    }
+  }
+}
+
 function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: CadEntity): void {
   ctx.beginPath();
 
@@ -21,18 +71,13 @@ function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: 
     const end = camera.worldToScreen(entity.end);
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
+  } else if (entity.type === "CIRCLE") {
+    traceArcPath(ctx, camera, entity.center, entity.radius, 0, Math.PI * 2);
+  } else if (entity.type === "ARC") {
+    const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
+    traceArcPath(ctx, camera, entity.center, entity.radius, entity.startAngle, span);
   } else {
-    entity.vertices.forEach((vertex, index) => {
-      const screenPoint = camera.worldToScreen(vertex);
-      if (index === 0) {
-        ctx.moveTo(screenPoint.x, screenPoint.y);
-      } else {
-        ctx.lineTo(screenPoint.x, screenPoint.y);
-      }
-    });
-    if (entity.closed) {
-      ctx.closePath();
-    }
+    tracePolylinePath(ctx, camera, entity.vertices, entity.closed);
   }
 }
 

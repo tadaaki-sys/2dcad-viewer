@@ -183,15 +183,13 @@ describe("DxfParserAdapter", () => {
         "21",
         "0.0",
         "0",
-        "CIRCLE",
+        "POINT",
         "8",
         "0",
         "10",
         "5.0",
         "20",
         "5.0",
-        "40",
-        "2.0",
         "0",
         "TEXT",
         "8",
@@ -205,14 +203,12 @@ describe("DxfParserAdapter", () => {
         "40",
         "5.0",
         "0",
-        "CIRCLE",
+        "POINT",
         "8",
         "0",
         "10",
         "1.0",
         "20",
-        "1.0",
-        "40",
         "1.0",
       ].join("\n"),
     );
@@ -222,7 +218,7 @@ describe("DxfParserAdapter", () => {
     expect(model.stats.totalEntityCount).toBe(4);
     expect(model.stats.supportedEntityCount).toBe(1);
     expect(model.stats.unsupportedEntityCount).toBe(3);
-    expect(model.stats.unsupportedBreakdown).toEqual({ CIRCLE: 2, TEXT: 1 });
+    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, TEXT: 1 });
   });
 
   it("excludes paper space entities from the model", () => {
@@ -311,7 +307,7 @@ describe("DxfParserAdapter", () => {
   });
 
   it("returns null bounds when there are no supported entities", () => {
-    const dxf = buildDxf(["0", "CIRCLE", "8", "0", "10", "0.0", "20", "0.0", "40", "1.0"].join("\n"));
+    const dxf = buildDxf(["0", "POINT", "8", "0", "10", "0.0", "20", "0.0"].join("\n"));
 
     const model = parseDxfText(dxf);
 
@@ -407,17 +403,17 @@ describe("DxfParserAdapter - INSERT/BLOCK expansion", () => {
   });
 
   it("counts entities inside a block towards total/unsupported stats", () => {
-    const circleInBlock = ["0", "CIRCLE", "8", "0", "10", "0.0", "20", "0.0", "40", "1.0"].join("\n");
+    const pointInBlock = ["0", "POINT", "8", "0", "10", "0.0", "20", "0.0"].join("\n");
     const dxf = buildDxfWithBlocks(
       insertRef("SYMBOL", { x: 0, y: 0 }),
-      blockDef("SYMBOL", { x: 0, y: 0 }, [lineInBlock, circleInBlock].join("\n")),
+      blockDef("SYMBOL", { x: 0, y: 0 }, [lineInBlock, pointInBlock].join("\n")),
     );
 
     const model = parseDxfText(dxf);
 
     expect(model.stats.totalEntityCount).toBe(2);
     expect(model.stats.supportedEntityCount).toBe(1);
-    expect(model.stats.unsupportedBreakdown).toEqual({ CIRCLE: 1 });
+    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 1 });
   });
 
   it("counts an INSERT referencing a missing block as unsupported instead of crashing", () => {
@@ -442,5 +438,75 @@ describe("DxfParserAdapter - INSERT/BLOCK expansion", () => {
 
     // 無限ループせず完了すること自体がテストの主目的
     expect(model.entities).toHaveLength(0);
+  });
+});
+
+describe("DxfParserAdapter - CIRCLE/ARC conversion", () => {
+  it("converts a CIRCLE entity into a CadCircle", () => {
+    const dxf = buildDxf(["0", "CIRCLE", "8", "0", "10", "5.0", "20", "10.0", "40", "3.0"].join("\n"));
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("CIRCLE");
+    if (entity.type === "CIRCLE") {
+      expect(entity.center).toEqual({ x: 5, y: 10 });
+      expect(entity.radius).toBe(3);
+    }
+  });
+
+  it("converts an ARC entity into a CadArc, preserving start/end angles", () => {
+    const dxf = buildDxf(
+      ["0", "ARC", "8", "0", "10", "0.0", "20", "0.0", "40", "5.0", "50", "0", "51", "90"].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("ARC");
+    if (entity.type === "ARC") {
+      expect(entity.center).toEqual({ x: 0, y: 0 });
+      expect(entity.radius).toBe(5);
+      expect(entity.startAngle).toBeCloseTo(0, 9);
+      expect(entity.endAngle).toBeCloseTo(Math.PI / 2, 9);
+    }
+  });
+
+  it("scales a CIRCLE's radius and translates its center through a scaled/positioned INSERT", () => {
+    const circleInBlock = ["0", "CIRCLE", "8", "0", "10", "0.0", "20", "0.0", "40", "2.0"].join("\n");
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 100, y: 100 }, { xScale: 2, yScale: 2 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, circleInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("CIRCLE");
+    if (entity.type === "CIRCLE") {
+      expect(entity.center).toEqual({ x: 100, y: 100 });
+      expect(entity.radius).toBe(4);
+    }
+  });
+
+  it("rotates an ARC's start/end angles through a rotated INSERT", () => {
+    const arcInBlock = ["0", "ARC", "8", "0", "10", "0.0", "20", "0.0", "40", "5.0", "50", "0", "51", "90"].join("\n");
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 0, y: 0 }, { rotation: 90 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, arcInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("ARC");
+    if (entity.type === "ARC") {
+      expect(entity.startAngle).toBeCloseTo(Math.PI / 2, 9);
+      expect(entity.endAngle).toBeCloseTo(Math.PI, 9);
+    }
   });
 });

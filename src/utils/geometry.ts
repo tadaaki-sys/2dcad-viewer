@@ -47,6 +47,22 @@ export function segmentsIntersect(p1: Point2D, p2: Point2D, p3: Point2D, p4: Poi
   return intersectSegments(p1, p2, p3, p4) !== null;
 }
 
+/**
+ * ARCのstartAngleからendAngleまでCCW方向に進む角度差(0〜2πの範囲)を返す。
+ * DXFの角度はCCWで進む前提のため、endAngleがstartAngleを超えて1周する場合も正しく扱う。
+ * span=0(start===end)は「1周分」として扱う(CIRCLEやほぼ全周のARCに対応するため)。
+ */
+export function normalizeArcSpan(startAngle: number, endAngle: number): number {
+  const twoPi = Math.PI * 2;
+  let span = (endAngle - startAngle) % twoPi;
+  if (span <= 0) span += twoPi;
+  return span;
+}
+
+export function pointOnArc(center: Point2D, radius: number, angle: number): Point2D {
+  return { x: center.x + radius * Math.cos(angle), y: center.y + radius * Math.sin(angle) };
+}
+
 export function polylineLength(vertices: Point2D[], closed: boolean): number {
   let total = 0;
   for (let i = 0; i < vertices.length - 1; i++) {

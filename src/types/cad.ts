@@ -32,7 +32,28 @@ export type CadPolyline = {
   closed: boolean;
 };
 
-export type CadEntity = CadLine | CadPolyline;
+export type CadCircle = {
+  id: string;
+  type: "CIRCLE";
+  layer: string;
+  color: string;
+  center: Point2D;
+  radius: number;
+};
+
+/** startAngle/endAngleはラジアン、+X軸からCCW方向(DXFの角度系と同じ数学的な向き) */
+export type CadArc = {
+  id: string;
+  type: "ARC";
+  layer: string;
+  color: string;
+  center: Point2D;
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+};
+
+export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc;
 
 export type CadBounds = {
   min: Point2D;

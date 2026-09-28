@@ -3,9 +3,12 @@ import type { IBlock, IDxf, IEntity, IInsertEntity } from "dxf-parser";
 import type { ILineEntity } from "dxf-parser";
 import type { ILwpolylineEntity } from "dxf-parser";
 import type { IPolylineEntity } from "dxf-parser";
+import type { ICircleEntity } from "dxf-parser";
+import type { IArcEntity } from "dxf-parser";
 import type { CadBounds, CadEntity, CadLayer, CadModel, Point2D } from "../types/cad";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
 import type { Matrix2D } from "../utils/matrix2d";
+import { getEntityPoints } from "../cad-view/entityGeometry";
 
 const DEFAULT_COLOR = "#ffffff";
 // ブロックが自分自身(直接/間接)を参照する循環定義に対する安全装置。通常のDXFでは数段でネストが終わる。
@@ -237,6 +240,35 @@ function convertEntity(
     };
   }
 
+  if (entity.type === "CIRCLE" || entity.type === "ARC") {
+    const shape = entity as ICircleEntity | IArcEntity;
+    if (!shape.center || !Number.isFinite(shape.radius)) return null;
+
+    const center = applyMatrix(toPoint2D(shape.center), matrix);
+    // 非一様スケール(X/Yで倍率が異なる)の場合、真円/真弧は表現できないため
+    // 面積を保つ幾何平均を半径の近似スケールとして使う(ブロックが不均一縮尺で参照されるケースへの実用的な妥協)
+    const scaleFactor = Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
+    const radius = shape.radius * scaleFactor;
+    if (!(radius > 0)) return null;
+
+    if (entity.type === "CIRCLE") {
+      return { id: nextId(), type: "CIRCLE", layer, color, center, radius };
+    }
+
+    const arc = entity as IArcEntity;
+    const rotationOffset = Math.atan2(matrix.b, matrix.a);
+    return {
+      id: nextId(),
+      type: "ARC",
+      layer,
+      color,
+      center,
+      radius,
+      startAngle: arc.startAngle + rotationOffset,
+      endAngle: arc.endAngle + rotationOffset,
+    };
+  }
+
   return null;
 }
 
@@ -248,7 +280,7 @@ function computeBounds(entities: CadEntity[]): CadBounds | null {
   let found = false;
 
   for (const entity of entities) {
-    const points = entity.type === "LINE" ? [entity.start, entity.end] : entity.vertices;
+    const points = getEntityPoints(entity);
     for (const point of points) {
       found = true;
       if (point.x < minX) minX = point.x;
