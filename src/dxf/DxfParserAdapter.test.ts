@@ -24,6 +24,71 @@ function buildDxf(entitiesSection: string, tablesSection = ""): string {
     .join("\n");
 }
 
+function buildDxfWithBlocks(entitiesSection: string, blocksSection: string, tablesSection = ""): string {
+  return [
+    "0",
+    "SECTION",
+    "2",
+    "TABLES",
+    tablesSection,
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "BLOCKS",
+    blocksSection,
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "ENTITIES",
+    entitiesSection,
+    "0",
+    "ENDSEC",
+    "0",
+    "EOF",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+function blockDef(name: string, basePoint: { x: number; y: number }, entitiesLines: string): string {
+  return [
+    "0",
+    "BLOCK",
+    "8",
+    "0",
+    "2",
+    name,
+    "70",
+    "0",
+    "10",
+    String(basePoint.x),
+    "20",
+    String(basePoint.y),
+    "30",
+    "0.0",
+    entitiesLines,
+    "0",
+    "ENDBLK",
+  ].join("\n");
+}
+
+function insertRef(
+  blockName: string,
+  position: { x: number; y: number },
+  options: { rotation?: number; xScale?: number; yScale?: number; colorIndex?: number } = {},
+): string {
+  const lines = ["0", "INSERT", "8", "0", "2", blockName, "10", String(position.x), "20", String(position.y)];
+  if (options.colorIndex !== undefined) lines.push("62", String(options.colorIndex));
+  if (options.xScale !== undefined) lines.push("41", String(options.xScale));
+  if (options.yScale !== undefined) lines.push("42", String(options.yScale));
+  if (options.rotation !== undefined) lines.push("50", String(options.rotation));
+  return lines.join("\n");
+}
+
 const LAYER_TABLE = [
   "0",
   "TABLE",
@@ -251,5 +316,131 @@ describe("DxfParserAdapter", () => {
     const model = parseDxfText(dxf);
 
     expect(model.bounds).toBeNull();
+  });
+});
+
+describe("DxfParserAdapter - INSERT/BLOCK expansion", () => {
+  const lineInBlock = ["0", "LINE", "8", "0", "10", "0.0", "20", "0.0", "11", "10.0", "21", "0.0"].join("\n");
+
+  it("translates a block's LINE by the INSERT position", () => {
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 100, y: 200 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, lineInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("LINE");
+    if (entity.type === "LINE") {
+      expect(entity.start).toEqual({ x: 100, y: 200 });
+      expect(entity.end).toEqual({ x: 110, y: 200 });
+    }
+  });
+
+  it("applies INSERT rotation and scale around the block base point", () => {
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 0, y: 0 }, { rotation: 90, xScale: 2, yScale: 2 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, lineInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    const entity = model.entities[0];
+    expect(entity.type).toBe("LINE");
+    if (entity.type === "LINE") {
+      expect(entity.start.x).toBeCloseTo(0, 9);
+      expect(entity.start.y).toBeCloseTo(0, 9);
+      // local (10,0) -> scaled (20,0) -> rotated 90deg -> (0,20)
+      expect(entity.end.x).toBeCloseTo(0, 9);
+      expect(entity.end.y).toBeCloseTo(20, 9);
+    }
+  });
+
+  it("offsets by the block base point before applying the insert transform", () => {
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 100, y: 100 }),
+      blockDef("SYMBOL", { x: 5, y: 5 }, lineInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    const entity = model.entities[0];
+    if (entity.type === "LINE") {
+      // local (0,0) is 5 units left/below the base point -> insertPos + (-5,-5)
+      expect(entity.start).toEqual({ x: 95, y: 95 });
+      expect(entity.end).toEqual({ x: 105, y: 95 });
+    }
+  });
+
+  it("resolves nested INSERTs by composing transforms", () => {
+    const innerInsert = insertRef("INNER", { x: 10, y: 0 });
+    const dxf = buildDxfWithBlocks(
+      insertRef("OUTER", { x: 100, y: 100 }),
+      [blockDef("OUTER", { x: 0, y: 0 }, innerInsert), blockDef("INNER", { x: 0, y: 0 }, lineInBlock)].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    if (entity.type === "LINE") {
+      // INNER's line (0,0)-(10,0) shifted by INNER insert (10,0), then by OUTER insert (100,100)
+      expect(entity.start).toEqual({ x: 110, y: 100 });
+      expect(entity.end).toEqual({ x: 120, y: 100 });
+    }
+  });
+
+  it("inherits the INSERT's own color for ByBlock (colorIndex 0) entities inside the block", () => {
+    const byBlockLine = ["0", "LINE", "8", "0", "62", "0", "10", "0.0", "20", "0.0", "11", "10.0", "21", "0.0"].join(
+      "\n",
+    );
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 0, y: 0 }, { colorIndex: 1 }), // red
+      blockDef("SYMBOL", { x: 0, y: 0 }, byBlockLine),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities[0].color).toBe("#ff0000");
+  });
+
+  it("counts entities inside a block towards total/unsupported stats", () => {
+    const circleInBlock = ["0", "CIRCLE", "8", "0", "10", "0.0", "20", "0.0", "40", "1.0"].join("\n");
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 0, y: 0 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, [lineInBlock, circleInBlock].join("\n")),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.stats.totalEntityCount).toBe(2);
+    expect(model.stats.supportedEntityCount).toBe(1);
+    expect(model.stats.unsupportedBreakdown).toEqual({ CIRCLE: 1 });
+  });
+
+  it("counts an INSERT referencing a missing block as unsupported instead of crashing", () => {
+    const dxf = buildDxf(insertRef("DOES_NOT_EXIST", { x: 0, y: 0 }));
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(0);
+    expect(model.stats.totalEntityCount).toBe(1);
+    expect(model.stats.unsupportedBreakdown).toEqual({ INSERT: 1 });
+  });
+
+  it("does not infinite-loop on a circular block reference", () => {
+    const dxf = buildDxfWithBlocks(
+      insertRef("A", { x: 0, y: 0 }),
+      [blockDef("A", { x: 0, y: 0 }, insertRef("B", { x: 0, y: 0 })), blockDef("B", { x: 0, y: 0 }, insertRef("A", { x: 0, y: 0 }))].join(
+        "\n",
+      ),
+    );
+
+    const model = parseDxfText(dxf);
+
+    // 無限ループせず完了すること自体がテストの主目的
+    expect(model.entities).toHaveLength(0);
   });
 });
