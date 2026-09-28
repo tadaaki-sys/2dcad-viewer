@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import DxfParser from "dxf-parser";
 import { convertToCadModel } from "./DxfParserAdapter";
+import { decodeDxfBuffer } from "./dxfEncoding";
 import type {
   DxfWorkerErrorMessage,
   DxfWorkerProgressMessage,
@@ -19,7 +20,8 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
   const startedAt = performance.now();
   try {
     postProgress("reading", null);
-    const text = await event.data.file.text();
+    const buffer = await event.data.file.arrayBuffer();
+    const text = decodeDxfBuffer(buffer);
 
     postProgress("parsing", null);
     const parser = new DxfParser();
