@@ -17,6 +17,7 @@ function entityLength(entity: CadEntity): number {
   if (entity.type === "LINE") return distance(entity.start, entity.end);
   if (entity.type === "CIRCLE") return 2 * Math.PI * entity.radius;
   if (entity.type === "ARC") return entity.radius * normalizeArcSpan(entity.startAngle, entity.endAngle);
+  if (entity.type === "TEXT") return 0;
   return polylineLength(entity.vertices, entity.closed);
 }
 
@@ -44,6 +45,12 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
       { label: "Radius", value: formatMm(entity.radius) },
       { label: "Start/End Angle", value: `${radiansToDegrees(entity.startAngle).toFixed(1)}°, ${radiansToDegrees(entity.endAngle).toFixed(1)}°` },
       { label: "Arc Length", value: formatMm(entityLength(entity)) },
+    );
+  } else if (entity.type === "TEXT") {
+    rows.push(
+      { label: "Position X/Y", value: `${formatMm(entity.position.x)}, ${formatMm(entity.position.y)}` },
+      { label: "Text Height", value: formatMm(entity.height) },
+      { label: "Content", value: entity.text.replace(/\n/g, " / ") },
     );
   } else {
     rows.push(

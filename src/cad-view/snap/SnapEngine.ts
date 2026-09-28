@@ -16,10 +16,10 @@ type CandidateGenerator = (
   toleranceWorld: number,
 ) => SnapCandidate[];
 
-/** CIRCLEには自然な「端点」概念がないため候補を出さない。ARCは始点/終点の厳密座標を2点返す */
+/** CIRCLE/TEXTには自然な「端点」概念がないため候補を出さない。ARCは始点/終点の厳密座標を2点返す */
 function endpointsOf(entity: CadEntity): Point2D[] {
   if (entity.type === "LINE") return [entity.start, entity.end];
-  if (entity.type === "CIRCLE") return [];
+  if (entity.type === "CIRCLE" || entity.type === "TEXT") return [];
   if (entity.type === "ARC") return [pointOnArc(entity.center, entity.radius, entity.startAngle), pointOnArc(entity.center, entity.radius, entity.endAngle)];
   return entity.vertices;
 }
@@ -52,8 +52,8 @@ function collectMidpointCandidates(
   for (const entity of entities) {
     if (!visibleLayerNames.has(entity.layer)) continue;
 
-    // CIRCLEには自然な中点がないため候補を出さない。ARCは弧の中央角度の厳密な1点のみ(テッセレーション頂点は使わない)
-    if (entity.type === "CIRCLE") continue;
+    // CIRCLE/TEXTには自然な中点がないため候補を出さない。ARCは弧の中央角度の厳密な1点のみ(テッセレーション頂点は使わない)
+    if (entity.type === "CIRCLE" || entity.type === "TEXT") continue;
     if (entity.type === "ARC") {
       const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
       const midpoint = pointOnArc(entity.center, entity.radius, entity.startAngle + span / 2);

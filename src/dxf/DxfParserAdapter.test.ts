@@ -191,17 +191,19 @@ describe("DxfParserAdapter", () => {
         "20",
         "5.0",
         "0",
-        "TEXT",
+        "ELLIPSE",
         "8",
         "0",
-        "1",
-        "hello",
         "10",
         "0.0",
         "20",
         "0.0",
-        "40",
+        "11",
         "5.0",
+        "21",
+        "0.0",
+        "40",
+        "0.5",
         "0",
         "POINT",
         "8",
@@ -218,7 +220,7 @@ describe("DxfParserAdapter", () => {
     expect(model.stats.totalEntityCount).toBe(4);
     expect(model.stats.supportedEntityCount).toBe(1);
     expect(model.stats.unsupportedEntityCount).toBe(3);
-    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, TEXT: 1 });
+    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, ELLIPSE: 1 });
   });
 
   it("excludes paper space entities from the model", () => {
@@ -507,6 +509,116 @@ describe("DxfParserAdapter - CIRCLE/ARC conversion", () => {
     if (entity.type === "ARC") {
       expect(entity.startAngle).toBeCloseTo(Math.PI / 2, 9);
       expect(entity.endAngle).toBeCloseTo(Math.PI, 9);
+    }
+  });
+});
+
+describe("DxfParserAdapter - TEXT/MTEXT conversion", () => {
+  it("converts a default-aligned TEXT entity using its start point", () => {
+    const dxf = buildDxf(
+      ["0", "TEXT", "8", "0", "1", "hello", "10", "5.0", "20", "10.0", "40", "2.5"].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("TEXT");
+    if (entity.type === "TEXT") {
+      expect(entity.position).toEqual({ x: 5, y: 10 });
+      expect(entity.text).toBe("hello");
+      expect(entity.height).toBe(2.5);
+      expect(entity.horizontalAlign).toBe("left");
+      expect(entity.verticalAlign).toBe("baseline");
+    }
+  });
+
+  it("uses the second alignment point for a center/middle-justified TEXT entity", () => {
+    const dxf = buildDxf(
+      [
+        "0",
+        "TEXT",
+        "8",
+        "0",
+        "1",
+        "centered",
+        "10",
+        "0.0",
+        "20",
+        "0.0",
+        "11",
+        "20.0",
+        "21",
+        "30.0",
+        "40",
+        "2.5",
+        "72",
+        "1",
+        "73",
+        "2",
+      ].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    const entity = model.entities[0];
+    expect(entity.type).toBe("TEXT");
+    if (entity.type === "TEXT") {
+      expect(entity.position).toEqual({ x: 20, y: 30 });
+      expect(entity.horizontalAlign).toBe("center");
+      expect(entity.verticalAlign).toBe("middle");
+    }
+  });
+
+  it("converts an MTEXT entity, stripping formatting codes and converting \\P to a newline", () => {
+    const dxf = buildDxf(
+      [
+        "0",
+        "MTEXT",
+        "8",
+        "0",
+        "10",
+        "0.0",
+        "20",
+        "0.0",
+        "40",
+        "3.0",
+        "71",
+        "5",
+        "1",
+        "\\fArial;1階平面図\\P縮尺1:100",
+      ].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("TEXT");
+    if (entity.type === "TEXT") {
+      expect(entity.text).toBe("1階平面図\n縮尺1:100");
+      expect(entity.horizontalAlign).toBe("center");
+      expect(entity.verticalAlign).toBe("middle");
+    }
+  });
+
+  it("scales TEXT height and rotates it through a scaled/rotated INSERT", () => {
+    const textInBlock = ["0", "TEXT", "8", "0", "1", "note", "10", "0.0", "20", "0.0", "40", "2.0", "50", "0"].join(
+      "\n",
+    );
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 0, y: 0 }, { rotation: 90, xScale: 2, yScale: 2 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, textInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("TEXT");
+    if (entity.type === "TEXT") {
+      expect(entity.height).toBe(4);
+      expect(entity.rotation).toBeCloseTo(Math.PI / 2, 9);
     }
   });
 });

@@ -239,3 +239,50 @@ describe("findEntityAtPoint - CIRCLE/ARC", () => {
     expect(result.map((e) => e.id)).toEqual(["circle-1"]);
   });
 });
+
+describe("findEntityAtPoint - TEXT", () => {
+  // 幅 = 2文字 * height10 * 0.65 = 13, 高さ = 1行 * height10 * 1.2 = 12
+  // horizontalAlign=left, verticalAlign=topなので、バウンディングボックスは x:[0,13], y:[-12,0]
+  const text: CadEntity = {
+    id: "text-1",
+    type: "TEXT",
+    layer: "A",
+    color: "#ffffff",
+    position: { x: 0, y: 0 },
+    text: "AB",
+    height: 10,
+    rotation: 0,
+    horizontalAlign: "left",
+    verticalAlign: "top",
+  };
+
+  const visible = new Set(["A"]);
+
+  it("hits anywhere inside the TEXT's bounding box, unlike CIRCLE's empty interior", () => {
+    const inside = findEntityAtPoint([text], visible, { x: 5, y: -5 }, 1);
+    expect(inside?.id).toBe("text-1");
+  });
+
+  it("does not hit a point far outside the TEXT's bounding box", () => {
+    const outside = findEntityAtPoint([text], visible, { x: 50, y: 50 }, 1);
+    expect(outside).toBeNull();
+  });
+
+  it("selects a TEXT fully inside a window box", () => {
+    const box = { min: { x: -2, y: -14 }, max: { x: 15, y: 2 } };
+    const result = findEntitiesInBox([text], visible, box, "window");
+    expect(result.map((e) => e.id)).toEqual(["text-1"]);
+  });
+
+  it("does not select a TEXT via window box when it pokes outside", () => {
+    const box = { min: { x: 5, y: -14 }, max: { x: 15, y: 2 } };
+    const result = findEntitiesInBox([text], visible, box, "window");
+    expect(result).toEqual([]);
+  });
+
+  it("selects a TEXT via crossing box when only partially overlapping", () => {
+    const box = { min: { x: 5, y: -14 }, max: { x: 15, y: 2 } };
+    const result = findEntitiesInBox([text], visible, box, "crossing");
+    expect(result.map((e) => e.id)).toEqual(["text-1"]);
+  });
+});

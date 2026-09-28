@@ -5,14 +5,46 @@ import type { ILwpolylineEntity } from "dxf-parser";
 import type { IPolylineEntity } from "dxf-parser";
 import type { ICircleEntity } from "dxf-parser";
 import type { IArcEntity } from "dxf-parser";
-import type { CadBounds, CadEntity, CadLayer, CadModel, Point2D } from "../types/cad";
+import type { ITextEntity } from "dxf-parser";
+import type { IMtextEntity } from "dxf-parser";
+import type { CadBounds, CadEntity, CadHorizontalAlign, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
 import type { Matrix2D } from "../utils/matrix2d";
 import { getEntityPoints } from "../cad-view/entityGeometry";
+import { stripMtextFormatting } from "./mtextFormatting";
 
 const DEFAULT_COLOR = "#ffffff";
+const DEFAULT_TEXT_HEIGHT = 2.5;
 // ブロックが自分自身(直接/間接)を参照する循環定義に対する安全装置。通常のDXFでは数段でネストが終わる。
 const MAX_INSERT_DEPTH = 12;
+
+function alignFromTextHalign(halign: number | undefined): CadHorizontalAlign {
+  if (halign === 2) return "right";
+  if (halign === 1 || halign === 3 || halign === 4 || halign === 5) return "center";
+  return "left";
+}
+
+function alignFromTextValign(valign: number | undefined): CadVerticalAlign {
+  if (valign === 1) return "bottom";
+  if (valign === 2) return "middle";
+  if (valign === 3) return "top";
+  return "baseline";
+}
+
+const MTEXT_ATTACHMENT_HORIZONTAL: CadHorizontalAlign[] = ["left", "center", "right"];
+const MTEXT_ATTACHMENT_VERTICAL: CadVerticalAlign[] = ["top", "middle", "bottom"];
+
+/** MTEXTのattachmentPoint(1〜9、左上から右下へ3x3)を水平/垂直の配置に変換する */
+function alignFromMtextAttachment(attachmentPoint: number | undefined): {
+  horizontalAlign: CadHorizontalAlign;
+  verticalAlign: CadVerticalAlign;
+} {
+  const index = Math.min(9, Math.max(1, attachmentPoint ?? 1)) - 1;
+  return {
+    horizontalAlign: MTEXT_ATTACHMENT_HORIZONTAL[index % 3],
+    verticalAlign: MTEXT_ATTACHMENT_VERTICAL[Math.floor(index / 3)],
+  };
+}
 
 export function parseDxfText(text: string): CadModel {
   const parser = new DxfParser();
@@ -266,6 +298,58 @@ function convertEntity(
       radius,
       startAngle: arc.startAngle + rotationOffset,
       endAngle: arc.endAngle + rotationOffset,
+    };
+  }
+
+  if (entity.type === "TEXT") {
+    const text = entity as ITextEntity;
+    if (!text.startPoint || !text.text) return null;
+
+    const scaleFactor = Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
+    const rotationOffset = Math.atan2(matrix.b, matrix.a);
+    // 第2整列点(11,21)は水平/垂直の整列指定(72/73)が既定(0)以外の場合のみ意味を持つ(DXF仕様)
+    const usesSecondPoint = (text.halign !== undefined && text.halign !== 0) || (text.valign !== undefined && text.valign !== 0);
+    const rawPosition = usesSecondPoint && text.endPoint ? text.endPoint : text.startPoint;
+    const height = (Number.isFinite(text.textHeight) && text.textHeight > 0 ? text.textHeight : DEFAULT_TEXT_HEIGHT) * scaleFactor;
+
+    return {
+      id: nextId(),
+      type: "TEXT",
+      layer,
+      color,
+      position: applyMatrix(toPoint2D(rawPosition), matrix),
+      text: stripMtextFormatting(text.text),
+      height,
+      rotation: ((text.rotation ?? 0) * Math.PI) / 180 + rotationOffset,
+      horizontalAlign: alignFromTextHalign(text.halign),
+      verticalAlign: alignFromTextValign(text.valign),
+    };
+  }
+
+  if (entity.type === "MTEXT") {
+    const mtext = entity as IMtextEntity;
+    if (!mtext.position || !mtext.text) return null;
+
+    const scaleFactor = Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
+    const rotationOffset = Math.atan2(matrix.b, matrix.a);
+    // rotation(50)が無い場合、directionVector(11)から回転角を求める(DXF仕様上どちらか一方が使われる)
+    const rotationDegrees =
+      mtext.rotation ??
+      (mtext.directionVector ? (Math.atan2(mtext.directionVector.y, mtext.directionVector.x) * 180) / Math.PI : 0);
+    const height = (Number.isFinite(mtext.height) && mtext.height > 0 ? mtext.height : DEFAULT_TEXT_HEIGHT) * scaleFactor;
+    const { horizontalAlign, verticalAlign } = alignFromMtextAttachment(mtext.attachmentPoint);
+
+    return {
+      id: nextId(),
+      type: "TEXT",
+      layer,
+      color,
+      position: applyMatrix(toPoint2D(mtext.position), matrix),
+      text: stripMtextFormatting(mtext.text),
+      height,
+      rotation: (rotationDegrees * Math.PI) / 180 + rotationOffset,
+      horizontalAlign,
+      verticalAlign,
     };
   }
 

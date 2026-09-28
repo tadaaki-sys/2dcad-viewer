@@ -53,7 +53,24 @@ export type CadArc = {
   endAngle: number;
 };
 
-export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc;
+export type CadHorizontalAlign = "left" | "center" | "right";
+export type CadVerticalAlign = "top" | "middle" | "bottom" | "baseline";
+
+/** rotationはラジアン、+X軸からCCW方向(DXFの角度系と同じ数学的な向き)。textは複数行の場合\nを含む */
+export type CadText = {
+  id: string;
+  type: "TEXT";
+  layer: string;
+  color: string;
+  position: Point2D;
+  text: string;
+  height: number;
+  rotation: number;
+  horizontalAlign: CadHorizontalAlign;
+  verticalAlign: CadVerticalAlign;
+};
+
+export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText;
 
 export type CadBounds = {
   min: Point2D;

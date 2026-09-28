@@ -1,5 +1,5 @@
 import { pointToSegmentDistance, segmentsIntersect } from "../../utils/geometry";
-import { getEntityPoints, getEntitySegments } from "../entityGeometry";
+import { distanceFromPointToText, getEntityPoints, getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 
 export type SelectionBox = {
@@ -9,8 +9,12 @@ export type SelectionBox = {
 
 export type BoxSelectionMode = "window" | "crossing";
 
-/** どのEntity種別でも、構成する線分(CIRCLE/ARCはテッセレーション済み)への最短距離で判定する */
+/**
+ * どのEntity種別でも、構成する線分(CIRCLE/ARCはテッセレーション済み)への最短距離で判定する。
+ * TEXTだけは中身が詰まった矩形として扱い、バウンディングボックスの内側なら距離0(クリックしやすさ優先)。
+ */
 function distanceFromEntity(entity: CadEntity, point: Point2D): number {
+  if (entity.type === "TEXT") return distanceFromPointToText(entity, point);
   let minDistance = Infinity;
   for (const [a, b] of getEntitySegments(entity)) {
     minDistance = Math.min(minDistance, pointToSegmentDistance(point, a, b));

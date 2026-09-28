@@ -1,9 +1,10 @@
-import type { CadEntity, Measurement, Point2D } from "../../types/cad";
+import type { CadEntity, CadText, Measurement, Point2D } from "../../types/cad";
 import { computeMeasurementDistances } from "../measurement/Measurement";
 import { formatMm } from "../../utils/format";
 import { normalizeArcSpan, pointOnArc } from "../../utils/geometry";
 import type { Camera } from "../camera/Camera";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
+import { TEXT_LINE_HEIGHT_FACTOR } from "../entityGeometry";
 
 const LINE_WIDTH_PX = 1;
 const HIGHLIGHT_LINE_WIDTH_PX = 2.5;
@@ -13,6 +14,9 @@ const CROSSING_BOX_COLOR = "#50c878";
 const MEASUREMENT_COLOR = "#ff8c00";
 const MEASUREMENT_MARKER_RADIUS_PX = 4;
 const MEASUREMENT_FONT = "11px sans-serif";
+
+// 画面上でこれより小さいフォントサイズになったTEXTは、視認できず描画コストだけかかるため省略する
+const MIN_TEXT_RENDER_PX = 3;
 
 // ズーム倍率に応じた円/弧の分割数(画面上で1segmentがおおよそこのpx幅に収まるようにする)
 const ARC_SEGMENT_TARGET_PX = 3;
@@ -63,7 +67,7 @@ function traceArcPath(
   }
 }
 
-function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: CadEntity): void {
+function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: Exclude<CadEntity, CadText>): void {
   ctx.beginPath();
 
   if (entity.type === "LINE") {
@@ -79,6 +83,37 @@ function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: 
   } else {
     tracePolylinePath(ctx, camera, entity.vertices, entity.closed);
   }
+}
+
+/** ワールド座標系(Y-up)の位置・回転をスクリーン座標系(Y-down)へ変換してTEXT/MTEXTを描画する */
+function drawTextEntity(ctx: CanvasRenderingContext2D, camera: Camera, entity: CadText, color: string): void {
+  const fontSizePx = entity.height * camera.scale;
+  if (!(fontSizePx >= MIN_TEXT_RENDER_PX)) return;
+
+  const screenPosition = camera.worldToScreen(entity.position);
+  const lines = entity.text.length > 0 ? entity.text.split("\n") : [""];
+  const lineHeightPx = fontSizePx * TEXT_LINE_HEIGHT_FACTOR;
+
+  ctx.save();
+  ctx.translate(screenPosition.x, screenPosition.y);
+  // worldToScreenはY軸を反転するため、ワールドでのCCW回転(entity.rotation)はスクリーン上では逆向きになる
+  ctx.rotate(-entity.rotation);
+  ctx.fillStyle = color;
+  ctx.font = `${fontSizePx}px sans-serif`;
+  ctx.textAlign = entity.horizontalAlign;
+
+  if (entity.verticalAlign === "baseline") {
+    ctx.textBaseline = "alphabetic";
+    lines.forEach((line, index) => ctx.fillText(line, 0, index * lineHeightPx));
+  } else {
+    ctx.textBaseline = "top";
+    const blockHeightPx = lineHeightPx * lines.length;
+    const startY =
+      entity.verticalAlign === "top" ? 0 : entity.verticalAlign === "middle" ? -blockHeightPx / 2 : -blockHeightPx;
+    lines.forEach((line, index) => ctx.fillText(line, 0, startY + index * lineHeightPx));
+  }
+
+  ctx.restore();
 }
 
 function drawDragSelectionBox(ctx: CanvasRenderingContext2D, box: DragSelectionBox): void {
@@ -187,6 +222,10 @@ export class CanvasRenderer implements Renderer {
         continue;
       }
 
+      if (entity.type === "TEXT") {
+        drawTextEntity(ctx, camera, entity, entity.color);
+        continue;
+      }
       ctx.strokeStyle = entity.color;
       traceEntityPath(ctx, camera, entity);
       ctx.stroke();
@@ -196,6 +235,10 @@ export class CanvasRenderer implements Renderer {
       ctx.strokeStyle = HIGHLIGHT_COLOR;
       ctx.lineWidth = HIGHLIGHT_LINE_WIDTH_PX;
       for (const entity of selectedEntities) {
+        if (entity.type === "TEXT") {
+          drawTextEntity(ctx, camera, entity, HIGHLIGHT_COLOR);
+          continue;
+        }
         traceEntityPath(ctx, camera, entity);
         ctx.stroke();
       }
