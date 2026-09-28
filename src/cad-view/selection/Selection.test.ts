@@ -286,3 +286,69 @@ describe("findEntityAtPoint - TEXT", () => {
     expect(result.map((e) => e.id)).toEqual(["text-1"]);
   });
 });
+
+describe("findEntityAtPoint - ELLIPSE", () => {
+  const ellipse: CadEntity = {
+    id: "ellipse-1",
+    type: "ELLIPSE",
+    layer: "A",
+    color: "#ffffff",
+    center: { x: 0, y: 0 },
+    majorRadius: 10,
+    minorRadius: 5,
+    rotation: 0,
+    startParam: 0,
+    endParam: Math.PI * 2,
+  };
+
+  const ellipseArc: CadEntity = {
+    id: "ellipse-arc-1",
+    type: "ELLIPSE",
+    layer: "A",
+    color: "#ffffff",
+    center: { x: 100, y: 0 },
+    majorRadius: 10,
+    minorRadius: 5,
+    rotation: 0,
+    startParam: 0,
+    endParam: Math.PI, // 上半分(param 0〜180度)
+  };
+
+  const visible = new Set(["A"]);
+
+  it("hits the rim of an ELLIPSE but not its empty interior", () => {
+    const onRim = findEntityAtPoint([ellipse], visible, { x: 0, y: 5.2 }, 1);
+    expect(onRim?.id).toBe("ellipse-1");
+
+    const atCenter = findEntityAtPoint([ellipse], visible, { x: 0, y: 0 }, 1);
+    expect(atCenter).toBeNull();
+  });
+
+  it("hits a point on the elliptical arc's swept range", () => {
+    const hit = findEntityAtPoint([ellipseArc], visible, { x: 100, y: 5.2 }, 1);
+    expect(hit?.id).toBe("ellipse-arc-1");
+  });
+
+  it("does not hit the ellipse's rim outside the arc's swept range", () => {
+    const miss = findEntityAtPoint([ellipseArc], visible, { x: 100, y: -5 }, 1);
+    expect(miss).toBeNull();
+  });
+
+  it("selects an ELLIPSE fully inside a window box", () => {
+    const box = { min: { x: -15, y: -10 }, max: { x: 15, y: 10 } };
+    const result = findEntitiesInBox([ellipse], visible, box, "window");
+    expect(result.map((e) => e.id)).toEqual(["ellipse-1"]);
+  });
+
+  it("does not select an ELLIPSE via window box when it pokes outside", () => {
+    const box = { min: { x: -5, y: -10 }, max: { x: 15, y: 10 } };
+    const result = findEntitiesInBox([ellipse], visible, box, "window");
+    expect(result).toEqual([]);
+  });
+
+  it("selects an ELLIPSE via crossing box when only partially overlapping", () => {
+    const box = { min: { x: -5, y: -10 }, max: { x: 15, y: 10 } };
+    const result = findEntitiesInBox([ellipse], visible, box, "crossing");
+    expect(result.map((e) => e.id)).toEqual(["ellipse-1"]);
+  });
+});

@@ -1,6 +1,7 @@
 import type { CadEntity } from "../types/cad";
 import { polylineLength, distance, normalizeArcSpan } from "../utils/geometry";
 import { formatMm } from "../utils/format";
+import { getEntityPoints } from "../cad-view/entityGeometry";
 import "./PropertyPanel.css";
 
 type PropertyPanelProps = {
@@ -18,6 +19,8 @@ function entityLength(entity: CadEntity): number {
   if (entity.type === "CIRCLE") return 2 * Math.PI * entity.radius;
   if (entity.type === "ARC") return entity.radius * normalizeArcSpan(entity.startAngle, entity.endAngle);
   if (entity.type === "TEXT") return 0;
+  // 楕円(弧)の正確な弧長は楕円積分が必要なため、既存のテッセレーション点を使った近似で済ませる
+  if (entity.type === "ELLIPSE") return polylineLength(getEntityPoints(entity), false);
   return polylineLength(entity.vertices, entity.closed);
 }
 
@@ -51,6 +54,12 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
       { label: "Position X/Y", value: `${formatMm(entity.position.x)}, ${formatMm(entity.position.y)}` },
       { label: "Text Height", value: formatMm(entity.height) },
       { label: "Content", value: entity.text.replace(/\n/g, " / ") },
+    );
+  } else if (entity.type === "ELLIPSE") {
+    rows.push(
+      { label: "Center X/Y", value: `${formatMm(entity.center.x)}, ${formatMm(entity.center.y)}` },
+      { label: "Major/Minor Radius", value: `${formatMm(entity.majorRadius)}, ${formatMm(entity.minorRadius)}` },
+      { label: "Length", value: formatMm(entityLength(entity)) },
     );
   } else {
     rows.push(

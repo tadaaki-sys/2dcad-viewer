@@ -1,4 +1,4 @@
-import { distance, intersectSegments, normalizeArcSpan, pointOnArc } from "../../utils/geometry";
+import { distance, intersectSegments, normalizeArcSpan, pointOnArc, pointOnEllipse } from "../../utils/geometry";
 import { getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 
@@ -16,11 +16,26 @@ type CandidateGenerator = (
   toleranceWorld: number,
 ) => SnapCandidate[];
 
-/** CIRCLE/TEXTには自然な「端点」概念がないため候補を出さない。ARCは始点/終点の厳密座標を2点返す */
+// 全周(または全周とみなせる誤差)のCIRCLE/ELLIPSEには自然な端点/中点がないため候補から除外する際の許容誤差
+const FULL_SWEEP_EPSILON = 1e-6;
+
+function isFullSweep(span: number): boolean {
+  return span >= Math.PI * 2 - FULL_SWEEP_EPSILON;
+}
+
+/** CIRCLE/TEXT、および全周のELLIPSEには自然な「端点」概念がないため候補を出さない。ARC/部分ELLIPSEは始点/終点の厳密座標を2点返す */
 function endpointsOf(entity: CadEntity): Point2D[] {
   if (entity.type === "LINE") return [entity.start, entity.end];
   if (entity.type === "CIRCLE" || entity.type === "TEXT") return [];
   if (entity.type === "ARC") return [pointOnArc(entity.center, entity.radius, entity.startAngle), pointOnArc(entity.center, entity.radius, entity.endAngle)];
+  if (entity.type === "ELLIPSE") {
+    const span = normalizeArcSpan(entity.startParam, entity.endParam);
+    if (isFullSweep(span)) return [];
+    return [
+      pointOnEllipse(entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.startParam),
+      pointOnEllipse(entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.endParam),
+    ];
+  }
   return entity.vertices;
 }
 
@@ -52,11 +67,20 @@ function collectMidpointCandidates(
   for (const entity of entities) {
     if (!visibleLayerNames.has(entity.layer)) continue;
 
-    // CIRCLE/TEXTには自然な中点がないため候補を出さない。ARCは弧の中央角度の厳密な1点のみ(テッセレーション頂点は使わない)
+    // CIRCLE/TEXT、および全周のELLIPSEには自然な中点がないため候補を出さない。ARC/部分ELLIPSEは弧の中央角度の厳密な1点のみ(テッセレーション頂点は使わない)
     if (entity.type === "CIRCLE" || entity.type === "TEXT") continue;
     if (entity.type === "ARC") {
       const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
       const midpoint = pointOnArc(entity.center, entity.radius, entity.startAngle + span / 2);
+      if (distance(midpoint, worldPoint) <= toleranceWorld) {
+        results.push({ point: midpoint, type: "midpoint" });
+      }
+      continue;
+    }
+    if (entity.type === "ELLIPSE") {
+      const span = normalizeArcSpan(entity.startParam, entity.endParam);
+      if (isFullSweep(span)) continue;
+      const midpoint = pointOnEllipse(entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.startParam + span / 2);
       if (distance(midpoint, worldPoint) <= toleranceWorld) {
         results.push({ point: midpoint, type: "midpoint" });
       }

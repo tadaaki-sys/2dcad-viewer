@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDxfText } from "./DxfParserAdapter";
+import { normalizeArcSpan } from "../utils/geometry";
 
 function buildDxf(entitiesSection: string, tablesSection = ""): string {
   return [
@@ -191,19 +192,17 @@ describe("DxfParserAdapter", () => {
         "20",
         "5.0",
         "0",
-        "ELLIPSE",
+        "SPLINE",
         "8",
         "0",
         "10",
         "0.0",
         "20",
         "0.0",
-        "11",
+        "10",
         "5.0",
-        "21",
-        "0.0",
-        "40",
-        "0.5",
+        "20",
+        "5.0",
         "0",
         "POINT",
         "8",
@@ -220,7 +219,7 @@ describe("DxfParserAdapter", () => {
     expect(model.stats.totalEntityCount).toBe(4);
     expect(model.stats.supportedEntityCount).toBe(1);
     expect(model.stats.unsupportedEntityCount).toBe(3);
-    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, ELLIPSE: 1 });
+    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, SPLINE: 1 });
   });
 
   it("excludes paper space entities from the model", () => {
@@ -618,6 +617,100 @@ describe("DxfParserAdapter - TEXT/MTEXT conversion", () => {
     expect(entity.type).toBe("TEXT");
     if (entity.type === "TEXT") {
       expect(entity.height).toBe(4);
+      expect(entity.rotation).toBeCloseTo(Math.PI / 2, 9);
+    }
+  });
+});
+
+describe("DxfParserAdapter - ELLIPSE conversion", () => {
+  it("converts a full ELLIPSE into a CadEllipse", () => {
+    const dxf = buildDxf(
+      ["0", "ELLIPSE", "8", "0", "10", "10.0", "20", "20.0", "11", "8.0", "21", "0.0", "40", "0.5"].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("ELLIPSE");
+    if (entity.type === "ELLIPSE") {
+      expect(entity.center).toEqual({ x: 10, y: 20 });
+      expect(entity.majorRadius).toBe(8);
+      expect(entity.minorRadius).toBe(4);
+      expect(entity.rotation).toBeCloseTo(0, 9);
+      expect(normalizeArcSpan(entity.startParam, entity.endParam)).toBeCloseTo(Math.PI * 2, 9);
+    }
+  });
+
+  it("preserves startParam/endParam for an elliptical arc", () => {
+    const dxf = buildDxf(
+      [
+        "0",
+        "ELLIPSE",
+        "8",
+        "0",
+        "10",
+        "0.0",
+        "20",
+        "0.0",
+        "11",
+        "8.0",
+        "21",
+        "0.0",
+        "40",
+        "0.5",
+        "41",
+        "0",
+        "42",
+        String(Math.PI / 2),
+      ].join("\n"),
+    );
+
+    const model = parseDxfText(dxf);
+
+    const entity = model.entities[0];
+    expect(entity.type).toBe("ELLIPSE");
+    if (entity.type === "ELLIPSE") {
+      expect(entity.startParam).toBeCloseTo(0, 9);
+      expect(entity.endParam).toBeCloseTo(Math.PI / 2, 9);
+    }
+  });
+
+  it("scales an ELLIPSE's radii and translates its center through a scaled/positioned INSERT", () => {
+    const ellipseInBlock = ["0", "ELLIPSE", "8", "0", "10", "0.0", "20", "0.0", "11", "8.0", "21", "0.0", "40", "0.5"].join(
+      "\n",
+    );
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 100, y: 100 }, { xScale: 2, yScale: 2 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, ellipseInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("ELLIPSE");
+    if (entity.type === "ELLIPSE") {
+      expect(entity.center).toEqual({ x: 100, y: 100 });
+      expect(entity.majorRadius).toBe(16);
+      expect(entity.minorRadius).toBe(8);
+    }
+  });
+
+  it("rotates an ELLIPSE's major axis through a rotated INSERT", () => {
+    const ellipseInBlock = ["0", "ELLIPSE", "8", "0", "10", "0.0", "20", "0.0", "11", "8.0", "21", "0.0", "40", "0.5"].join(
+      "\n",
+    );
+    const dxf = buildDxfWithBlocks(
+      insertRef("SYMBOL", { x: 0, y: 0 }, { rotation: 90 }),
+      blockDef("SYMBOL", { x: 0, y: 0 }, ellipseInBlock),
+    );
+
+    const model = parseDxfText(dxf);
+
+    const entity = model.entities[0];
+    expect(entity.type).toBe("ELLIPSE");
+    if (entity.type === "ELLIPSE") {
       expect(entity.rotation).toBeCloseTo(Math.PI / 2, 9);
     }
   });

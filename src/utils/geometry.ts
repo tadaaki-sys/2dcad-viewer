@@ -63,6 +63,24 @@ export function pointOnArc(center: Point2D, radius: number, angle: number): Poin
   return { x: center.x + radius * Math.cos(angle), y: center.y + radius * Math.sin(angle) };
 }
 
+/** 楕円上でパラメータ角paramに対応する点。rotationはメジャー軸の向き(+X軸からCCW) */
+export function pointOnEllipse(
+  center: Point2D,
+  majorRadius: number,
+  minorRadius: number,
+  rotation: number,
+  param: number,
+): Point2D {
+  const localX = majorRadius * Math.cos(param);
+  const localY = minorRadius * Math.sin(param);
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  return {
+    x: center.x + localX * cos - localY * sin,
+    y: center.y + localX * sin + localY * cos,
+  };
+}
+
 export function polylineLength(vertices: Point2D[], closed: boolean): number {
   let total = 0;
   for (let i = 0; i < vertices.length - 1; i++) {

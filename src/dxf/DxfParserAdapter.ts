@@ -7,6 +7,7 @@ import type { ICircleEntity } from "dxf-parser";
 import type { IArcEntity } from "dxf-parser";
 import type { ITextEntity } from "dxf-parser";
 import type { IMtextEntity } from "dxf-parser";
+import type { IEllipseEntity } from "dxf-parser";
 import type { CadBounds, CadEntity, CadHorizontalAlign, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
 import type { Matrix2D } from "../utils/matrix2d";
@@ -234,6 +235,11 @@ function toPoint2D(point: { x: number; y: number }): Point2D {
   return { x: point.x, y: point.y };
 }
 
+/** ベクトル(向きと長さのみ)にmatrixの線形部分だけを適用する(平行移動は無視) */
+function transformVector(v: Point2D, m: Matrix2D): Point2D {
+  return { x: m.a * v.x + m.c * v.y, y: m.b * v.x + m.d * v.y };
+}
+
 function convertEntity(
   entity: IEntity,
   layerColorByName: Map<string, string>,
@@ -350,6 +356,39 @@ function convertEntity(
       rotation: (rotationDegrees * Math.PI) / 180 + rotationOffset,
       horizontalAlign,
       verticalAlign,
+    };
+  }
+
+  if (entity.type === "ELLIPSE") {
+    const ellipse = entity as IEllipseEntity;
+    if (!ellipse.center || !ellipse.majorAxisEndPoint || !Number.isFinite(ellipse.axisRatio)) return null;
+
+    const center = applyMatrix(toPoint2D(ellipse.center), matrix);
+    // majorAxisEndPoint(11,21)は中心からの相対ベクトルなので、平行移動を含まない線形変換のみを適用する
+    const majorVector = transformVector(toPoint2D(ellipse.majorAxisEndPoint), matrix);
+    const majorRadius = Math.hypot(majorVector.x, majorVector.y);
+    if (!(majorRadius > 0)) return null;
+
+    // マイナー軸ベクトル(メジャー軸を90度回転してaxisRatio倍)も同様に線形変換する。
+    // 非一様スケールの場合、変換後は厳密には直交しなくなるが(せん断)、実用上は近似として許容する。
+    const localMinorVector: Point2D = {
+      x: -ellipse.majorAxisEndPoint.y * ellipse.axisRatio,
+      y: ellipse.majorAxisEndPoint.x * ellipse.axisRatio,
+    };
+    const minorVector = transformVector(localMinorVector, matrix);
+    const minorRadius = Math.hypot(minorVector.x, minorVector.y);
+
+    return {
+      id: nextId(),
+      type: "ELLIPSE",
+      layer,
+      color,
+      center,
+      majorRadius,
+      minorRadius,
+      rotation: Math.atan2(majorVector.y, majorVector.x),
+      startParam: ellipse.startAngle ?? 0,
+      endParam: ellipse.endAngle ?? Math.PI * 2,
     };
   }
 

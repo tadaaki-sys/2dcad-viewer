@@ -70,7 +70,24 @@ export type CadText = {
   verticalAlign: CadVerticalAlign;
 };
 
-export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText;
+/**
+ * rotationはメジャー軸の向き(ラジアン、+X軸からCCW方向)。
+ * startParam/endParamはDXFの楕円パラメータ角(ラジアン)で、非全周の場合は楕円弧になる。
+ */
+export type CadEllipse = {
+  id: string;
+  type: "ELLIPSE";
+  layer: string;
+  color: string;
+  center: Point2D;
+  majorRadius: number;
+  minorRadius: number;
+  rotation: number;
+  startParam: number;
+  endParam: number;
+};
+
+export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse;
 
 export type CadBounds = {
   min: Point2D;

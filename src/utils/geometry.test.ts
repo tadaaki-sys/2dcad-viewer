@@ -4,6 +4,7 @@ import {
   intersectSegments,
   normalizeArcSpan,
   pointOnArc,
+  pointOnEllipse,
   pointToSegmentDistance,
   polylineLength,
   segmentsIntersect,
@@ -100,6 +101,24 @@ describe("pointOnArc", () => {
     const p = pointOnArc({ x: 0, y: 0 }, 2, Math.PI / 2);
     expect(p.x).toBeCloseTo(0, 9);
     expect(p.y).toBeCloseTo(2, 9);
+  });
+});
+
+describe("pointOnEllipse", () => {
+  it("computes points at param 0 and PI/2 for an axis-aligned ellipse", () => {
+    const p0 = pointOnEllipse({ x: 0, y: 0 }, 10, 4, 0, 0);
+    expect(p0.x).toBeCloseTo(10, 9);
+    expect(p0.y).toBeCloseTo(0, 9);
+
+    const pQuarter = pointOnEllipse({ x: 0, y: 0 }, 10, 4, 0, Math.PI / 2);
+    expect(pQuarter.x).toBeCloseTo(0, 9);
+    expect(pQuarter.y).toBeCloseTo(4, 9);
+  });
+
+  it("rotates the ellipse's major axis by the given rotation", () => {
+    const p = pointOnEllipse({ x: 5, y: 5 }, 10, 4, Math.PI / 2, 0);
+    expect(p.x).toBeCloseTo(5, 9);
+    expect(p.y).toBeCloseTo(15, 9);
   });
 });
 

@@ -1,4 +1,4 @@
-import { normalizeArcSpan, pointOnArc } from "../utils/geometry";
+import { normalizeArcSpan, pointOnArc, pointOnEllipse } from "../utils/geometry";
 import type { CadEntity, CadText, Point2D } from "../types/cad";
 
 // 選択のヒットテストやWindow/Crossing判定用の固定分割数(描画時の解像度とは別、ズームに依存しない)
@@ -68,9 +68,25 @@ function tessellateArc(center: Point2D, radius: number, startAngle: number, span
   return points;
 }
 
+function tessellateEllipse(
+  center: Point2D,
+  majorRadius: number,
+  minorRadius: number,
+  rotation: number,
+  startParam: number,
+  span: number,
+): Point2D[] {
+  const segmentCount = Math.max(2, Math.round((span / (Math.PI * 2)) * FIXED_ARC_SEGMENTS_PER_FULL_CIRCLE));
+  const points: Point2D[] = [];
+  for (let i = 0; i <= segmentCount; i++) {
+    points.push(pointOnEllipse(center, majorRadius, minorRadius, rotation, startParam + (span * i) / segmentCount));
+  }
+  return points;
+}
+
 /**
- * Entityを構成する頂点(または円/弧を近似した多角形の頂点)の一覧を返す。
- * CIRCLEは1周分、ARCはstartAngle〜endAngleのCCW区間をテッセレーションする。
+ * Entityを構成する頂点(または円/弧/楕円を近似した多角形の頂点)の一覧を返す。
+ * CIRCLE/ELLIPSE(全周)は1周分、ARC/ELLIPSE(一部)はstart〜endのCCW区間をテッセレーションする。
  */
 export function getEntityPoints(entity: CadEntity): Point2D[] {
   if (entity.type === "LINE") return [entity.start, entity.end];
@@ -78,6 +94,10 @@ export function getEntityPoints(entity: CadEntity): Point2D[] {
   if (entity.type === "ARC") {
     const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
     return tessellateArc(entity.center, entity.radius, entity.startAngle, span);
+  }
+  if (entity.type === "ELLIPSE") {
+    const span = normalizeArcSpan(entity.startParam, entity.endParam);
+    return tessellateEllipse(entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.startParam, span);
   }
   if (entity.type === "TEXT") return getTextBoundingBoxCorners(entity);
   return entity.vertices;

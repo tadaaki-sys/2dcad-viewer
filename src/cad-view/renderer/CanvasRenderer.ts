@@ -1,7 +1,7 @@
 import type { CadEntity, CadText, Measurement, Point2D } from "../../types/cad";
 import { computeMeasurementDistances } from "../measurement/Measurement";
 import { formatMm } from "../../utils/format";
-import { normalizeArcSpan, pointOnArc } from "../../utils/geometry";
+import { normalizeArcSpan, pointOnArc, pointOnEllipse } from "../../utils/geometry";
 import type { Camera } from "../camera/Camera";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 import { TEXT_LINE_HEIGHT_FACTOR } from "../entityGeometry";
@@ -67,6 +67,28 @@ function traceArcPath(
   }
 }
 
+function traceEllipsePath(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  center: Point2D,
+  majorRadius: number,
+  minorRadius: number,
+  rotation: number,
+  startParam: number,
+  span: number,
+): void {
+  const segmentCount = computeAdaptiveSegmentCount(Math.max(majorRadius, minorRadius), span, camera);
+  for (let i = 0; i <= segmentCount; i++) {
+    const worldPoint = pointOnEllipse(center, majorRadius, minorRadius, rotation, startParam + (span * i) / segmentCount);
+    const screenPoint = camera.worldToScreen(worldPoint);
+    if (i === 0) {
+      ctx.moveTo(screenPoint.x, screenPoint.y);
+    } else {
+      ctx.lineTo(screenPoint.x, screenPoint.y);
+    }
+  }
+}
+
 function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: Exclude<CadEntity, CadText>): void {
   ctx.beginPath();
 
@@ -80,6 +102,9 @@ function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: 
   } else if (entity.type === "ARC") {
     const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
     traceArcPath(ctx, camera, entity.center, entity.radius, entity.startAngle, span);
+  } else if (entity.type === "ELLIPSE") {
+    const span = normalizeArcSpan(entity.startParam, entity.endParam);
+    traceEllipsePath(ctx, camera, entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.startParam, span);
   } else {
     tracePolylinePath(ctx, camera, entity.vertices, entity.closed);
   }
