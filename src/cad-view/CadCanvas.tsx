@@ -287,9 +287,40 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
     let isPanning = false;
     let lastPanPoint: Point2D | null = null;
+    let isSpaceHeld = false;
 
     let leftDragStartClient: Point2D | null = null;
     let isBoxDragging = false;
+
+    // Space押下中は掴んで移動できることが分かるようカーソルを手のひらアイコンに変える(中ボタンドラッグが分かりにくいための代替操作)
+    function updatePanCursor() {
+      canvas!.style.cursor = isPanning ? "grabbing" : isSpaceHeld ? "grab" : "";
+    }
+
+    function isTypingTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.code !== "Space" || isSpaceHeld || isTypingTarget(event.target)) return;
+      isSpaceHeld = true;
+      event.preventDefault();
+      updatePanCursor();
+    }
+
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.code !== "Space") return;
+      isSpaceHeld = false;
+      updatePanCursor();
+    }
+
+    function handleWindowBlur() {
+      isSpaceHeld = false;
+      isPanning = false;
+      lastPanPoint = null;
+      updatePanCursor();
+    }
 
     function computeWorldPointWithSnap(clientX: number, clientY: number): Point2D {
       const screenPoint = getCanvasRelativePoint(canvas!, clientX, clientY);
@@ -409,10 +440,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function handleMouseDown(event: MouseEvent) {
-      if (event.button === MIDDLE_MOUSE_BUTTON) {
+      if (event.button === MIDDLE_MOUSE_BUTTON || (event.button === LEFT_MOUSE_BUTTON && isSpaceHeld)) {
         event.preventDefault();
         isPanning = true;
         lastPanPoint = { x: event.clientX, y: event.clientY };
+        updatePanCursor();
         return;
       }
       if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.measurementModeEnabled) {
@@ -461,9 +493,10 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function handleWindowMouseUp(event: MouseEvent) {
-      if (event.button === MIDDLE_MOUSE_BUTTON) {
+      if (event.button === MIDDLE_MOUSE_BUTTON || (event.button === LEFT_MOUSE_BUTTON && isPanning)) {
         isPanning = false;
         lastPanPoint = null;
+        updatePanCursor();
         return;
       }
       if (event.button === LEFT_MOUSE_BUTTON && leftDragStartClient) {
@@ -496,6 +529,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     canvas.addEventListener("mouseleave", handleMouseLeave);
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseup", handleWindowMouseUp);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
 
     return () => {
       canvas.removeEventListener("wheel", handleWheel);
@@ -504,6 +540,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       canvas.removeEventListener("mouseleave", handleMouseLeave);
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
     };
   }, []);
 

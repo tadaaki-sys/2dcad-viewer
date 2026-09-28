@@ -53,6 +53,7 @@ export function StatusBar({ fileInfo, cursorWorld, stats }: StatusBarProps) {
           </div>
         )}
       </div>
+      <span className="status-bar__hint">Space+ドラッグ or ホイールクリックで移動</span>
       <span className="status-bar__coords">
         {cursorWorld ? `X: ${formatMm(cursorWorld.x)}  Y: ${formatMm(cursorWorld.y)}` : "X: -  Y: -"}
       </span>
