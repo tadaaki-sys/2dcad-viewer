@@ -100,6 +100,7 @@ export function getEntityPoints(entity: CadEntity): Point2D[] {
     return tessellateEllipse(entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.startParam, span);
   }
   if (entity.type === "TEXT") return getTextBoundingBoxCorners(entity);
+  if (entity.type === "SPLINE") return entity.points;
   return entity.vertices;
 }
 
@@ -110,8 +111,9 @@ export function getEntitySegments(entity: CadEntity): Array<[Point2D, Point2D]> 
   for (let i = 0; i < points.length - 1; i++) {
     segments.push([points[i], points[i + 1]]);
   }
-  const isClosedPolyline = (entity.type === "LWPOLYLINE" || entity.type === "POLYLINE") && entity.closed;
-  if ((isClosedPolyline || entity.type === "TEXT") && points.length > 2) {
+  const hasClosedFlag =
+    (entity.type === "LWPOLYLINE" || entity.type === "POLYLINE" || entity.type === "SPLINE") && entity.closed;
+  if ((hasClosedFlag || entity.type === "TEXT") && points.length > 2) {
     segments.push([points[points.length - 1], points[0]]);
   }
   return segments;

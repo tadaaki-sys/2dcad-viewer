@@ -8,11 +8,13 @@ import type { IArcEntity } from "dxf-parser";
 import type { ITextEntity } from "dxf-parser";
 import type { IMtextEntity } from "dxf-parser";
 import type { IEllipseEntity } from "dxf-parser";
+import type { ISplineEntity } from "dxf-parser";
 import type { CadBounds, CadEntity, CadHorizontalAlign, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
 import type { Matrix2D } from "../utils/matrix2d";
 import { getEntityPoints } from "../cad-view/entityGeometry";
 import { stripMtextFormatting } from "./mtextFormatting";
+import { tessellateSpline } from "../utils/spline";
 
 const DEFAULT_COLOR = "#ffffff";
 const DEFAULT_TEXT_HEIGHT = 2.5;
@@ -390,6 +392,21 @@ function convertEntity(
       startParam: ellipse.startAngle ?? 0,
       endParam: ellipse.endAngle ?? Math.PI * 2,
     };
+  }
+
+  if (entity.type === "SPLINE") {
+    const spline = entity as ISplineEntity;
+    // 非有理B-スプラインはアフィン変換に対して不変なので、制御点/フィットポイントを先に変換してから評価してよい
+    const transformAll = (points: Array<{ x: number; y: number }> | undefined) =>
+      points?.map((point) => applyMatrix(toPoint2D(point), matrix));
+    const points = tessellateSpline({
+      controlPoints: transformAll(spline.controlPoints),
+      fitPoints: transformAll(spline.fitPoints),
+      knots: spline.knotValues,
+      degree: spline.degreeOfSplineCurve,
+    });
+    if (!points) return null;
+    return { id: nextId(), type: "SPLINE", layer, color, points, closed: Boolean(spline.closed) };
   }
 
   return null;

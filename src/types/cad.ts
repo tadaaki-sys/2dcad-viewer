@@ -87,7 +87,17 @@ export type CadEllipse = {
   endParam: number;
 };
 
-export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse;
+/** pointsはスプライン曲線を折れ線に近似した点列(変換行列適用済みのワールド座標) */
+export type CadSpline = {
+  id: string;
+  type: "SPLINE";
+  layer: string;
+  color: string;
+  points: Point2D[];
+  closed: boolean;
+};
+
+export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline;
 
 export type CadBounds = {
   min: Point2D;

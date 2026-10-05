@@ -21,6 +21,7 @@ function entityLength(entity: CadEntity): number {
   if (entity.type === "TEXT") return 0;
   // 楕円(弧)の正確な弧長は楕円積分が必要なため、既存のテッセレーション点を使った近似で済ませる
   if (entity.type === "ELLIPSE") return polylineLength(getEntityPoints(entity), false);
+  if (entity.type === "SPLINE") return polylineLength(entity.points, entity.closed);
   return polylineLength(entity.vertices, entity.closed);
 }
 
@@ -54,6 +55,13 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
       { label: "Position X/Y", value: `${formatMm(entity.position.x)}, ${formatMm(entity.position.y)}` },
       { label: "Text Height", value: formatMm(entity.height) },
       { label: "Content", value: entity.text.replace(/\n/g, " / ") },
+    );
+  } else if (entity.type === "SPLINE") {
+    // 曲線を折れ線に近似した長さなので、実際の弧長とはわずかに異なる
+    rows.push(
+      { label: "Start X/Y", value: `${formatMm(entity.points[0].x)}, ${formatMm(entity.points[0].y)}` },
+      { label: "End X/Y", value: `${formatMm(entity.points[entity.points.length - 1].x)}, ${formatMm(entity.points[entity.points.length - 1].y)}` },
+      { label: "Length", value: formatMm(entityLength(entity)) },
     );
   } else if (entity.type === "ELLIPSE") {
     rows.push(

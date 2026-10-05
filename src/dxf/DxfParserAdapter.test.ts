@@ -192,17 +192,13 @@ describe("DxfParserAdapter", () => {
         "20",
         "5.0",
         "0",
-        "SPLINE",
+        "SOLID",
         "8",
         "0",
         "10",
         "0.0",
         "20",
         "0.0",
-        "10",
-        "5.0",
-        "20",
-        "5.0",
         "0",
         "POINT",
         "8",
@@ -219,7 +215,7 @@ describe("DxfParserAdapter", () => {
     expect(model.stats.totalEntityCount).toBe(4);
     expect(model.stats.supportedEntityCount).toBe(1);
     expect(model.stats.unsupportedEntityCount).toBe(3);
-    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, SPLINE: 1 });
+    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, SOLID: 1 });
   });
 
   it("excludes paper space entities from the model", () => {
@@ -712,6 +708,74 @@ describe("DxfParserAdapter - ELLIPSE conversion", () => {
     expect(entity.type).toBe("ELLIPSE");
     if (entity.type === "ELLIPSE") {
       expect(entity.rotation).toBeCloseTo(Math.PI / 2, 9);
+    }
+  });
+});
+
+describe("DxfParserAdapter - SPLINE conversion", () => {
+  // 2次ベジェ(制御点3、クランプノット)。t=0.5の点は (10, 10)
+  function quadraticSplineLines(flags = 8): string[] {
+    return [
+      "0", "SPLINE", "8", "0",
+      "70", String(flags), "71", "2", "72", "6", "73", "3",
+      "40", "0", "40", "0", "40", "0", "40", "1", "40", "1", "40", "1",
+      "10", "0.0", "20", "0.0",
+      "10", "10.0", "20", "20.0",
+      "10", "20.0", "20", "0.0",
+    ];
+  }
+
+  it("converts a SPLINE into a smooth polyline through its start, apex region, and end", () => {
+    const model = parseDxfText(buildDxf(quadraticSplineLines().join("\n")));
+
+    expect(model.entities).toHaveLength(1);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("SPLINE");
+    if (entity.type === "SPLINE") {
+      expect(entity.points.length).toBeGreaterThan(3);
+      expect(entity.points[0]).toEqual({ x: 0, y: 0 });
+      const last = entity.points[entity.points.length - 1];
+      expect(last.x).toBeCloseTo(20, 9);
+      expect(last.y).toBeCloseTo(0, 9);
+      expect(entity.points.some((p) => Math.abs(p.x - 10) < 1e-9 && Math.abs(p.y - 10) < 1e-9)).toBe(true);
+      expect(entity.closed).toBe(false);
+    }
+    expect(model.stats.unsupportedEntityCount).toBe(0);
+  });
+
+  it("marks a SPLINE with the closed flag as closed", () => {
+    const model = parseDxfText(buildDxf(quadraticSplineLines(1 | 8).join("\n")));
+    const entity = model.entities[0];
+    expect(entity.type === "SPLINE" && entity.closed).toBe(true);
+  });
+
+  it("falls back to fit points when a SPLINE has no control points", () => {
+    const lines = ["0", "SPLINE", "8", "0", "70", "0", "74", "3", "11", "0.0", "21", "0.0", "11", "5.0", "21", "5.0", "11", "9.0", "21", "0.0"];
+    const model = parseDxfText(buildDxf(lines.join("\n")));
+    const entity = model.entities[0];
+    expect(entity.type).toBe("SPLINE");
+    if (entity.type === "SPLINE") {
+      expect(entity.points).toEqual([
+        { x: 0, y: 0 },
+        { x: 5, y: 5 },
+        { x: 9, y: 0 },
+      ]);
+    }
+  });
+
+  it("transforms a SPLINE through a scaled/positioned INSERT", () => {
+    const dxf = buildDxfWithBlocks(
+      insertRef("CURVE", { x: 100, y: 100 }, { xScale: 2, yScale: 2 }),
+      blockDef("CURVE", { x: 0, y: 0 }, quadraticSplineLines().join("\n")),
+    );
+    const model = parseDxfText(dxf);
+    const entity = model.entities[0];
+    expect(entity.type).toBe("SPLINE");
+    if (entity.type === "SPLINE") {
+      expect(entity.points[0]).toEqual({ x: 100, y: 100 });
+      const last = entity.points[entity.points.length - 1];
+      expect(last.x).toBeCloseTo(140, 9);
+      expect(last.y).toBeCloseTo(100, 9);
     }
   });
 });

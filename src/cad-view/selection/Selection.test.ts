@@ -287,6 +287,34 @@ describe("findEntityAtPoint - TEXT", () => {
   });
 });
 
+describe("findEntityAtPoint - SPLINE", () => {
+  const spline: CadEntity = {
+    id: "spline-1",
+    type: "SPLINE",
+    layer: "A",
+    color: "#ffffff",
+    points: [
+      { x: 0, y: 0 },
+      { x: 5, y: 5 },
+      { x: 10, y: 0 },
+    ],
+    closed: false,
+  };
+  const visible = new Set(["A"]);
+
+  it("hits near the curve but not far from it", () => {
+    expect(findEntityAtPoint([spline], visible, { x: 2.5, y: 2.6 }, 1)?.id).toBe("spline-1");
+    expect(findEntityAtPoint([spline], visible, { x: 5, y: -5 }, 1)).toBeNull();
+  });
+
+  it("does not add a closing segment when the SPLINE is open, but does when closed", () => {
+    // 始点(0,0)と終点(10,0)の中間(5,0)は、開いたスプラインでは曲線から離れている
+    expect(findEntityAtPoint([spline], visible, { x: 5, y: 0 }, 0.5)).toBeNull();
+    const closed: CadEntity = { ...(spline as Extract<CadEntity, { type: "SPLINE" }>), closed: true };
+    expect(findEntityAtPoint([closed], visible, { x: 5, y: 0 }, 0.5)?.id).toBe("spline-1");
+  });
+});
+
 describe("findEntityAtPoint - ELLIPSE", () => {
   const ellipse: CadEntity = {
     id: "ellipse-1",

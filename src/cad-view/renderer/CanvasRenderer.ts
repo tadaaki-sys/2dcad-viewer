@@ -105,6 +105,8 @@ function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: 
   } else if (entity.type === "ELLIPSE") {
     const span = normalizeArcSpan(entity.startParam, entity.endParam);
     traceEllipsePath(ctx, camera, entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.startParam, span);
+  } else if (entity.type === "SPLINE") {
+    tracePolylinePath(ctx, camera, entity.points, entity.closed);
   } else {
     tracePolylinePath(ctx, camera, entity.vertices, entity.closed);
   }
