@@ -1,10 +1,11 @@
 import type { CadEntity, CadText, Measurement, Point2D } from "../../types/cad";
 import { computeMeasurementDistances } from "../measurement/Measurement";
 import { formatMm } from "../../utils/format";
-import { normalizeArcSpan, pointOnArc, pointOnEllipse } from "../../utils/geometry";
+import { normalizeArcSpan, pointOnEllipse } from "../../utils/geometry";
 import type { Camera } from "../camera/Camera";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 import { TEXT_LINE_HEIGHT_FACTOR } from "../entityGeometry";
+import { BOUNDS_STRIDE } from "../spatial/entityBounds";
 
 const LINE_WIDTH_PX = 1;
 const HIGHLIGHT_LINE_WIDTH_PX = 2.5;
@@ -18,13 +19,16 @@ const MEASUREMENT_FONT = "11px sans-serif";
 // 画面上でこれより小さいフォントサイズになったTEXTは、視認できず描画コストだけかかるため省略する
 const MIN_TEXT_RENDER_PX = 3;
 
-// ズーム倍率に応じた円/弧の分割数(画面上で1segmentがおおよそこのpx幅に収まるようにする)
+// 画面上の大きさ(縦横とも)がこれ未満の図形は、ほとんど見えず描画コストだけかかるため描画しない
+const MIN_ENTITY_SCREEN_SIZE_PX = 0.5;
+
+// ズーム倍率に応じた楕円の分割数(画面上で1segmentがおおよそこのpx幅に収まるようにする)。円/弧はブラウザ標準のarcで描く。
 const ARC_SEGMENT_TARGET_PX = 3;
 const MIN_ARC_SEGMENTS_PER_FULL_CIRCLE = 12;
 const MAX_ARC_SEGMENTS_PER_FULL_CIRCLE = 128;
 
-function computeAdaptiveSegmentCount(radiusWorld: number, spanRadians: number, camera: Camera): number {
-  const screenRadius = Math.abs(radiusWorld * camera.scale);
+function computeAdaptiveSegmentCount(radiusWorld: number, spanRadians: number, scale: number): number {
+  const screenRadius = Math.abs(radiusWorld * scale);
   const fullCircleSegments = Math.min(
     MAX_ARC_SEGMENTS_PER_FULL_CIRCLE,
     Math.max(MIN_ARC_SEGMENTS_PER_FULL_CIRCLE, Math.ceil((2 * Math.PI * screenRadius) / ARC_SEGMENT_TARGET_PX)),
@@ -33,83 +37,93 @@ function computeAdaptiveSegmentCount(radiusWorld: number, spanRadians: number, c
   return Math.max(2, Math.round(fullCircleSegments * fraction));
 }
 
-function tracePolylinePath(ctx: CanvasRenderingContext2D, camera: Camera, vertices: Point2D[], closed: boolean): void {
-  vertices.forEach((vertex, index) => {
-    const screenPoint = camera.worldToScreen(vertex);
-    if (index === 0) {
-      ctx.moveTo(screenPoint.x, screenPoint.y);
-    } else {
-      ctx.lineTo(screenPoint.x, screenPoint.y);
-    }
-  });
-  if (closed) {
-    ctx.closePath();
-  }
-}
+// 以下のパス構築関数は、ワールド→スクリーン変換(Y反転)を数値のまま展開して書く。
+// 点ごとにオブジェクトを作ると、数十万点の描画でGCが支配的になるため。
+//   screenX = worldX * k + ox,  screenY = oy - worldY * k
 
-function traceArcPath(
-  ctx: CanvasRenderingContext2D,
-  camera: Camera,
-  center: Point2D,
-  radius: number,
-  startAngle: number,
-  span: number,
+function appendPolyline(
+  path: CanvasPath,
+  vertices: readonly Point2D[],
+  closed: boolean,
+  k: number,
+  ox: number,
+  oy: number,
 ): void {
-  const segmentCount = computeAdaptiveSegmentCount(radius, span, camera);
-  for (let i = 0; i <= segmentCount; i++) {
-    const worldPoint = pointOnArc(center, radius, startAngle + (span * i) / segmentCount);
-    const screenPoint = camera.worldToScreen(worldPoint);
-    if (i === 0) {
-      ctx.moveTo(screenPoint.x, screenPoint.y);
-    } else {
-      ctx.lineTo(screenPoint.x, screenPoint.y);
-    }
+  for (let i = 0; i < vertices.length; i++) {
+    const x = vertices[i].x * k + ox;
+    const y = oy - vertices[i].y * k;
+    if (i === 0) path.moveTo(x, y);
+    else path.lineTo(x, y);
   }
+  if (closed) path.closePath();
 }
 
-function traceEllipsePath(
-  ctx: CanvasRenderingContext2D,
-  camera: Camera,
-  center: Point2D,
-  majorRadius: number,
-  minorRadius: number,
-  rotation: number,
-  startParam: number,
-  span: number,
+function appendEllipse(
+  path: CanvasPath,
+  entity: Extract<CadEntity, { type: "ELLIPSE" }>,
+  k: number,
+  ox: number,
+  oy: number,
 ): void {
-  const segmentCount = computeAdaptiveSegmentCount(Math.max(majorRadius, minorRadius), span, camera);
+  const span = normalizeArcSpan(entity.startParam, entity.endParam);
+  const segmentCount = computeAdaptiveSegmentCount(Math.max(entity.majorRadius, entity.minorRadius), span, k);
   for (let i = 0; i <= segmentCount; i++) {
-    const worldPoint = pointOnEllipse(center, majorRadius, minorRadius, rotation, startParam + (span * i) / segmentCount);
-    const screenPoint = camera.worldToScreen(worldPoint);
-    if (i === 0) {
-      ctx.moveTo(screenPoint.x, screenPoint.y);
-    } else {
-      ctx.lineTo(screenPoint.x, screenPoint.y);
-    }
+    const p = pointOnEllipse(
+      entity.center,
+      entity.majorRadius,
+      entity.minorRadius,
+      entity.rotation,
+      entity.startParam + (span * i) / segmentCount,
+    );
+    const x = p.x * k + ox;
+    const y = oy - p.y * k;
+    if (i === 0) path.moveTo(x, y);
+    else path.lineTo(x, y);
   }
 }
 
+/** 図形1つ分のパスをpath(CanvasRenderingContext2DまたはPath2D)へ追加する */
+function appendEntity(path: CanvasPath, entity: Exclude<CadEntity, CadText>, k: number, ox: number, oy: number): void {
+  switch (entity.type) {
+    case "LINE":
+      path.moveTo(entity.start.x * k + ox, oy - entity.start.y * k);
+      path.lineTo(entity.end.x * k + ox, oy - entity.end.y * k);
+      return;
+    case "CIRCLE": {
+      const x = entity.center.x * k + ox;
+      const y = oy - entity.center.y * k;
+      const r = entity.radius * k;
+      path.moveTo(x + r, y);
+      path.arc(x, y, r, 0, Math.PI * 2);
+      return;
+    }
+    case "ARC": {
+      const x = entity.center.x * k + ox;
+      const y = oy - entity.center.y * k;
+      const r = entity.radius * k;
+      const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
+      // Y軸が反転しているため、ワールドのCCW(角度増加)はcanvasの角度では符号が逆で、反時計回り指定になる
+      path.moveTo(x + r * Math.cos(entity.startAngle), y - r * Math.sin(entity.startAngle));
+      path.arc(x, y, r, -entity.startAngle, -(entity.startAngle + span), true);
+      return;
+    }
+    case "ELLIPSE":
+      appendEllipse(path, entity, k, ox, oy);
+      return;
+    case "SPLINE":
+      appendPolyline(path, entity.points, entity.closed, k, ox, oy);
+      return;
+    case "LWPOLYLINE":
+    case "POLYLINE":
+      appendPolyline(path, entity.vertices, entity.closed, k, ox, oy);
+      return;
+  }
+}
+
+/** 選択ハイライトなど、図形を個別にctxへ描くためのパス作成 */
 function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: Exclude<CadEntity, CadText>): void {
   ctx.beginPath();
-
-  if (entity.type === "LINE") {
-    const start = camera.worldToScreen(entity.start);
-    const end = camera.worldToScreen(entity.end);
-    ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
-  } else if (entity.type === "CIRCLE") {
-    traceArcPath(ctx, camera, entity.center, entity.radius, 0, Math.PI * 2);
-  } else if (entity.type === "ARC") {
-    const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
-    traceArcPath(ctx, camera, entity.center, entity.radius, entity.startAngle, span);
-  } else if (entity.type === "ELLIPSE") {
-    const span = normalizeArcSpan(entity.startParam, entity.endParam);
-    traceEllipsePath(ctx, camera, entity.center, entity.majorRadius, entity.minorRadius, entity.rotation, entity.startParam, span);
-  } else if (entity.type === "SPLINE") {
-    tracePolylinePath(ctx, camera, entity.points, entity.closed);
-  } else {
-    tracePolylinePath(ctx, camera, entity.vertices, entity.closed);
-  }
+  appendEntity(ctx, entity, camera.scale, camera.offsetX, camera.offsetY);
 }
 
 /** ワールド座標系(Y-up)の位置・回転をスクリーン座標系(Y-down)へ変換してTEXT/MTEXTを描画する */
@@ -234,28 +248,73 @@ export class CanvasRenderer implements Renderer {
     measurements,
     selectedMeasurementId,
     pendingMeasurementPoint,
+    spatialIndex,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, viewportWidth, viewportHeight);
 
     ctx.lineWidth = LINE_WIDTH_PX;
 
+    const { entities } = model;
+    const entityBounds = spatialIndex?.entityBounds ?? model.entityBounds;
+    const k = camera.scale;
+    const minWorldSize = MIN_ENTITY_SCREEN_SIZE_PX / k;
+    const hasSelection = selectedEntityIds.size > 0;
+
+    // 画面に映る範囲(ワールド座標)。線幅分の余白を持たせる。画面が図面全体を含むなら絞り込み不要。
+    const margin = 2 / k;
+    const viewMinX = (0 - camera.offsetX) / k - margin;
+    const viewMaxX = (viewportWidth - camera.offsetX) / k + margin;
+    const viewMinY = (camera.offsetY - viewportHeight) / k - margin;
+    const viewMaxY = camera.offsetY / k + margin;
+    const world = spatialIndex?.worldBounds ?? null;
+    const viewCoversWorld =
+      world !== null &&
+      viewMinX <= world.min.x &&
+      viewMaxX >= world.max.x &&
+      viewMinY <= world.min.y &&
+      viewMaxY >= world.max.y;
+    const candidateIndices =
+      spatialIndex && !viewCoversWorld ? spatialIndex.grid.queryRect(viewMinX, viewMinY, viewMaxX, viewMaxY, false) : null;
+    const candidateCount = candidateIndices ? candidateIndices.length : entities.length;
+
+    // 同じ色の図形は1本のパスにまとめて1回のstrokeで描く(図形ごとにstrokeするとEntity数に比例して遅くなる)
+    const pathsByColor = new Map<string, Path2D>();
+    const texts: CadText[] = [];
     const selectedEntities: CadEntity[] = [];
 
-    for (const entity of model.entities) {
+    for (let n = 0; n < candidateCount; n++) {
+      const i = candidateIndices ? candidateIndices[n] : n;
+      const entity = entities[i];
       if (!visibleLayerNames.has(entity.layer)) continue;
-      if (selectedEntityIds.has(entity.id)) {
+      if (hasSelection && selectedEntityIds.has(entity.id)) {
         selectedEntities.push(entity);
         continue;
       }
 
-      if (entity.type === "TEXT") {
-        drawTextEntity(ctx, camera, entity, entity.color);
+      const o = i * BOUNDS_STRIDE;
+      if (entityBounds[o + 2] - entityBounds[o] < minWorldSize && entityBounds[o + 3] - entityBounds[o + 1] < minWorldSize) {
         continue;
       }
-      ctx.strokeStyle = entity.color;
-      traceEntityPath(ctx, camera, entity);
-      ctx.stroke();
+
+      if (entity.type === "TEXT") {
+        texts.push(entity);
+        continue;
+      }
+      let path = pathsByColor.get(entity.color);
+      if (!path) {
+        path = new Path2D();
+        pathsByColor.set(entity.color, path);
+      }
+      appendEntity(path, entity, k, camera.offsetX, camera.offsetY);
+    }
+
+    for (const [color, path] of pathsByColor) {
+      ctx.strokeStyle = color;
+      ctx.stroke(path);
+    }
+    for (const text of texts) {
+      drawTextEntity(ctx, camera, text, text.color);
     }
 
     if (selectedEntities.length > 0) {

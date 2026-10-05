@@ -9,10 +9,10 @@ import type { ITextEntity } from "dxf-parser";
 import type { IMtextEntity } from "dxf-parser";
 import type { IEllipseEntity } from "dxf-parser";
 import type { ISplineEntity } from "dxf-parser";
-import type { CadBounds, CadEntity, CadHorizontalAlign, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
+import type { CadEntity, CadHorizontalAlign, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
 import type { Matrix2D } from "../utils/matrix2d";
-import { getEntityPoints } from "../cad-view/entityGeometry";
+import { computeAllEntityBounds, unionOfEntityBounds } from "../cad-view/spatial/entityBounds";
 import { stripMtextFormatting } from "./mtextFormatting";
 import { tessellateSpline } from "../utils/spline";
 
@@ -88,10 +88,13 @@ export function convertToCadModel(raw: IDxf): CadModel {
   const supportedEntityCount = context.entities.length;
   const unsupportedEntityCount = context.totalEntityCount - supportedEntityCount;
 
+  const entityBounds = computeAllEntityBounds(context.entities);
+
   return {
     entities: context.entities,
+    entityBounds,
     layers,
-    bounds: computeBounds(context.entities),
+    bounds: unionOfEntityBounds(entityBounds),
     stats: {
       totalEntityCount: context.totalEntityCount,
       supportedEntityCount,
@@ -410,25 +413,4 @@ function convertEntity(
   }
 
   return null;
-}
-
-function computeBounds(entities: CadEntity[]): CadBounds | null {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let found = false;
-
-  for (const entity of entities) {
-    const points = getEntityPoints(entity);
-    for (const point of points) {
-      found = true;
-      if (point.x < minX) minX = point.x;
-      if (point.y < minY) minY = point.y;
-      if (point.x > maxX) maxX = point.x;
-      if (point.y > maxY) maxY = point.y;
-    }
-  }
-
-  return found ? { min: { x: minX, y: minY }, max: { x: maxX, y: maxY } } : null;
 }

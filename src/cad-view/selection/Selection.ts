@@ -1,6 +1,7 @@
 import { pointToSegmentDistance, segmentsIntersect } from "../../utils/geometry";
 import { distanceFromPointToText, getEntityPoints, getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
+import type { SpatialIndex } from "../spatial/SpatialIndex";
 
 export type SelectionBox = {
   min: Point2D;
@@ -32,19 +33,27 @@ export function findEntitiesNearPoint(
   visibleLayerNames: ReadonlySet<string>,
   point: Point2D,
   toleranceWorld: number,
+  index?: SpatialIndex | null,
 ): CadEntity[] {
-  const candidates: Array<{ entity: CadEntity; distance: number }> = [];
+  const hits: Array<{ entity: CadEntity; distance: number }> = [];
 
-  for (const entity of entities) {
+  // 索引があれば点の周辺にバウンディングボックスを持つ図形だけを検査する(昇順なので距離が同じ場合の順序は従来通り)
+  const candidateIndices = index
+    ? index.grid.queryRect(point.x - toleranceWorld, point.y - toleranceWorld, point.x + toleranceWorld, point.y + toleranceWorld)
+    : null;
+  const count = candidateIndices ? candidateIndices.length : entities.length;
+
+  for (let n = 0; n < count; n++) {
+    const entity = entities[candidateIndices ? candidateIndices[n] : n];
     if (!visibleLayerNames.has(entity.layer)) continue;
     const dist = distanceFromEntity(entity, point);
     if (dist <= toleranceWorld) {
-      candidates.push({ entity, distance: dist });
+      hits.push({ entity, distance: dist });
     }
   }
 
-  candidates.sort((a, b) => a.distance - b.distance);
-  return candidates.map((candidate) => candidate.entity);
+  hits.sort((a, b) => a.distance - b.distance);
+  return hits.map((hit) => hit.entity);
 }
 
 /**
@@ -56,8 +65,9 @@ export function findEntityAtPoint(
   visibleLayerNames: ReadonlySet<string>,
   point: Point2D,
   toleranceWorld: number,
+  index?: SpatialIndex | null,
 ): CadEntity | null {
-  return findEntitiesNearPoint(entities, visibleLayerNames, point, toleranceWorld)[0] ?? null;
+  return findEntitiesNearPoint(entities, visibleLayerNames, point, toleranceWorld, index)[0] ?? null;
 }
 
 function isPointInBox(point: Point2D, box: SelectionBox): boolean {
@@ -103,7 +113,12 @@ export function findEntitiesInBox(
   visibleLayerNames: ReadonlySet<string>,
   box: SelectionBox,
   mode: BoxSelectionMode,
+  index?: SpatialIndex | null,
 ): CadEntity[] {
   const test = mode === "window" ? isEntityFullyInsideBox : isEntityTouchingBox;
-  return entities.filter((entity) => visibleLayerNames.has(entity.layer) && test(entity, box));
+  // Window/Crossingのどちらも、対象図形のバウンディングボックスは必ず選択範囲と交差する
+  const candidates = index
+    ? index.grid.queryRect(box.min.x, box.min.y, box.max.x, box.max.y).map((i) => entities[i])
+    : entities;
+  return candidates.filter((entity) => visibleLayerNames.has(entity.layer) && test(entity, box));
 }

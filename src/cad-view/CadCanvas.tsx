@@ -6,6 +6,7 @@ import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
 import { findEntitiesInBox, findEntitiesNearPoint } from "./selection/Selection";
 import { findSnapPoint } from "./snap/SnapEngine";
 import { findMeasurementAtPoint } from "./measurement/Measurement";
+import { buildSpatialIndex } from "./spatial/SpatialIndex";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -111,8 +112,12 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     [layers],
   );
 
+  // 図面を読み込んだ時に1回だけ作る。選択・スナップ・描画が全図形の総当たりにならないようにするための索引。
+  const spatialIndex = useMemo(() => (model ? buildSpatialIndex(model) : null), [model]);
+
   const stateRef = useRef({
     model,
+    spatialIndex,
     visibleLayerNames,
     selectedEntityIds,
     selectionEnabled,
@@ -126,6 +131,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   });
   stateRef.current = {
     model,
+    spatialIndex,
     visibleLayerNames,
     selectedEntityIds,
     selectionEnabled,
@@ -151,6 +157,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
     const {
       model: currentModel,
+      spatialIndex: currentSpatialIndex,
       visibleLayerNames: currentVisible,
       selectedEntityIds: currentSelectedIds,
       measurements: currentMeasurements,
@@ -170,6 +177,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       measurements: currentMeasurements,
       selectedMeasurementId: currentSelectedMeasurementId,
       pendingMeasurementPoint: pendingMeasurementPointRef.current,
+      spatialIndex: currentSpatialIndex,
     });
 
     const renderEnd = performance.now();
@@ -329,7 +337,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         stateRef.current;
       if (currentMeasurementModeEnabled && currentModel) {
         const toleranceWorld = SNAP_TOLERANCE_PX / cameraRef.current.scale;
-        const snap = findSnapPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+        const snap = findSnapPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld, stateRef.current.spatialIndex);
         if (snap) return snap.point;
       }
       return worldPoint;
@@ -362,7 +370,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       if (event.ctrlKey || event.metaKey) {
         stateRef.current.onMeasurementSelect(null);
         if (!currentModel) return;
-        const candidates = findEntitiesNearPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+        const candidates = findEntitiesNearPoint(
+          currentModel.entities,
+          currentVisible,
+          worldPoint,
+          toleranceWorld,
+          stateRef.current.spatialIndex,
+        );
         overlapCycleRef.current = null; // Ctrl+Clickは巡回選択とは独立した操作として扱う
         const hitEntity = candidates[0] ?? null;
         if (!hitEntity) return; // Ctrl+空白クリックは選択状態を変えない
@@ -390,7 +404,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         stateRef.current.onSelectionChange(new Set());
         return;
       }
-      const candidates = findEntitiesNearPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld);
+      const candidates = findEntitiesNearPoint(
+        currentModel.entities,
+        currentVisible,
+        worldPoint,
+        toleranceWorld,
+        stateRef.current.spatialIndex,
+      );
 
       if (candidates.length === 0) {
         overlapCycleRef.current = null;
@@ -429,7 +449,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         max: { x: Math.max(startWorld.x, endWorld.x), y: Math.max(startWorld.y, endWorld.y) },
       };
       const mode = startScreen.x <= endScreen.x ? "window" : "crossing";
-      const hitEntities = findEntitiesInBox(currentModel.entities, currentVisible, box, mode);
+      const hitEntities = findEntitiesInBox(currentModel.entities, currentVisible, box, mode, stateRef.current.spatialIndex);
       const hitIds = hitEntities.map((entity) => entity.id);
 
       if (event.ctrlKey || event.metaKey) {

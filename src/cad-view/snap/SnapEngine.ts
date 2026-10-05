@@ -1,6 +1,14 @@
-import { distance, intersectSegments, normalizeArcSpan, pointOnArc, pointOnEllipse } from "../../utils/geometry";
+import {
+  distance,
+  intersectSegments,
+  normalizeArcSpan,
+  pointOnArc,
+  pointOnEllipse,
+  pointToSegmentDistance,
+} from "../../utils/geometry";
 import { getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
+import type { SpatialIndex } from "../spatial/SpatialIndex";
 
 export type SnapType = "endpoint" | "midpoint" | "intersection";
 
@@ -122,7 +130,12 @@ function collectIntersectionCandidates(
   for (const entity of entities) {
     if (!visibleLayerNames.has(entity.layer)) continue;
     for (const segment of getEntitySegments(entity)) {
-      if (isSegmentNearPoint(segment[0], segment[1], worldPoint, toleranceWorld)) {
+      // 交点は両方の線分上にあり、かつカーソルからtoleranceWorld以内なので、各線分自身がその範囲に入っている必要がある。
+      // 安価なバウンディングボックス判定で粗く絞ってから、実距離で絞ると、後段の総当たり(線分数の2乗)が大きく減る。
+      if (
+        isSegmentNearPoint(segment[0], segment[1], worldPoint, toleranceWorld) &&
+        pointToSegmentDistance(worldPoint, segment[0], segment[1]) <= toleranceWorld
+      ) {
         nearbySegments.push(segment);
       }
     }
@@ -160,12 +173,20 @@ export function findSnapPoint(
   visibleLayerNames: ReadonlySet<string>,
   worldPoint: Point2D,
   toleranceWorld: number,
+  index?: SpatialIndex | null,
 ): SnapCandidate | null {
   let best: SnapCandidate | null = null;
   let bestDistance = toleranceWorld;
 
+  // 端点・中点・交点はいずれも図形自身の上にあるので、カーソル周辺にバウンディングボックスがある図形だけ調べればよい
+  const nearbyEntities = index
+    ? index.grid
+        .queryRect(worldPoint.x - toleranceWorld, worldPoint.y - toleranceWorld, worldPoint.x + toleranceWorld, worldPoint.y + toleranceWorld)
+        .map((i) => entities[i])
+    : entities;
+
   for (const generate of CANDIDATE_GENERATORS) {
-    for (const candidate of generate(entities, visibleLayerNames, worldPoint, toleranceWorld)) {
+    for (const candidate of generate(nearbyEntities, visibleLayerNames, worldPoint, toleranceWorld)) {
       const dist = distance(candidate.point, worldPoint);
       if (dist <= bestDistance) {
         bestDistance = dist;

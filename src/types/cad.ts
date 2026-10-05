@@ -113,6 +113,8 @@ export type CadModelStats = {
 
 export type CadModel = {
   entities: CadEntity[];
+  /** entities[i]のバウンディングボックス [minX,minY,maxX,maxY] を4要素ずつ並べたもの(選択・描画の絞り込み用) */
+  entityBounds: Float64Array;
   layers: CadLayer[];
   bounds: CadBounds | null;
   stats: CadModelStats;
