@@ -1,6 +1,6 @@
 import type { CadModel } from "../types/cad";
 
-export type DxfLoadingStage = "reading" | "parsing" | "converting" | "preparing";
+export type DxfLoadingStage = "reading" | "dwgConverting" | "parsing" | "converting" | "preparing";
 
 export type DxfWorkerRequest = {
   type: "parse";

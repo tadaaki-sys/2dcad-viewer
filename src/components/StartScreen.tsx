@@ -54,7 +54,7 @@ export function StartScreen({ recentFiles, errorMessage, onFileSelected }: Start
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <div className="start-screen__message">DXFファイルをここへドロップ</div>
+        <div className="start-screen__message">DXF / DWGファイルをここへドロップ</div>
         <div className="start-screen__or">または</div>
         <button type="button" className="start-screen__button" onClick={handleBrowseClick}>
           ファイルを選択
@@ -62,7 +62,7 @@ export function StartScreen({ recentFiles, errorMessage, onFileSelected }: Start
         <input
           ref={fileInputRef}
           type="file"
-          accept=".dxf"
+          accept=".dxf,.dwg"
           style={{ display: "none" }}
           onChange={handleFileInputChange}
         />

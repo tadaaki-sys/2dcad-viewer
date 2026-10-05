@@ -2,6 +2,8 @@
 import DxfParser from "dxf-parser";
 import { convertToCadModel } from "./DxfParserAdapter";
 import { decodeDxfBuffer } from "./dxfEncoding";
+import { detectDwgVersion } from "./dwgFormat";
+import { convertDwgToDxfBuffer } from "./dwgToDxf";
 import type {
   DxfWorkerErrorMessage,
   DxfWorkerProgressMessage,
@@ -21,7 +23,17 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
   try {
     postProgress("reading", null);
     const buffer = await event.data.file.arrayBuffer();
-    const text = decodeDxfBuffer(buffer);
+
+    // 拡張子ではなく先頭のバージョン識別子でDWGを判別し、DXFへ変換してから既存のDXF処理に流す
+    const dwgVersion = detectDwgVersion(buffer);
+    let text: string;
+    if (dwgVersion) {
+      console.log("[dxf.worker] DWG detected", dwgVersion);
+      postProgress("dwgConverting", null);
+      text = decodeDxfBuffer(await convertDwgToDxfBuffer(buffer));
+    } else {
+      text = decodeDxfBuffer(buffer);
+    }
 
     postProgress("parsing", null);
     const parser = new DxfParser();

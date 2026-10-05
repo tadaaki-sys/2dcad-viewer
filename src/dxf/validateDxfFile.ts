@@ -1,9 +1,11 @@
 const BINARY_DXF_SENTINEL = "AutoCAD Binary DXF";
+const SUPPORTED_EXTENSIONS = [".dxf", ".dwg"];
 
 export type DxfValidationResult = { valid: true } | { valid: false; reason: "extension" | "binary" };
 
 export async function validateDxfFile(file: File): Promise<DxfValidationResult> {
-  if (!file.name.toLowerCase().endsWith(".dxf")) {
+  const lowerCaseName = file.name.toLowerCase();
+  if (!SUPPORTED_EXTENSIONS.some((extension) => lowerCaseName.endsWith(extension))) {
     return { valid: false, reason: "extension" };
   }
 

@@ -12,12 +12,20 @@ import type { CadCanvasHandle } from "./cad-view/CadCanvas";
 import { PerformanceOverlay } from "./components/PerformanceOverlay";
 import { useRecentFiles } from "./hooks/useRecentFiles";
 import { validateDxfFile } from "./dxf/validateDxfFile";
+import { isDwgFileName } from "./dxf/dwgFormat";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
 import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
 import "./App.css";
 
 const DXF_ERROR_MESSAGE =
   "DXFの解析に失敗しました。\n\n考えられる原因：\n・ASCII DXFではない\n・ファイルが破損している\n・未対応形式";
+
+const DWG_ERROR_MESSAGE =
+  "DWGの読み込みに失敗しました。\n\n考えられる原因：\n・ファイルが破損している\n・パスワード保護されている\n・未対応のDWGバージョン/内容\n\n対処：AutoCADで「名前を付けて保存」から、DXFまたは旧形式のDWGとして保存し直してお試しください。";
+
+function loadErrorMessageFor(file: File): string {
+  return isDwgFileName(file.name) ? DWG_ERROR_MESSAGE : DXF_ERROR_MESSAGE;
+}
 
 type LoadingProgress = {
   stage: DxfLoadingStage;
@@ -94,7 +102,7 @@ export default function App() {
         console.error("[App] DXF parse failed", message.message);
         setLoadingProgress(null);
         setLoadStartedAt(null);
-        setErrorMessage(DXF_ERROR_MESSAGE);
+        setErrorMessage(loadErrorMessageFor(file));
         terminateWorker();
       }
     };
@@ -103,7 +111,7 @@ export default function App() {
       console.error("[App] DXF worker crashed", event.message);
       setLoadingProgress(null);
       setLoadStartedAt(null);
-      setErrorMessage(DXF_ERROR_MESSAGE);
+      setErrorMessage(loadErrorMessageFor(file));
       terminateWorker();
     };
 
@@ -256,7 +264,7 @@ export default function App() {
       <input
         ref={openFileInputRef}
         type="file"
-        accept=".dxf"
+        accept=".dxf,.dwg"
         style={{ display: "none" }}
         onChange={handleOpenFileInputChange}
       />

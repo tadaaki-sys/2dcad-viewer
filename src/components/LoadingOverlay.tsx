@@ -4,6 +4,7 @@ import "./LoadingOverlay.css";
 
 const STAGE_LABELS: Record<DxfLoadingStage, string> = {
   reading: "ファイル読込",
+  dwgConverting: "DWG変換",
   parsing: "DXF解析",
   converting: "内部形式変換",
   preparing: "描画準備",
@@ -11,6 +12,7 @@ const STAGE_LABELS: Record<DxfLoadingStage, string> = {
 
 const STAGE_PERCENT: Record<DxfLoadingStage, number> = {
   reading: 10,
+  dwgConverting: 30,
   parsing: 50,
   converting: 80,
   preparing: 95,

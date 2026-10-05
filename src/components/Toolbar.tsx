@@ -22,7 +22,7 @@ export function Toolbar({
   return (
     <div className="toolbar">
       <button type="button" className="toolbar__button" onClick={onOpenFile}>
-        DXFを開く
+        図面を開く
       </button>
       <button type="button" className="toolbar__button" onClick={onCloseDocument} disabled={!isDocumentOpen}>
         図面を閉じる
