@@ -24,6 +24,15 @@ const DEFAULT_TEXT_HEIGHT = 2.5;
 // 実際のCAD図面では、グループ化の入れ子で10〜20段になることがあり、低い上限だと配下の図形が丸ごと消える。
 const MAX_INSERT_DEPTH = 64;
 
+const MIN_WIDTH_FACTOR = 0.05;
+const MAX_WIDTH_FACTOR = 10;
+
+/** TEXTの幅係数(グループコード41)。未指定・0以下・非数は1(等幅)として扱う */
+function sanitizeWidthFactor(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return 1;
+  return Math.min(MAX_WIDTH_FACTOR, Math.max(MIN_WIDTH_FACTOR, value));
+}
+
 function alignFromTextHalign(halign: number | undefined): CadHorizontalAlign {
   if (halign === 2) return "right";
   if (halign === 1 || halign === 3 || halign === 4 || halign === 5) return "center";
@@ -441,6 +450,7 @@ function convertEntity(
       position: applyMatrix(toPoint2D(rawPosition), matrix),
       text: stripMtextFormatting(text.text),
       height,
+      widthFactor: sanitizeWidthFactor(text.xScale),
       rotation: ((text.rotation ?? 0) * Math.PI) / 180 + rotationOffset,
       horizontalAlign: alignFromTextHalign(text.halign),
       verticalAlign: alignFromTextValign(text.valign),

@@ -585,6 +585,19 @@ describe("DxfParserAdapter - TEXT/MTEXT conversion", () => {
     }
   });
 
+  it("reads the TEXT width factor (group 41) and defaults to 1 when absent or invalid", () => {
+    const factorOf = (extra: string[]) => {
+      const dxf = buildDxf(["0", "TEXT", "8", "0", "1", "hello", "10", "0.0", "20", "0.0", "40", "2.5", ...extra].join("\n"));
+      const entity = parseDxfText(dxf).entities[0];
+      return entity.type === "TEXT" ? entity.widthFactor : undefined;
+    };
+    expect(factorOf(["41", "0.5"])).toBe(0.5);
+    expect(factorOf(["41", "1.6"])).toBe(1.6);
+    expect(factorOf([])).toBe(1);
+    expect(factorOf(["41", "0"])).toBe(1);
+    expect(factorOf(["41", "-2"])).toBe(1);
+  });
+
   it("uses the second alignment point for a center/middle-justified TEXT entity", () => {
     const dxf = buildDxf(
       [

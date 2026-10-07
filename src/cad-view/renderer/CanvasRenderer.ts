@@ -154,6 +154,8 @@ function drawTextEntity(ctx: CanvasRenderingContext2D, camera: Camera, entity: C
   ctx.translate(screenPosition.x, screenPosition.y);
   // worldToScreenはY軸を反転するため、ワールドでのCCW回転(entity.rotation)はスクリーン上では逆向きになる
   ctx.rotate(-entity.rotation);
+  // 幅係数は文字の進行方向(回転後のX方向)だけを伸縮する。基準点は原点なので配置は変わらない
+  if (entity.widthFactor !== undefined && entity.widthFactor !== 1) ctx.scale(entity.widthFactor, 1);
   ctx.fillStyle = color;
   ctx.font = `${fontSizePx}px sans-serif`;
   ctx.textAlign = entity.horizontalAlign;

@@ -263,6 +263,18 @@ describe("findEntityAtPoint - TEXT", () => {
     expect(inside?.id).toBe("text-1");
   });
 
+  it("narrows the clickable area with a width factor and widens it for full-width characters", () => {
+    // "AB"(2文字×0.65)×高さ10 = 幅13。幅係数0.5なら6.5なので x=10 はもう箱の外
+    const squeezed: CadEntity = { ...(text as Extract<CadEntity, { type: "TEXT" }>), widthFactor: 0.5 };
+    expect(findEntityAtPoint([text], visible, { x: 10, y: -5 }, 0.5)?.id).toBe("text-1");
+    expect(findEntityAtPoint([squeezed], visible, { x: 10, y: -5 }, 0.5)).toBeNull();
+
+    // 全角2文字は幅20(文字高と同じ幅)。ASCIIの幅13なら x=18 は箱の外だが、全角なら中
+    const japanese: CadEntity = { ...(text as Extract<CadEntity, { type: "TEXT" }>), text: "配置" };
+    expect(findEntityAtPoint([text], visible, { x: 18, y: -5 }, 0.5)).toBeNull();
+    expect(findEntityAtPoint([japanese], visible, { x: 18, y: -5 }, 0.5)?.id).toBe("text-1");
+  });
+
   it("does not hit a point far outside the TEXT's bounding box", () => {
     const outside = findEntityAtPoint([text], visible, { x: 50, y: 50 }, 1);
     expect(outside).toBeNull();

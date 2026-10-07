@@ -36,6 +36,8 @@ class RecordingContext extends RecordingPath {
   restore() {}
   translate() {}
   rotate() {}
+  scales: Array<[number, number]> = [];
+  scale(x: number, y: number) { this.scales.push([x, y]); }
   setLineDash(dash: number[]) { this.currentDash = dash; }
   fillText(text: string) { this.fillTexts.push(text); }
 }
@@ -161,6 +163,23 @@ describe("CanvasRenderer batching", () => {
     const ctx = render(makeModel([text]), camera());
     expect(ctx.fillTexts).toEqual(["ABC"]);
     expect(ctx.strokes).toHaveLength(0);
+  });
+});
+
+describe("CanvasRenderer text width factor", () => {
+  const textWith = (widthFactor?: number): CadEntity => ({
+    id: "t", type: "TEXT", ...common, color: "#fff", position: { x: 10, y: 50 }, text: "ABC", height: 10, rotation: 0,
+    horizontalAlign: "left", verticalAlign: "baseline", ...(widthFactor !== undefined ? { widthFactor } : {}),
+  });
+
+  it("stretches or squeezes the text horizontally by the width factor", () => {
+    expect(render(makeModel([textWith(0.5)]), camera()).scales).toEqual([[0.5, 1]]);
+    expect(render(makeModel([textWith(1.6)]), camera()).scales).toEqual([[1.6, 1]]);
+  });
+
+  it("does not touch the transform when the factor is 1 or absent", () => {
+    expect(render(makeModel([textWith(1)]), camera()).scales).toEqual([]);
+    expect(render(makeModel([textWith()]), camera()).scales).toEqual([]);
   });
 });
 

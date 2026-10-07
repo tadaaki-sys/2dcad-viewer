@@ -71,7 +71,10 @@ export type CadArc = {
 export type CadHorizontalAlign = "left" | "center" | "right";
 export type CadVerticalAlign = "top" | "middle" | "bottom" | "baseline";
 
-/** rotationはラジアン、+X軸からCCW方向(DXFの角度系と同じ数学的な向き)。textは複数行の場合\nを含む */
+/**
+ * rotationはラジアン、+X軸からCCW方向(DXFの角度系と同じ数学的な向き)。textは複数行の場合\nを含む。
+ * widthFactorは文字の横幅の倍率(DXFのTEXT幅係数)。CADは枠に収めるために0.4〜1.7などへ変えるので無視できない。省略時は1。
+ */
 export type CadText = {
   id: string;
   type: "TEXT";
@@ -80,6 +83,7 @@ export type CadText = {
   position: Point2D;
   text: string;
   height: number;
+  widthFactor?: number;
   rotation: number;
   horizontalAlign: CadHorizontalAlign;
   verticalAlign: CadVerticalAlign;
