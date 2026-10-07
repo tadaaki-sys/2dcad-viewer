@@ -14,11 +14,23 @@ export type CadLayer = {
   visible: boolean;
 };
 
+/**
+ * 線種の破線パターン。patternは[線,空き,線,空き,...]の偶数個で、長さはワールド座標系
+ * ($LTSCALEと図形ごとの線種尺度を反映済み)。長さ0の「線」は点を表す。無ければ実線。
+ * 同じ線種・尺度の図形は同じオブジェクトを共有する(keyが同じ)。
+ */
+export type LineDash = {
+  key: string;
+  name: string;
+  pattern: number[];
+};
+
 export type CadLine = {
   id: string;
   type: "LINE";
   layer: string;
   color: string;
+  lineDash?: LineDash;
   start: Point2D;
   end: Point2D;
 };
@@ -28,6 +40,7 @@ export type CadPolyline = {
   type: "LWPOLYLINE" | "POLYLINE";
   layer: string;
   color: string;
+  lineDash?: LineDash;
   vertices: Point2D[];
   closed: boolean;
 };
@@ -37,6 +50,7 @@ export type CadCircle = {
   type: "CIRCLE";
   layer: string;
   color: string;
+  lineDash?: LineDash;
   center: Point2D;
   radius: number;
 };
@@ -47,6 +61,7 @@ export type CadArc = {
   type: "ARC";
   layer: string;
   color: string;
+  lineDash?: LineDash;
   center: Point2D;
   radius: number;
   startAngle: number;
@@ -79,6 +94,7 @@ export type CadEllipse = {
   type: "ELLIPSE";
   layer: string;
   color: string;
+  lineDash?: LineDash;
   center: Point2D;
   majorRadius: number;
   minorRadius: number;
@@ -93,6 +109,7 @@ export type CadSpline = {
   type: "SPLINE";
   layer: string;
   color: string;
+  lineDash?: LineDash;
   points: Point2D[];
   closed: boolean;
 };

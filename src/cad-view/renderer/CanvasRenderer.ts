@@ -1,4 +1,4 @@
-import type { CadEntity, CadText, Measurement, Point2D } from "../../types/cad";
+import type { CadEntity, CadText, LineDash, Measurement, Point2D } from "../../types/cad";
 import { computeMeasurementDistances } from "../measurement/Measurement";
 import { formatMm } from "../../utils/format";
 import { normalizeArcSpan, pointOnEllipse } from "../../utils/geometry";
@@ -21,6 +21,21 @@ const MIN_TEXT_RENDER_PX = 3;
 
 // 画面上の大きさ(縦横とも)がこれ未満の図形は、ほとんど見えず描画コストだけかかるため描画しない
 const MIN_ENTITY_SCREEN_SIZE_PX = 0.5;
+
+// 破線の1周期(線+空き)が画面上でこれより短いと、縮小表示では点の集まりにしか見えず描画も重いので実線で描く
+const MIN_DASH_PERIOD_PX = 4;
+// 長さ0の「点」は、画面上でこの長さの短い線として描く
+const DOT_LENGTH_PX = 1;
+
+type StrokeBatch = { color: string; screenDash: number[] | null; path: Path2D };
+
+/** ワールド座標の破線パターンを、現在の拡大率での画面上のpx長へ換算する。実線扱いにする場合はnull */
+function toScreenDashPattern(dash: LineDash, k: number): number[] | null {
+  let period = 0;
+  for (const value of dash.pattern) period += value;
+  if (period * k < MIN_DASH_PERIOD_PX) return null;
+  return dash.pattern.map((value, index) => (index % 2 === 0 && value === 0 ? DOT_LENGTH_PX : value * k));
+}
 
 // ズーム倍率に応じた楕円の分割数(画面上で1segmentがおおよそこのpx幅に収まるようにする)。円/弧はブラウザ標準のarcで描く。
 const ARC_SEGMENT_TARGET_PX = 3;
@@ -278,8 +293,9 @@ export class CanvasRenderer implements Renderer {
       spatialIndex && !viewCoversWorld ? spatialIndex.grid.queryRect(viewMinX, viewMinY, viewMaxX, viewMaxY, false) : null;
     const candidateCount = candidateIndices ? candidateIndices.length : entities.length;
 
-    // 同じ色の図形は1本のパスにまとめて1回のstrokeで描く(図形ごとにstrokeするとEntity数に比例して遅くなる)
-    const pathsByColor = new Map<string, Path2D>();
+    // 同じ色・同じ線種の図形は1本のパスにまとめて1回のstrokeで描く(図形ごとにstrokeするとEntity数に比例して遅くなる)
+    const batches = new Map<string, StrokeBatch>();
+    const screenDashByKey = new Map<string, number[] | null>();
     const texts: CadText[] = [];
     const selectedEntities: CadEntity[] = [];
 
@@ -301,18 +317,28 @@ export class CanvasRenderer implements Renderer {
         texts.push(entity);
         continue;
       }
-      let path = pathsByColor.get(entity.color);
-      if (!path) {
-        path = new Path2D();
-        pathsByColor.set(entity.color, path);
+      let batchKey = entity.color;
+      let screenDash: number[] | null = null;
+      if (entity.lineDash) {
+        const dash = entity.lineDash;
+        if (!screenDashByKey.has(dash.key)) screenDashByKey.set(dash.key, toScreenDashPattern(dash, k));
+        screenDash = screenDashByKey.get(dash.key) ?? null;
+        if (screenDash) batchKey = `${entity.color}|${dash.key}`;
       }
-      appendEntity(path, entity, k, camera.offsetX, camera.offsetY);
+      let batch = batches.get(batchKey);
+      if (!batch) {
+        batch = { color: entity.color, screenDash, path: new Path2D() };
+        batches.set(batchKey, batch);
+      }
+      appendEntity(batch.path, entity, k, camera.offsetX, camera.offsetY);
     }
 
-    for (const [color, path] of pathsByColor) {
-      ctx.strokeStyle = color;
-      ctx.stroke(path);
+    for (const batch of batches.values()) {
+      ctx.strokeStyle = batch.color;
+      ctx.setLineDash(batch.screenDash ?? []);
+      ctx.stroke(batch.path);
     }
+    ctx.setLineDash([]);
     for (const text of texts) {
       drawTextEntity(ctx, camera, text, text.color);
     }

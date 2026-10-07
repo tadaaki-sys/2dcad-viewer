@@ -30,6 +30,9 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
     { label: "Entity Type", value: entity.type },
     { label: "Layer", value: entity.layer },
   ];
+  if (entity.type !== "TEXT" && entity.lineDash) {
+    rows.push({ label: "Linetype", value: entity.lineDash.name });
+  }
 
   if (entity.type === "LINE") {
     rows.push(

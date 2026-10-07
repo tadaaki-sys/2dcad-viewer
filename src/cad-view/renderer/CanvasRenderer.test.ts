@@ -17,7 +17,8 @@ class RecordingPath {
 }
 
 class RecordingContext extends RecordingPath {
-  strokes: Array<{ style: string; path: RecordingPath | null; width: number }> = [];
+  strokes: Array<{ style: string; path: RecordingPath | null; width: number; dash: number[] }> = [];
+  currentDash: number[] = [];
   strokeStyle = "";
   fillStyle = "";
   lineWidth = 1;
@@ -26,14 +27,16 @@ class RecordingContext extends RecordingPath {
   textBaseline = "";
   fillTexts: string[] = [];
   beginPath() { /* パス記録はops側で行う */ }
-  stroke(path?: RecordingPath) { this.strokes.push({ style: this.strokeStyle, path: path ?? null, width: this.lineWidth }); }
+  stroke(path?: RecordingPath) {
+    this.strokes.push({ style: this.strokeStyle, path: path ?? null, width: this.lineWidth, dash: [...this.currentDash] });
+  }
   fillRect() {}
   strokeRect() {}
   save() {}
   restore() {}
   translate() {}
   rotate() {}
-  setLineDash() {}
+  setLineDash(dash: number[]) { this.currentDash = dash; }
   fillText(text: string) { this.fillTexts.push(text); }
 }
 
@@ -158,6 +161,61 @@ describe("CanvasRenderer batching", () => {
     const ctx = render(makeModel([text]), camera());
     expect(ctx.fillTexts).toEqual(["ABC"]);
     expect(ctx.strokes).toHaveLength(0);
+  });
+});
+
+describe("CanvasRenderer linetypes", () => {
+  const dashed = { key: "DASHED@1", name: "DASHED", pattern: [10, 5] };
+  const withDash = (id: string, y: number, lineDash?: typeof dashed, color = "#fff"): CadEntity => ({
+    ...(line(id, 0, y, 100, y, color) as Extract<CadEntity, { type: "LINE" }>),
+    ...(lineDash ? { lineDash } : {}),
+  });
+
+  it("strokes dashed lines in their own batch with the pattern scaled to screen pixels", () => {
+    const ctx = render(makeModel([withDash("d", 10, dashed), withDash("s", 30)]), camera(2, 0, 100));
+
+    const dashedStroke = ctx.strokes.find((s) => s.dash.length > 0)!;
+    expect(dashedStroke.dash).toEqual([20, 10]);
+    expect(dashedStroke.path!.ops.filter((op) => op[0] === "moveTo")).toHaveLength(1);
+    const solidStroke = ctx.strokes.find((s) => s.dash.length === 0)!;
+    expect(solidStroke.path!.ops.filter((op) => op[0] === "moveTo")).toHaveLength(1);
+  });
+
+  it("batches dashed entities of the same color and linetype together", () => {
+    const entities = [withDash("a", 10, dashed), withDash("b", 20, dashed), withDash("c", 30, dashed)];
+    const ctx = render(makeModel(entities), camera(2, 0, 100));
+    const dashedStrokes = ctx.strokes.filter((s) => s.dash.length > 0);
+    expect(dashedStrokes).toHaveLength(1);
+    expect(dashedStrokes[0].path!.ops.filter((op) => op[0] === "moveTo")).toHaveLength(3);
+  });
+
+  it("separates the same linetype in different colors", () => {
+    const ctx = render(makeModel([withDash("a", 10, dashed, "#f00"), withDash("b", 20, dashed, "#00f")]), camera(2, 0, 100));
+    expect(ctx.strokes.filter((s) => s.dash.length > 0).map((s) => s.style).sort()).toEqual(["#00f", "#f00"]);
+  });
+
+  it("draws a pattern as solid when one period would be too small on screen", () => {
+    const fine = { key: "FINE@1", name: "FINE", pattern: [0.5, 0.5] };
+    const ctx = render(makeModel([withDash("f", 10, fine)]), camera(1, 0, 100));
+    expect(ctx.strokes).toHaveLength(1);
+    expect(ctx.strokes[0].dash).toEqual([]);
+  });
+
+  it("draws a zero-length dash (dot) as a short visible mark", () => {
+    const dotted = { key: "DOT@1", name: "DOT", pattern: [0, 10] };
+    const ctx = render(makeModel([withDash("d", 10, dotted)]), camera(2, 0, 100));
+    expect(ctx.strokes[0].dash).toEqual([1, 20]);
+  });
+
+  it("restores a solid dash state after drawing dashed batches", () => {
+    const ctx = render(makeModel([withDash("d", 10, dashed)]), camera(2, 0, 100));
+    expect(ctx.currentDash).toEqual([]);
+  });
+
+  it("highlights a selected dashed entity as a solid line", () => {
+    const ctx = render(makeModel([withDash("d", 10, dashed)]), camera(2, 0, 100), { selectedEntityIds: new Set(["d"]) });
+    const highlight = ctx.strokes.find((s) => s.style === "#ffff00")!;
+    expect(highlight.dash).toEqual([]);
   });
 });
 

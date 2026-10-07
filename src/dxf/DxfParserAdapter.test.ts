@@ -779,3 +779,99 @@ describe("DxfParserAdapter - SPLINE conversion", () => {
     }
   });
 });
+
+describe("DxfParserAdapter - linetypes", () => {
+  const LTYPE_AND_LAYER_TABLES = [
+    "0", "TABLE", "2", "LTYPE", "70", "3",
+    "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
+    "0", "LTYPE", "2", "DASHED", "70", "0", "3", "Dashed", "72", "65", "73", "2", "40", "9.525", "49", "6.35", "74", "0", "49", "-3.175", "74", "0",
+    "0", "LTYPE", "2", "CENTER", "70", "0", "3", "Center", "72", "65", "73", "4", "40", "50.8", "49", "31.75", "74", "0", "49", "-6.35", "74", "0", "49", "6.35", "74", "0", "49", "-6.35", "74", "0",
+    "0", "ENDTAB",
+    "0", "TABLE", "2", "LAYER", "70", "2",
+    "0", "LAYER", "2", "CENTERLINES", "70", "0", "62", "1", "6", "CENTER",
+    "0", "LAYER", "2", "0", "70", "0", "62", "7", "6", "Continuous",
+    "0", "ENDTAB",
+  ].join("\n");
+
+  const lineOn = (layer: string, extra: string[] = []) =>
+    ["0", "LINE", "8", layer, ...extra, "10", "0.0", "20", "0.0", "11", "100.0", "21", "0.0"].join("\n");
+
+  const withLtScale = (dxf: string, ltscale: number) =>
+    ["0", "SECTION", "2", "HEADER", "9", "$LTSCALE", "40", String(ltscale), "0", "ENDSEC", dxf].join("\n");
+
+  function dashOf(dxf: string, index = 0) {
+    const entity = parseDxfText(dxf).entities[index];
+    return entity.type === "TEXT" ? undefined : entity.lineDash;
+  }
+
+  it("applies an explicit entity linetype from the LTYPE table", () => {
+    const dash = dashOf(buildDxf(lineOn("0", ["6", "DASHED"]), LTYPE_AND_LAYER_TABLES));
+    expect(dash?.name).toBe("DASHED");
+    expect(dash?.pattern).toEqual([6.35, 3.175]);
+  });
+
+  it("matches linetype names case-insensitively", () => {
+    expect(dashOf(buildDxf(lineOn("0", ["6", "dashed"]), LTYPE_AND_LAYER_TABLES))?.pattern).toEqual([6.35, 3.175]);
+  });
+
+  it("uses the layer's linetype for ByLayer entities", () => {
+    expect(dashOf(buildDxf(lineOn("CENTERLINES"), LTYPE_AND_LAYER_TABLES))?.name).toBe("CENTER");
+    expect(dashOf(buildDxf(lineOn("CENTERLINES", ["6", "BYLAYER"]), LTYPE_AND_LAYER_TABLES))?.name).toBe("CENTER");
+  });
+
+  it("lets an explicit entity linetype override the layer's linetype", () => {
+    expect(dashOf(buildDxf(lineOn("CENTERLINES", ["6", "DASHED"]), LTYPE_AND_LAYER_TABLES))?.name).toBe("DASHED");
+    expect(dashOf(buildDxf(lineOn("CENTERLINES", ["6", "Continuous"]), LTYPE_AND_LAYER_TABLES))).toBeUndefined();
+  });
+
+  it("leaves continuous, unspecified, and unknown linetypes solid", () => {
+    expect(dashOf(buildDxf(lineOn("0"), LTYPE_AND_LAYER_TABLES))).toBeUndefined();
+    expect(dashOf(buildDxf(lineOn("0", ["6", "CONTINUOUS"]), LTYPE_AND_LAYER_TABLES))).toBeUndefined();
+    expect(dashOf(buildDxf(lineOn("0", ["6", "NO_SUCH_LINETYPE"]), LTYPE_AND_LAYER_TABLES))).toBeUndefined();
+  });
+
+  it("scales the pattern by $LTSCALE and by the entity's own linetype scale", () => {
+    const base = buildDxf(lineOn("0", ["6", "DASHED"]), LTYPE_AND_LAYER_TABLES);
+    expect(dashOf(withLtScale(base, 2))?.pattern).toEqual([12.7, 6.35]);
+
+    const scaledEntity = buildDxf(lineOn("0", ["6", "DASHED", "48", "0.5"]), LTYPE_AND_LAYER_TABLES);
+    expect(dashOf(scaledEntity)?.pattern).toEqual([3.175, 1.5875]);
+
+    const both = withLtScale(buildDxf(lineOn("0", ["6", "DASHED", "48", "0.5"]), LTYPE_AND_LAYER_TABLES), 4);
+    expect(dashOf(both)?.pattern).toEqual([12.7, 6.35]);
+  });
+
+  it("keeps a multi-element pattern like CENTER intact", () => {
+    expect(dashOf(buildDxf(lineOn("CENTERLINES"), LTYPE_AND_LAYER_TABLES))?.pattern).toEqual([31.75, 6.35, 6.35, 6.35]);
+  });
+
+  it("shares one dash object between entities with the same linetype and scale", () => {
+    const two = buildDxf([lineOn("0", ["6", "DASHED"]), lineOn("0", ["6", "DASHED"])].join("\n"), LTYPE_AND_LAYER_TABLES);
+    const [first, second] = parseDxfText(two).entities;
+    const firstDash = first.type === "TEXT" ? undefined : first.lineDash;
+    const secondDash = second.type === "TEXT" ? undefined : second.lineDash;
+    expect(firstDash).toBeDefined();
+    expect(firstDash).toBe(secondDash);
+  });
+
+  it("resolves ByBlock linetypes from the INSERT and ignores the INSERT's scale", () => {
+    const insert = ["0", "INSERT", "8", "0", "2", "SYMBOL", "10", "0.0", "20", "0.0", "6", "DASHED", "41", "3.0", "42", "3.0"].join("\n");
+    const dxf = buildDxfWithBlocks(
+      insert,
+      blockDef("SYMBOL", { x: 0, y: 0 }, lineOn("0", ["6", "BYBLOCK"])),
+      LTYPE_AND_LAYER_TABLES,
+    );
+    const dash = dashOf(dxf);
+    expect(dash?.name).toBe("DASHED");
+    expect(dash?.pattern).toEqual([6.35, 3.175]);
+  });
+
+  it("makes ByBlock entities solid when there is no enclosing INSERT linetype", () => {
+    expect(dashOf(buildDxf(lineOn("0", ["6", "BYBLOCK"]), LTYPE_AND_LAYER_TABLES))).toBeUndefined();
+  });
+
+  it("applies the linetype to circles, arcs and polylines as well", () => {
+    const circle = ["0", "CIRCLE", "8", "0", "6", "DASHED", "10", "0.0", "20", "0.0", "40", "5.0"].join("\n");
+    expect(dashOf(buildDxf(circle, LTYPE_AND_LAYER_TABLES))?.name).toBe("DASHED");
+  });
+});

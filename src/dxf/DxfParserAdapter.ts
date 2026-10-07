@@ -9,11 +9,13 @@ import type { ITextEntity } from "dxf-parser";
 import type { IMtextEntity } from "dxf-parser";
 import type { IEllipseEntity } from "dxf-parser";
 import type { ISplineEntity } from "dxf-parser";
-import type { CadEntity, CadHorizontalAlign, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
+import type { CadEntity, CadHorizontalAlign, LineDash, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
 import type { Matrix2D } from "../utils/matrix2d";
 import { computeAllEntityBounds, unionOfEntityBounds } from "../cad-view/spatial/entityBounds";
 import { stripMtextFormatting } from "./mtextFormatting";
+import { extractLayerLineTypes } from "./layerLineTypes";
+import { normalizeDashPattern } from "../utils/lineDash";
 import { tessellateSpline } from "../utils/spline";
 
 const DEFAULT_COLOR = "#ffffff";
@@ -55,12 +57,28 @@ export function parseDxfText(text: string): CadModel {
   if (!raw) {
     throw new Error("DXFの解析結果が空です");
   }
-  return convertToCadModel(raw);
+  return convertToCadModel(raw, { layerLineTypes: extractLayerLineTypes(text) });
 }
+
+export type ConvertOptions = {
+  /** レイヤー名→線種名。dxf-parserが読まないLAYERテーブルの線種を、ByLayer解決用に渡す */
+  layerLineTypes?: ReadonlyMap<string, string>;
+};
+
+/** ByBlockで指定された属性が継承する、直近のINSERT側で解決済みの値 */
+type ByBlockStyle = { color: string | null; lineType: string | null };
+
+const NO_BYBLOCK_STYLE: ByBlockStyle = { color: null, lineType: null };
 
 type ConversionContext = {
   raw: IDxf;
   layerColorByName: Map<string, string>;
+  layerLineTypeByName: ReadonlyMap<string, string>;
+  /** 線種名(大文字)→DXFのLTYPE要素列 */
+  lineTypePatterns: Map<string, number[]>;
+  ltScale: number;
+  /** 線種名と尺度ごとの破線。同じものは同じオブジェクトを返す(nullは実線扱い) */
+  dashCache: Map<string, LineDash | null>;
   entities: CadEntity[];
   usedLayerNames: Set<string>;
   unsupportedBreakdown: Record<string, number>;
@@ -68,13 +86,17 @@ type ConversionContext = {
   nextId: number;
 };
 
-export function convertToCadModel(raw: IDxf): CadModel {
+export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadModel {
   const layerColorByName = buildLayerColorMap(raw);
   const modelSpaceEntities = (raw.entities ?? []).filter((entity) => !entity.inPaperSpace);
 
   const context: ConversionContext = {
     raw,
     layerColorByName,
+    layerLineTypeByName: options.layerLineTypes ?? new Map(),
+    lineTypePatterns: buildLineTypePatternMap(raw),
+    ltScale: readLineTypeScale(raw),
+    dashCache: new Map(),
     entities: [],
     usedLayerNames: new Set(),
     unsupportedBreakdown: {},
@@ -82,7 +104,7 @@ export function convertToCadModel(raw: IDxf): CadModel {
     nextId: 0,
   };
 
-  walkEntities(modelSpaceEntities, IDENTITY_MATRIX, null, new Set(), 0, context);
+  walkEntities(modelSpaceEntities, IDENTITY_MATRIX, NO_BYBLOCK_STYLE, new Set(), 0, context);
 
   const layers = buildLayers(raw, layerColorByName, context.usedLayerNames);
   const supportedEntityCount = context.entities.length;
@@ -111,20 +133,25 @@ export function convertToCadModel(raw: IDxf): CadModel {
 function walkEntities(
   entities: IEntity[],
   matrix: Matrix2D,
-  byBlockColor: string | null,
+  byBlock: ByBlockStyle,
   visitedBlockNames: ReadonlySet<string>,
   depth: number,
   context: ConversionContext,
 ): void {
   for (const entity of entities) {
     if (entity.type === "INSERT") {
-      expandInsert(entity as IInsertEntity, matrix, byBlockColor, visitedBlockNames, depth, context);
+      expandInsert(entity as IInsertEntity, matrix, byBlock, visitedBlockNames, depth, context);
       continue;
     }
 
     context.totalEntityCount++;
-    const converted = convertEntity(entity, context.layerColorByName, matrix, byBlockColor, () => `e${context.nextId++}`);
+    const converted = convertEntity(entity, context.layerColorByName, matrix, byBlock.color, () => `e${context.nextId++}`);
     if (converted) {
+      if (converted.type !== "TEXT") {
+        const lineTypeName = resolveLineTypeName(entity, context.layerLineTypeByName, byBlock.lineType);
+        const dash = resolveLineDash(lineTypeName, entity.lineTypeScale, context);
+        if (dash) converted.lineDash = dash;
+      }
       context.entities.push(converted);
       context.usedLayerNames.add(converted.layer);
     } else {
@@ -137,7 +164,7 @@ function walkEntities(
 function expandInsert(
   insert: IInsertEntity,
   parentMatrix: Matrix2D,
-  parentByBlockColor: string | null,
+  parentByBlock: ByBlockStyle,
   visitedBlockNames: ReadonlySet<string>,
   depth: number,
   context: ConversionContext,
@@ -155,7 +182,10 @@ function expandInsert(
   const nextVisited = new Set(visitedBlockNames);
   nextVisited.add(insert.name);
 
-  const insertColor = resolveEntityColor(insert, context.layerColorByName, parentByBlockColor);
+  const insertByBlock: ByBlockStyle = {
+    color: resolveEntityColor(insert, context.layerColorByName, parentByBlock.color),
+    lineType: resolveLineTypeName(insert, context.layerLineTypeByName, parentByBlock.lineType),
+  };
   const rotationRadians = ((insert.rotation ?? 0) * Math.PI) / 180;
   const scaleX = insert.xScale ?? 1;
   const scaleY = insert.yScale ?? 1;
@@ -185,7 +215,7 @@ function expandInsert(
         blockBasePoint,
       });
       const worldMatrix = multiplyMatrices(parentMatrix, localMatrix);
-      walkEntities(block.entities ?? [], worldMatrix, insertColor, nextVisited, depth + 1, context);
+      walkEntities(block.entities ?? [], worldMatrix, insertByBlock, nextVisited, depth + 1, context);
     }
   }
 }
@@ -197,6 +227,55 @@ function buildLayerColorMap(raw: IDxf): Map<string, string> {
     map.set(name, layer.color !== undefined ? toHexColor(layer.color) : DEFAULT_COLOR);
   }
   return map;
+}
+
+function buildLineTypePatternMap(raw: IDxf): Map<string, number[]> {
+  const map = new Map<string, number[]>();
+  for (const [name, lineType] of Object.entries(raw.tables?.lineType?.lineTypes ?? {})) {
+    // dxf-parserの型はstring[]だが、実際にはグループコード49の数値が入る
+    if (lineType.pattern) map.set(name.toUpperCase(), lineType.pattern.map(Number));
+  }
+  return map;
+}
+
+/** $LTSCALE(全体の線種尺度)。未指定や不正値は1 */
+function readLineTypeScale(raw: IDxf): number {
+  const value = raw.header?.["$LTSCALE"];
+  return typeof value === "number" && value > 0 && Number.isFinite(value) ? value : 1;
+}
+
+/**
+ * 図形の線種名を解決する。ByLayer(または未指定)ならレイヤーの線種、
+ * ByBlockなら属するINSERT側で解決された線種(byBlockLineType)を使う。
+ */
+function resolveLineTypeName(
+  entity: IEntity,
+  layerLineTypeByName: ReadonlyMap<string, string>,
+  byBlockLineType: string | null,
+): string | null {
+  const own = entity.lineType?.trim();
+  const upper = own?.toUpperCase();
+  if (!own || upper === "BYLAYER") return layerLineTypeByName.get(entity.layer) ?? null;
+  if (upper === "BYBLOCK") return byBlockLineType;
+  return own;
+}
+
+/** 線種名から破線パターンを得る。実線・未定義の線種はundefined。AutoCAD同様、INSERTの拡大率には影響されない */
+function resolveLineDash(name: string | null, entityScale: number | undefined, context: ConversionContext): LineDash | undefined {
+  if (!name) return undefined;
+  const upper = name.toUpperCase();
+  if (upper === "CONTINUOUS") return undefined;
+
+  const scale = context.ltScale * (entityScale !== undefined && entityScale > 0 ? entityScale : 1);
+  const key = `${upper}@${scale}`;
+  let dash = context.dashCache.get(key);
+  if (dash === undefined) {
+    const elements = context.lineTypePatterns.get(upper);
+    const pattern = elements ? normalizeDashPattern(elements, scale) : null;
+    dash = pattern ? { key, name, pattern } : null;
+    context.dashCache.set(key, dash);
+  }
+  return dash ?? undefined;
 }
 
 function buildLayers(raw: IDxf, layerColorByName: Map<string, string>, usedLayerNames: Set<string>): CadLayer[] {
