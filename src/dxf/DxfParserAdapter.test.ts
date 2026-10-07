@@ -436,6 +436,63 @@ describe("DxfParserAdapter - INSERT/BLOCK expansion", () => {
     // 無限ループせず完了すること自体がテストの主目的
     expect(model.entities).toHaveLength(0);
   });
+
+  it("expands deeply nested block references instead of dropping everything below a fixed depth", () => {
+    // 実際の図面ではグループ化の入れ子が10〜20段になる。B0 -> B1 -> ... -> B19 -> LINE
+    const depth = 20;
+    const blocks: string[] = [];
+    for (let i = 0; i < depth - 1; i++) {
+      blocks.push(blockDef(`B${i}`, { x: 0, y: 0 }, insertRef(`B${i + 1}`, { x: 1, y: 0 })));
+    }
+    blocks.push(blockDef(`B${depth - 1}`, { x: 0, y: 0 }, lineInBlock));
+
+    const model = parseDxfText(buildDxfWithBlocks(insertRef("B0", { x: 0, y: 0 }), blocks.join("\n")));
+
+    expect(model.entities).toHaveLength(1);
+    expect(model.stats.unsupportedEntityCount).toBe(0);
+    const entity = model.entities[0];
+    // 各段で+1ずつ平行移動する: 19段分
+    if (entity.type === "LINE") expect(entity.start).toEqual({ x: depth - 1, y: 0 });
+    else throw new Error("expected a LINE");
+  });
+});
+
+describe("DxfParserAdapter - DIMENSION", () => {
+  const dimensionBlockContent = [
+    ["0", "LINE", "8", "0", "62", "0", "10", "0.0", "20", "0.0", "11", "940.0", "21", "0.0"].join("\n"),
+    ["0", "MTEXT", "8", "0", "10", "470.0", "20", "20.0", "40", "30.0", "71", "5", "1", "940"].join("\n"),
+  ].join("\n");
+
+  const dimension = (blockName: string | null, extra: string[] = []) =>
+    ["0", "DIMENSION", "8", "DIM", ...extra, ...(blockName ? ["2", blockName] : []), "70", "0", "10", "0.0", "20", "0.0", "11", "470.0", "21", "20.0"].join(
+      "\n",
+    );
+
+  it("draws a DIMENSION by expanding its anonymous drawing block", () => {
+    const dxf = buildDxfWithBlocks(dimension("*D1"), blockDef("*D1", { x: 0, y: 0 }, dimensionBlockContent));
+
+    const model = parseDxfText(dxf);
+
+    expect(model.entities.map((e) => e.type).sort()).toEqual(["LINE", "TEXT"]);
+    expect(model.stats.unsupportedEntityCount).toBe(0);
+    const text = model.entities.find((e) => e.type === "TEXT");
+    if (text?.type === "TEXT") expect(text.text).toBe("940");
+  });
+
+  it("lets ByBlock entities in the dimension block inherit the dimension's own color", () => {
+    const dxf = buildDxfWithBlocks(dimension("*D1", ["62", "1"]), blockDef("*D1", { x: 0, y: 0 }, dimensionBlockContent));
+    const line = parseDxfText(dxf).entities.find((e) => e.type === "LINE");
+    expect(line?.color).toBe("#ff0000");
+  });
+
+  it("still reports a DIMENSION whose block is missing as unsupported", () => {
+    const missing = parseDxfText(buildDxf(dimension("*D99")));
+    expect(missing.entities).toHaveLength(0);
+    expect(missing.stats.unsupportedBreakdown).toEqual({ DIMENSION: 1 });
+
+    const noName = parseDxfText(buildDxf(dimension(null)));
+    expect(noName.stats.unsupportedBreakdown).toEqual({ DIMENSION: 1 });
+  });
 });
 
 describe("DxfParserAdapter - CIRCLE/ARC conversion", () => {

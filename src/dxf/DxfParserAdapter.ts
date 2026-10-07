@@ -20,8 +20,9 @@ import { tessellateSpline } from "../utils/spline";
 
 const DEFAULT_COLOR = "#ffffff";
 const DEFAULT_TEXT_HEIGHT = 2.5;
-// ブロックが自分自身(直接/間接)を参照する循環定義に対する安全装置。通常のDXFでは数段でネストが終わる。
-const MAX_INSERT_DEPTH = 12;
+// 循環参照はvisitedBlockNamesで別途検出するので、これは再帰が異常に深くなる場合だけの安全装置。
+// 実際のCAD図面では、グループ化の入れ子で10〜20段になることがあり、低い上限だと配下の図形が丸ごと消える。
+const MAX_INSERT_DEPTH = 64;
 
 function alignFromTextHalign(halign: number | undefined): CadHorizontalAlign {
   if (halign === 2) return "right";
@@ -144,6 +145,15 @@ function walkEntities(
       continue;
     }
 
+    // DIMENSIONの寸法線・矢印・数値は、名前付きの匿名ブロック(*Dn)に描画済みの図形として入っている
+    if (entity.type === "DIMENSION") {
+      const blockName = (entity as IEntity & { block?: string }).block;
+      if (blockName && context.raw.blocks?.[blockName]) {
+        expandInsert(dimensionAsInsert(entity, blockName), matrix, byBlock, visitedBlockNames, depth, context);
+        continue;
+      }
+    }
+
     context.totalEntityCount++;
     const converted = convertEntity(entity, context.layerColorByName, matrix, byBlock.color, () => `e${context.nextId++}`);
     if (converted) {
@@ -159,6 +169,27 @@ function walkEntities(
       context.unsupportedBreakdown[type] = (context.unsupportedBreakdown[type] ?? 0) + 1;
     }
   }
+}
+
+/** DIMENSIONを、その描画ブロックを原点・等倍・回転なしで挿入するINSERTとして扱う(色・線種のByBlockは寸法自身の指定を継承する) */
+function dimensionAsInsert(dimension: IEntity, blockName: string): IInsertEntity {
+  return {
+    type: "INSERT",
+    name: blockName,
+    layer: dimension.layer,
+    colorIndex: dimension.colorIndex,
+    color: dimension.color,
+    lineType: dimension.lineType,
+    position: { x: 0, y: 0, z: 0 },
+    xScale: 1,
+    yScale: 1,
+    zScale: 1,
+    rotation: 0,
+    columnCount: 1,
+    rowCount: 1,
+    columnSpacing: 0,
+    rowSpacing: 0,
+  } as unknown as IInsertEntity;
 }
 
 function expandInsert(
