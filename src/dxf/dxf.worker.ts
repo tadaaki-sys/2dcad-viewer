@@ -3,7 +3,7 @@ import DxfParser from "dxf-parser";
 import { convertToCadModel } from "./DxfParserAdapter";
 import { decodeDxfBuffer } from "./dxfEncoding";
 import { detectDwgVersion } from "./dwgFormat";
-import { extractLayerLineTypes } from "./layerLineTypes";
+import { extractLayerStyles } from "./layerStyles";
 import { convertDwgToDxfBuffer } from "./dwgToDxf";
 import type {
   DxfWorkerErrorMessage,
@@ -44,7 +44,7 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
     }
 
     postProgress("converting", raw.entities?.length ?? null);
-    const cadModel = convertToCadModel(raw, { layerLineTypes: extractLayerLineTypes(text) });
+    const cadModel = convertToCadModel(raw, { layerStyles: extractLayerStyles(text) });
     console.log("[dxf.worker] converted CadModel stats", cadModel.stats);
 
     postProgress("preparing", cadModel.stats.totalEntityCount);

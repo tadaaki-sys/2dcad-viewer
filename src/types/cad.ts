@@ -31,6 +31,8 @@ export type CadLine = {
   layer: string;
   color: string;
   lineDash?: LineDash;
+  /** 線の太さ(1/100mm)。0.27mmを超える太線の場合だけ保持し、省略時は細線(1px)として描く */
+  lineWeight?: number;
   start: Point2D;
   end: Point2D;
 };
@@ -41,6 +43,8 @@ export type CadPolyline = {
   layer: string;
   color: string;
   lineDash?: LineDash;
+  /** 線の太さ(1/100mm)。0.27mmを超える太線の場合だけ保持し、省略時は細線(1px)として描く */
+  lineWeight?: number;
   vertices: Point2D[];
   closed: boolean;
 };
@@ -51,6 +55,8 @@ export type CadCircle = {
   layer: string;
   color: string;
   lineDash?: LineDash;
+  /** 線の太さ(1/100mm)。0.27mmを超える太線の場合だけ保持し、省略時は細線(1px)として描く */
+  lineWeight?: number;
   center: Point2D;
   radius: number;
 };
@@ -62,6 +68,8 @@ export type CadArc = {
   layer: string;
   color: string;
   lineDash?: LineDash;
+  /** 線の太さ(1/100mm)。0.27mmを超える太線の場合だけ保持し、省略時は細線(1px)として描く */
+  lineWeight?: number;
   center: Point2D;
   radius: number;
   startAngle: number;
@@ -99,6 +107,8 @@ export type CadEllipse = {
   layer: string;
   color: string;
   lineDash?: LineDash;
+  /** 線の太さ(1/100mm)。0.27mmを超える太線の場合だけ保持し、省略時は細線(1px)として描く */
+  lineWeight?: number;
   center: Point2D;
   majorRadius: number;
   minorRadius: number;
@@ -114,6 +124,8 @@ export type CadSpline = {
   layer: string;
   color: string;
   lineDash?: LineDash;
+  /** 線の太さ(1/100mm)。0.27mmを超える太線の場合だけ保持し、省略時は細線(1px)として描く */
+  lineWeight?: number;
   points: Point2D[];
   closed: boolean;
 };

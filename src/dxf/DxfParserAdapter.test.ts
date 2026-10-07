@@ -850,6 +850,61 @@ describe("DxfParserAdapter - SPLINE conversion", () => {
   });
 });
 
+describe("DxfParserAdapter - line weights", () => {
+  const LAYER_TABLE = [
+    "0", "TABLE", "2", "LAYER", "70", "2",
+    "0", "LAYER", "2", "HEAVY", "70", "0", "62", "1", "6", "Continuous", "370", "50",
+    "0", "LAYER", "2", "THIN", "70", "0", "62", "7", "6", "Continuous", "370", "-3",
+    "0", "ENDTAB",
+  ].join("\n");
+
+  const lineOn = (layer: string, extra: string[] = []) =>
+    ["0", "LINE", "8", layer, ...extra, "10", "0.0", "20", "0.0", "11", "100.0", "21", "0.0"].join("\n");
+
+  function weightOf(dxf: string): number | undefined {
+    const entity = parseDxfText(dxf).entities[0];
+    return entity.type === "TEXT" ? undefined : entity.lineWeight;
+  }
+
+  it("keeps an explicit heavy weight (in 1/100 mm)", () => {
+    expect(weightOf(buildDxf(lineOn("THIN", ["370", "50"]), LAYER_TABLE))).toBe(50);
+    expect(weightOf(buildDxf(lineOn("THIN", ["370", "211"]), LAYER_TABLE))).toBe(211);
+  });
+
+  it("does not store thin weights, which render as a standard 1 px line", () => {
+    for (const thin of ["13", "18", "25", "27"]) {
+      expect(weightOf(buildDxf(lineOn("THIN", ["370", thin]), LAYER_TABLE))).toBeUndefined();
+    }
+  });
+
+  it("uses the layer's weight for ByLayer (or unspecified) entities", () => {
+    expect(weightOf(buildDxf(lineOn("HEAVY"), LAYER_TABLE))).toBe(50);
+    expect(weightOf(buildDxf(lineOn("HEAVY", ["370", "-1"]), LAYER_TABLE))).toBe(50);
+    expect(weightOf(buildDxf(lineOn("THIN"), LAYER_TABLE))).toBeUndefined();
+  });
+
+  it("lets an explicit entity weight or the default marker override the layer's weight", () => {
+    expect(weightOf(buildDxf(lineOn("HEAVY", ["370", "13"]), LAYER_TABLE))).toBeUndefined();
+    expect(weightOf(buildDxf(lineOn("HEAVY", ["370", "-3"]), LAYER_TABLE))).toBeUndefined();
+    expect(weightOf(buildDxf(lineOn("HEAVY", ["370", "100"]), LAYER_TABLE))).toBe(100);
+  });
+
+  it("resolves ByBlock weights from the INSERT", () => {
+    const insert = (weight: string[]) =>
+      ["0", "INSERT", "8", "THIN", "2", "SYMBOL", "10", "0.0", "20", "0.0", ...weight].join("\n");
+    const block = blockDef("SYMBOL", { x: 0, y: 0 }, lineOn("THIN", ["370", "-2"]));
+
+    expect(weightOf(buildDxfWithBlocks(insert(["370", "70"]), block, LAYER_TABLE))).toBe(70);
+    expect(weightOf(buildDxfWithBlocks(insert([]), block, LAYER_TABLE))).toBeUndefined();
+  });
+
+  it("lets a ByBlock insert inherit from the layer of the INSERT itself", () => {
+    const insert = ["0", "INSERT", "8", "HEAVY", "2", "SYMBOL", "10", "0.0", "20", "0.0", "370", "-1"].join("\n");
+    const block = blockDef("SYMBOL", { x: 0, y: 0 }, lineOn("THIN", ["370", "-2"]));
+    expect(weightOf(buildDxfWithBlocks(insert, block, LAYER_TABLE))).toBe(50);
+  });
+});
+
 describe("DxfParserAdapter - linetypes", () => {
   const LTYPE_AND_LAYER_TABLES = [
     "0", "TABLE", "2", "LTYPE", "70", "3",

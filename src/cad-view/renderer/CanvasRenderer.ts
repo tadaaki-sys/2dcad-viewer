@@ -2,6 +2,7 @@ import type { CadEntity, CadText, LineDash, Measurement, Point2D } from "../../t
 import { computeMeasurementDistances } from "../measurement/Measurement";
 import { formatMm } from "../../utils/format";
 import { normalizeArcSpan, pointOnEllipse } from "../../utils/geometry";
+import { lineWeightToScreenWidthPx } from "../../utils/lineWeight";
 import type { Camera } from "../camera/Camera";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 import { TEXT_LINE_HEIGHT_FACTOR } from "../entityGeometry";
@@ -27,7 +28,12 @@ const MIN_DASH_PERIOD_PX = 4;
 // 長さ0の「点」は、画面上でこの長さの短い線として描く
 const DOT_LENGTH_PX = 1;
 
-type StrokeBatch = { color: string; screenDash: number[] | null; path: Path2D };
+type StrokeBatch = { color: string; screenDash: number[] | null; widthPx: number; path: Path2D };
+
+/** 図形の線幅(px)。太線の指定が無ければ標準の1px */
+function strokeWidthOf(entity: Exclude<CadEntity, CadText>): number {
+  return entity.lineWeight === undefined ? LINE_WIDTH_PX : lineWeightToScreenWidthPx(entity.lineWeight);
+}
 
 /** ワールド座標の破線パターンを、現在の拡大率での画面上のpx長へ換算する。実線扱いにする場合はnull */
 function toScreenDashPattern(dash: LineDash, k: number): number[] | null {
@@ -327,9 +333,11 @@ export class CanvasRenderer implements Renderer {
         screenDash = screenDashByKey.get(dash.key) ?? null;
         if (screenDash) batchKey = `${entity.color}|${dash.key}`;
       }
+      const widthPx = strokeWidthOf(entity);
+      if (widthPx !== LINE_WIDTH_PX) batchKey = `${batchKey}|w${widthPx}`;
       let batch = batches.get(batchKey);
       if (!batch) {
-        batch = { color: entity.color, screenDash, path: new Path2D() };
+        batch = { color: entity.color, screenDash, widthPx, path: new Path2D() };
         batches.set(batchKey, batch);
       }
       appendEntity(batch.path, entity, k, camera.offsetX, camera.offsetY);
@@ -337,10 +345,12 @@ export class CanvasRenderer implements Renderer {
 
     for (const batch of batches.values()) {
       ctx.strokeStyle = batch.color;
+      ctx.lineWidth = batch.widthPx;
       ctx.setLineDash(batch.screenDash ?? []);
       ctx.stroke(batch.path);
     }
     ctx.setLineDash([]);
+    ctx.lineWidth = LINE_WIDTH_PX;
     for (const text of texts) {
       drawTextEntity(ctx, camera, text, text.color);
     }
@@ -353,6 +363,8 @@ export class CanvasRenderer implements Renderer {
           drawTextEntity(ctx, camera, entity, HIGHLIGHT_COLOR);
           continue;
         }
+        // 元の線が太いときも、ハイライトが細くならないよう元より少し太く描く
+        ctx.lineWidth = Math.max(HIGHLIGHT_LINE_WIDTH_PX, strokeWidthOf(entity) + 1);
         traceEntityPath(ctx, camera, entity);
         ctx.stroke();
       }

@@ -14,8 +14,10 @@ import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } fro
 import type { Matrix2D } from "../utils/matrix2d";
 import { computeAllEntityBounds, unionOfEntityBounds } from "../cad-view/spatial/entityBounds";
 import { stripMtextFormatting } from "./mtextFormatting";
-import { extractLayerLineTypes } from "./layerLineTypes";
+import { extractLayerStyles } from "./layerStyles";
+import type { LayerStyle } from "./layerStyles";
 import { normalizeDashPattern } from "../utils/lineDash";
+import { THIN_LINE_WEIGHT_LIMIT } from "../utils/lineWeight";
 import { tessellateSpline } from "../utils/spline";
 
 const DEFAULT_COLOR = "#ffffff";
@@ -67,23 +69,23 @@ export function parseDxfText(text: string): CadModel {
   if (!raw) {
     throw new Error("DXFの解析結果が空です");
   }
-  return convertToCadModel(raw, { layerLineTypes: extractLayerLineTypes(text) });
+  return convertToCadModel(raw, { layerStyles: extractLayerStyles(text) });
 }
 
 export type ConvertOptions = {
-  /** レイヤー名→線種名。dxf-parserが読まないLAYERテーブルの線種を、ByLayer解決用に渡す */
-  layerLineTypes?: ReadonlyMap<string, string>;
+  /** レイヤー名→線種・線の太さ。dxf-parserが読まないLAYERテーブルの値を、ByLayer解決用に渡す */
+  layerStyles?: ReadonlyMap<string, LayerStyle>;
 };
 
 /** ByBlockで指定された属性が継承する、直近のINSERT側で解決済みの値 */
-type ByBlockStyle = { color: string | null; lineType: string | null };
+type ByBlockStyle = { color: string | null; lineType: string | null; lineWeight: number | null };
 
-const NO_BYBLOCK_STYLE: ByBlockStyle = { color: null, lineType: null };
+const NO_BYBLOCK_STYLE: ByBlockStyle = { color: null, lineType: null, lineWeight: null };
 
 type ConversionContext = {
   raw: IDxf;
   layerColorByName: Map<string, string>;
-  layerLineTypeByName: ReadonlyMap<string, string>;
+  layerStyleByName: ReadonlyMap<string, LayerStyle>;
   /** 線種名(大文字)→DXFのLTYPE要素列 */
   lineTypePatterns: Map<string, number[]>;
   ltScale: number;
@@ -103,7 +105,7 @@ export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadM
   const context: ConversionContext = {
     raw,
     layerColorByName,
-    layerLineTypeByName: options.layerLineTypes ?? new Map(),
+    layerStyleByName: options.layerStyles ?? new Map(),
     lineTypePatterns: buildLineTypePatternMap(raw),
     ltScale: readLineTypeScale(raw),
     dashCache: new Map(),
@@ -167,9 +169,11 @@ function walkEntities(
     const converted = convertEntity(entity, context.layerColorByName, matrix, byBlock.color, () => `e${context.nextId++}`);
     if (converted) {
       if (converted.type !== "TEXT") {
-        const lineTypeName = resolveLineTypeName(entity, context.layerLineTypeByName, byBlock.lineType);
+        const lineTypeName = resolveLineTypeName(entity, context.layerStyleByName, byBlock.lineType);
         const dash = resolveLineDash(lineTypeName, entity.lineTypeScale, context);
         if (dash) converted.lineDash = dash;
+        const weight = resolveLineWeight(entity, context.layerStyleByName, byBlock.lineWeight);
+        if (weight !== null && weight > THIN_LINE_WEIGHT_LIMIT) converted.lineWeight = weight;
       }
       context.entities.push(converted);
       context.usedLayerNames.add(converted.layer);
@@ -224,7 +228,8 @@ function expandInsert(
 
   const insertByBlock: ByBlockStyle = {
     color: resolveEntityColor(insert, context.layerColorByName, parentByBlock.color),
-    lineType: resolveLineTypeName(insert, context.layerLineTypeByName, parentByBlock.lineType),
+    lineType: resolveLineTypeName(insert, context.layerStyleByName, parentByBlock.lineType),
+    lineWeight: resolveLineWeight(insert, context.layerStyleByName, parentByBlock.lineWeight),
   };
   const rotationRadians = ((insert.rotation ?? 0) * Math.PI) / 180;
   const scaleX = insert.xScale ?? 1;
@@ -290,14 +295,36 @@ function readLineTypeScale(raw: IDxf): number {
  */
 function resolveLineTypeName(
   entity: IEntity,
-  layerLineTypeByName: ReadonlyMap<string, string>,
+  layerStyleByName: ReadonlyMap<string, LayerStyle>,
   byBlockLineType: string | null,
 ): string | null {
   const own = entity.lineType?.trim();
   const upper = own?.toUpperCase();
-  if (!own || upper === "BYLAYER") return layerLineTypeByName.get(entity.layer) ?? null;
+  if (!own || upper === "BYLAYER") return layerStyleByName.get(entity.layer)?.lineType ?? null;
   if (upper === "BYBLOCK") return byBlockLineType;
   return own;
+}
+
+// DXFのグループコード370の特殊値(dxf-parserのコメントは-1/-2の意味が逆だが、DXF仕様はこちら)
+const LINEWEIGHT_BY_BLOCK = -2;
+const LINEWEIGHT_DEFAULT = -3;
+
+/**
+ * 図形の線の太さ(1/100mm)を解決する。数値の指定が最優先、ByBlockは属するINSERT側、
+ * 未指定とByLayerはレイヤーの値を使う。既定値(-3)や解決できない場合はnull(細線扱い)。
+ */
+function resolveLineWeight(
+  entity: IEntity,
+  layerStyleByName: ReadonlyMap<string, LayerStyle>,
+  byBlockLineWeight: number | null,
+): number | null {
+  const own = entity.lineweight;
+  if (own !== undefined && own >= 0) return own;
+  if (own === LINEWEIGHT_BY_BLOCK) return byBlockLineWeight;
+  if (own === LINEWEIGHT_DEFAULT) return null;
+
+  const layerWeight = layerStyleByName.get(entity.layer)?.lineWeight;
+  return layerWeight !== undefined && layerWeight !== null && layerWeight >= 0 ? layerWeight : null;
 }
 
 /** 線種名から破線パターンを得る。実線・未定義の線種はundefined。AutoCAD同様、INSERTの拡大率には影響されない */

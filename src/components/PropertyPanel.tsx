@@ -33,6 +33,9 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
   if (entity.type !== "TEXT" && entity.lineDash) {
     rows.push({ label: "Linetype", value: entity.lineDash.name });
   }
+  if (entity.type !== "TEXT" && entity.lineWeight !== undefined) {
+    rows.push({ label: "Lineweight", value: `${(entity.lineWeight / 100).toFixed(2)} mm` });
+  }
 
   if (entity.type === "LINE") {
     rows.push(

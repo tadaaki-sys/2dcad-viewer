@@ -166,6 +166,43 @@ describe("CanvasRenderer batching", () => {
   });
 });
 
+describe("CanvasRenderer line weights", () => {
+  const weighted = (id: string, y: number, lineWeight?: number, color = "#fff"): CadEntity => ({
+    ...(line(id, 0, y, 100, y, color) as Extract<CadEntity, { type: "LINE" }>),
+    ...(lineWeight !== undefined ? { lineWeight } : {}),
+  });
+
+  it("strokes heavy lines in a separate, wider batch and thin lines at 1 px", () => {
+    const ctx = render(makeModel([weighted("thin", 10), weighted("heavy", 30, 50)]), camera());
+
+    const widths = ctx.strokes.map((s) => s.width).sort((a, b) => a - b);
+    expect(widths).toEqual([1, 2]);
+    const heavy = ctx.strokes.find((s) => s.width === 2)!;
+    expect(heavy.path!.ops.filter((op) => op[0] === "moveTo")).toHaveLength(1);
+  });
+
+  it("batches heavy lines of the same color and weight together", () => {
+    const ctx = render(makeModel([weighted("a", 10, 50), weighted("b", 30, 50), weighted("c", 50, 100)]), camera());
+    expect(ctx.strokes.map((s) => s.width).sort((a, b) => a - b)).toEqual([2, 4]);
+  });
+
+  it("restores the standard width after drawing heavy batches", () => {
+    const ctx = render(makeModel([weighted("heavy", 30, 100)]), camera());
+    expect(ctx.lineWidth).toBe(1);
+  });
+
+  it("highlights a heavy selected line wider than the line itself", () => {
+    const ctx = render(makeModel([weighted("heavy", 30, 100)]), camera(), { selectedEntityIds: new Set(["heavy"]) });
+    const highlight = ctx.strokes.find((s) => s.style === "#ffff00")!;
+    expect(highlight.width).toBe(5);
+  });
+
+  it("keeps the normal highlight width for thin selected lines", () => {
+    const ctx = render(makeModel([weighted("thin", 30)]), camera(), { selectedEntityIds: new Set(["thin"]) });
+    expect(ctx.strokes.find((s) => s.style === "#ffff00")!.width).toBe(2.5);
+  });
+});
+
 describe("CanvasRenderer text width factor", () => {
   const textWith = (widthFactor?: number): CadEntity => ({
     id: "t", type: "TEXT", ...common, color: "#fff", position: { x: 10, y: 50 }, text: "ABC", height: 10, rotation: 0,
