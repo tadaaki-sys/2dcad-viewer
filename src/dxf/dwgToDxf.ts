@@ -47,8 +47,13 @@ export async function convertDwgToDxfBuffer(dwgBuffer: ArrayBuffer): Promise<Arr
     const output = wasm.FS.readFile(OUTPUT_FILE_NAME);
     return output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength) as ArrayBuffer;
   } finally {
+    // 片方の後始末に失敗しても、もう片方の削除と元のエラーの伝播を妨げない
     for (const name of [INPUT_FILE_NAME, OUTPUT_FILE_NAME]) {
-      if (wasm.FS.analyzePath(name, false).exists) wasm.FS.unlink(name);
+      try {
+        if (wasm.FS.analyzePath(name, false).exists) wasm.FS.unlink(name);
+      } catch {
+        // 一時ファイルの削除失敗は無視してよい(WASMのメモリ上のファイルシステムで、ワーカー終了時に破棄される)
+      }
     }
   }
 }

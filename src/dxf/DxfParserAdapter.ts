@@ -19,12 +19,17 @@ import type { LayerStyle } from "./layerStyles";
 import { normalizeDashPattern } from "../utils/lineDash";
 import { THIN_LINE_WEIGHT_LIMIT } from "../utils/lineWeight";
 import { tessellateSpline } from "../utils/spline";
+import { ellipseFromConjugateDiameters, isReflection, isSimilarityTransform, linearBasis } from "../utils/ellipseTransform";
+import { expandBulges } from "../utils/polylineBulge";
 
 const DEFAULT_COLOR = "#ffffff";
 const DEFAULT_TEXT_HEIGHT = 2.5;
 // 循環参照はvisitedBlockNamesで別途検出するので、これは再帰が異常に深くなる場合だけの安全装置。
 // 実際のCAD図面では、グループ化の入れ子で10〜20段になることがあり、低い上限だと配下の図形が丸ごと消える。
 const MAX_INSERT_DEPTH = 64;
+// 配列複写(MINSERT)1つあたりの複写数の上限と、展開後の図形総数の上限(壊れた/悪意あるファイルでメモリを使い切らないための安全装置)
+const MAX_ARRAY_INSTANCES = 100_000;
+const MAX_EXPANDED_ENTITIES = 3_000_000;
 
 const MIN_WIDTH_FACTOR = 0.05;
 const MAX_WIDTH_FACTOR = 10;
@@ -56,7 +61,9 @@ function alignFromMtextAttachment(attachmentPoint: number | undefined): {
   horizontalAlign: CadHorizontalAlign;
   verticalAlign: CadVerticalAlign;
 } {
-  const index = Math.min(9, Math.max(1, attachmentPoint ?? 1)) - 1;
+  // 1〜9の整数以外(未指定・小数・範囲外・非数)は左上として扱う
+  const valid = attachmentPoint !== undefined && Number.isInteger(attachmentPoint) && attachmentPoint >= 1 && attachmentPoint <= 9;
+  const index = (valid ? attachmentPoint : 1) - 1;
   return {
     horizontalAlign: MTEXT_ATTACHMENT_HORIZONTAL[index % 3],
     verticalAlign: MTEXT_ATTACHMENT_VERTICAL[Math.floor(index / 3)],
@@ -78,9 +85,15 @@ export type ConvertOptions = {
 };
 
 /** ByBlockで指定された属性が継承する、直近のINSERT側で解決済みの値 */
-type ByBlockStyle = { color: string | null; lineType: string | null; lineWeight: number | null };
+type ByBlockStyle = {
+  color: string | null;
+  lineType: string | null;
+  lineWeight: number | null;
+  /** 直近のINSERTの有効なレイヤー。ブロック内のレイヤー"0"の図形はこのレイヤーを継承する(DXF/AutoCADの仕様) */
+  layer: string | null;
+};
 
-const NO_BYBLOCK_STYLE: ByBlockStyle = { color: null, lineType: null, lineWeight: null };
+const NO_BYBLOCK_STYLE: ByBlockStyle = { color: null, lineType: null, lineWeight: null, layer: null };
 
 type ConversionContext = {
   raw: IDxf;
@@ -150,7 +163,15 @@ function walkEntities(
   depth: number,
   context: ConversionContext,
 ): void {
-  for (const entity of entities) {
+  for (const rawEntity of entities) {
+    // グループコード60(非表示)が立っている図形は描かない
+    if (rawEntity.visible === false) continue;
+    if (context.totalEntityCount > MAX_EXPANDED_ENTITIES) {
+      throw new Error(`ブロックの展開後の図形数が上限(${MAX_EXPANDED_ENTITIES.toLocaleString()}個)を超えました。図面が壊れているか、非常に大きすぎる可能性があります。`);
+    }
+    // ブロック内のレイヤー"0"は、そのブロックを挿入したINSERTのレイヤーになる
+    const entity = byBlock.layer !== null && rawEntity.layer === "0" ? { ...rawEntity, layer: byBlock.layer } : rawEntity;
+
     if (entity.type === "INSERT") {
       expandInsert(entity as IInsertEntity, matrix, byBlock, visitedBlockNames, depth, context);
       continue;
@@ -193,6 +214,7 @@ function dimensionAsInsert(dimension: IEntity, blockName: string): IInsertEntity
     colorIndex: dimension.colorIndex,
     color: dimension.color,
     lineType: dimension.lineType,
+    lineweight: dimension.lineweight,
     position: { x: 0, y: 0, z: 0 },
     xScale: 1,
     yScale: 1,
@@ -230,16 +252,22 @@ function expandInsert(
     color: resolveEntityColor(insert, context.layerColorByName, parentByBlock.color),
     lineType: resolveLineTypeName(insert, context.layerStyleByName, parentByBlock.lineType),
     lineWeight: resolveLineWeight(insert, context.layerStyleByName, parentByBlock.lineWeight),
+    layer: insert.layer ?? parentByBlock.layer,
   };
-  const rotationRadians = ((insert.rotation ?? 0) * Math.PI) / 180;
-  const scaleX = insert.xScale ?? 1;
-  const scaleY = insert.yScale ?? 1;
+  const rotationRadians = finiteOr(insert.rotation, 0) * Math.PI / 180;
+  const scaleX = finiteOr(insert.xScale, 1);
+  const scaleY = finiteOr(insert.yScale, 1);
   const insertPosition = insert.position ? toPoint2D(insert.position) : { x: 0, y: 0 };
   const blockBasePoint = block.position ? toPoint2D(block.position) : { x: 0, y: 0 };
-  const columnCount = insert.columnCount ?? 1;
-  const rowCount = insert.rowCount ?? 1;
-  const columnSpacing = insert.columnSpacing ?? 0;
-  const rowSpacing = insert.rowSpacing ?? 0;
+  const columnCount = positiveInteger(insert.columnCount);
+  const rowCount = positiveInteger(insert.rowCount);
+  const columnSpacing = finiteOr(insert.columnSpacing, 0);
+  const rowSpacing = finiteOr(insert.rowSpacing, 0);
+  if (columnCount * rowCount > MAX_ARRAY_INSTANCES) {
+    context.totalEntityCount++;
+    context.unsupportedBreakdown.INSERT = (context.unsupportedBreakdown.INSERT ?? 0) + 1;
+    return;
+  }
   const cos = Math.cos(rotationRadians);
   const sin = Math.sin(rotationRadians);
 
@@ -367,7 +395,8 @@ function resolveEntityColor(
   byBlockColor: string | null = null,
 ): string {
   const colorIndex = entity.colorIndex;
-  const isExplicitColor = colorIndex !== undefined && colorIndex !== 0 && colorIndex !== 256;
+  // 色番号が無くtrue color(420)だけが指定された図形は、その色を使う
+  const isExplicitColor = colorIndex === undefined || (colorIndex !== 0 && colorIndex !== 256);
   if (isExplicitColor && entity.color !== undefined) {
     return toHexColor(entity.color);
   }
@@ -380,6 +409,15 @@ function resolveEntityColor(
 function toHexColor(decimalColor: number): string {
   const clamped = Math.max(0, Math.min(0xffffff, Math.round(decimalColor)));
   return `#${clamped.toString(16).padStart(6, "0")}`;
+}
+
+function finiteOr(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) ? value : fallback;
+}
+
+/** 配列複写の行数/列数。未指定・非数・0以下は1、小数は切り捨て */
+function positiveInteger(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
 }
 
 function toPoint2D(point: { x: number; y: number }): Point2D {
@@ -417,15 +455,18 @@ function convertEntity(
 
   if (entity.type === "LWPOLYLINE" || entity.type === "POLYLINE") {
     const poly = entity as ILwpolylineEntity | IPolylineEntity;
-    const vertices = (poly.vertices ?? []).map((vertex) => applyMatrix(toPoint2D(vertex), matrix));
-    if (vertices.length < 2) return null;
+    const rawVertices = poly.vertices ?? [];
+    if (rawVertices.length < 2) return null;
+    const closed = Boolean(poly.shape);
+    // 円弧区間(bulge)は、行列を掛ける前のローカル座標で折れ線へ展開する
+    const vertices = expandBulges(rawVertices, closed).map((point) => applyMatrix(point, matrix));
     return {
       id: nextId(),
       type: entity.type,
       layer,
       color,
       vertices,
-      closed: Boolean(poly.shape),
+      closed,
     };
   }
 
@@ -433,19 +474,39 @@ function convertEntity(
     const shape = entity as ICircleEntity | IArcEntity;
     if (!shape.center || !Number.isFinite(shape.radius)) return null;
 
+    if (!(shape.radius > 0)) return null;
     const center = applyMatrix(toPoint2D(shape.center), matrix);
-    // 非一様スケール(X/Yで倍率が異なる)の場合、真円/真弧は表現できないため
-    // 面積を保つ幾何平均を半径の近似スケールとして使う(ブロックが不均一縮尺で参照されるケースへの実用的な妥協)
-    const scaleFactor = Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
-    const radius = shape.radius * scaleFactor;
-    if (!(radius > 0)) return null;
+    const arc = entity as IArcEntity;
+    const startAngle = entity.type === "ARC" ? arc.startAngle : 0;
+    const endAngle = entity.type === "ARC" ? arc.endAngle : Math.PI * 2;
 
+    if (!isSimilarityTransform(matrix)) {
+      // 非一様拡大縮小・せん断を受けた円/弧は楕円(弧)になる。共役半径から厳密な楕円へ直す
+      const { lx, ly } = linearBasis(matrix);
+      const ellipse = ellipseFromConjugateDiameters(
+        { x: shape.radius * lx.x, y: shape.radius * lx.y },
+        { x: shape.radius * ly.x, y: shape.radius * ly.y },
+        startAngle,
+        endAngle,
+      );
+      if (!ellipse) return null;
+      return { id: nextId(), type: "ELLIPSE", layer, color, center, ...ellipse };
+    }
+
+    const radius = shape.radius * Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
+    if (!(radius > 0)) return null;
     if (entity.type === "CIRCLE") {
       return { id: nextId(), type: "CIRCLE", layer, color, center, radius };
     }
 
-    const arc = entity as IArcEntity;
-    const rotationOffset = Math.atan2(matrix.b, matrix.a);
+    // 角度そのものではなく方向ベクトルを変換する(鏡像では角度の足し算では合わず、向きも逆になる)
+    const directionAngle = (angle: number) => {
+      const v = transformVector({ x: Math.cos(angle), y: Math.sin(angle) }, matrix);
+      return Math.atan2(v.y, v.x);
+    };
+    const mappedStart = directionAngle(startAngle);
+    const mappedEnd = directionAngle(endAngle);
+    const mirrored = isReflection(matrix);
     return {
       id: nextId(),
       type: "ARC",
@@ -453,8 +514,8 @@ function convertEntity(
       color,
       center,
       radius,
-      startAngle: arc.startAngle + rotationOffset,
-      endAngle: arc.endAngle + rotationOffset,
+      startAngle: mirrored ? mappedEnd : mappedStart,
+      endAngle: mirrored ? mappedStart : mappedEnd,
     };
   }
 
@@ -516,32 +577,18 @@ function convertEntity(
     if (!ellipse.center || !ellipse.majorAxisEndPoint || !Number.isFinite(ellipse.axisRatio)) return null;
 
     const center = applyMatrix(toPoint2D(ellipse.center), matrix);
-    // majorAxisEndPoint(11,21)は中心からの相対ベクトルなので、平行移動を含まない線形変換のみを適用する
+    // majorAxisEndPoint(11,21)は中心からの相対ベクトルなので、平行移動を含まない線形変換のみを適用する。
+    // メジャー軸とマイナー軸(メジャー軸を90度回転してaxisRatio倍)を変換したものは共役半径になり、
+    // 非一様拡大縮小・せん断・鏡像の後でも厳密な楕円(弧)の標準形へ直せる。
     const majorVector = transformVector(toPoint2D(ellipse.majorAxisEndPoint), matrix);
-    const majorRadius = Math.hypot(majorVector.x, majorVector.y);
-    if (!(majorRadius > 0)) return null;
+    const minorVector = transformVector(
+      { x: -ellipse.majorAxisEndPoint.y * ellipse.axisRatio, y: ellipse.majorAxisEndPoint.x * ellipse.axisRatio },
+      matrix,
+    );
+    const params = ellipseFromConjugateDiameters(majorVector, minorVector, ellipse.startAngle ?? 0, ellipse.endAngle ?? Math.PI * 2);
+    if (!params) return null;
 
-    // マイナー軸ベクトル(メジャー軸を90度回転してaxisRatio倍)も同様に線形変換する。
-    // 非一様スケールの場合、変換後は厳密には直交しなくなるが(せん断)、実用上は近似として許容する。
-    const localMinorVector: Point2D = {
-      x: -ellipse.majorAxisEndPoint.y * ellipse.axisRatio,
-      y: ellipse.majorAxisEndPoint.x * ellipse.axisRatio,
-    };
-    const minorVector = transformVector(localMinorVector, matrix);
-    const minorRadius = Math.hypot(minorVector.x, minorVector.y);
-
-    return {
-      id: nextId(),
-      type: "ELLIPSE",
-      layer,
-      color,
-      center,
-      majorRadius,
-      minorRadius,
-      rotation: Math.atan2(majorVector.y, majorVector.x),
-      startParam: ellipse.startAngle ?? 0,
-      endParam: ellipse.endAngle ?? Math.PI * 2,
-    };
+    return { id: nextId(), type: "ELLIPSE", layer, color, center, ...params };
   }
 
   if (entity.type === "SPLINE") {

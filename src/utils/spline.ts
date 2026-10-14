@@ -9,6 +9,8 @@ const MAX_REFINE_DEPTH = 6;
 // 許容誤差=スプライン自身の大きさ(制御点のバウンディング対角線)に対する比率。画面いっぱいに拡大しても誤差は数px以内
 const FLATNESS_TOLERANCE_RATIO = 0.0005;
 const KNOT_EPSILON = 1e-12;
+// 実用上のCADのスプラインは3次(まれに5次程度)。de Boor法は次数の2乗で重くなるので、異常な次数は制御点列のフォールバックにする
+const MAX_DEGREE = 25;
 
 export type SplineInput = {
   controlPoints?: Point2D[];
@@ -29,8 +31,15 @@ function hasValidKnots(controlPointCount: number, degree: number, knots: number[
 /** de Boor法でB-スプライン曲線上のパラメータtの点を求める(重み無し=非有理) */
 export function evaluateBSpline(controlPoints: Point2D[], knots: number[], degree: number, t: number): Point2D {
   const n = controlPoints.length;
-  let span = degree;
-  while (span < n - 1 && t >= knots[span + 1]) span++;
+  // t が属するノットスパン(knots[span] <= t < knots[span+1]、定義域の終端はn-1)を二分探索で求める
+  let low = degree;
+  let high = n - 1;
+  while (low < high) {
+    const mid = (low + high + 1) >> 1;
+    if (t >= knots[mid]) low = mid;
+    else high = mid - 1;
+  }
+  const span = low;
 
   const work = controlPoints.slice(span - degree, span + 1).map((p) => ({ x: p.x, y: p.y }));
   for (let r = 1; r <= degree; r++) {
@@ -55,6 +64,15 @@ function sampleBSpline(controlPoints: Point2D[], knots: number[], degree: number
   const spans: Array<[number, number]> = [];
   for (let k = degree; k < n; k++) {
     if (knots[k + 1] - knots[k] > KNOT_EPSILON) spans.push([knots[k], knots[k + 1]]);
+  }
+
+  // スパンが上限より多い(制御点が極端に多い)場合は、スパンごとの細分化をやめて定義域を等間隔に標本化し、総点数を抑える
+  if (spans.length > MAX_POINTS_PER_SPLINE) {
+    const sampled: Point2D[] = [];
+    for (let j = 0; j <= MAX_POINTS_PER_SPLINE; j++) {
+      sampled.push(evaluateBSpline(controlPoints, knots, degree, domainStart + ((domainEnd - domainStart) * j) / MAX_POINTS_PER_SPLINE));
+    }
+    return sampled;
   }
 
   // スパン数が多いほど1スパンあたりの点数を絞り、総点数が上限を超えないようにする
@@ -123,7 +141,7 @@ export function tessellateSpline(input: SplineInput): Point2D[] | null {
   const controlPoints = input.controlPoints ?? [];
   const degree = Math.floor(input.degree ?? 3);
 
-  if (controlPoints.length >= 2 && degree >= 1 && degree < controlPoints.length && hasValidKnots(controlPoints.length, degree, input.knots)) {
+  if (controlPoints.length >= 2 && degree >= 1 && degree <= MAX_DEGREE && degree < controlPoints.length && hasValidKnots(controlPoints.length, degree, input.knots)) {
     return sampleBSpline(controlPoints, input.knots as number[], degree);
   }
   if ((input.fitPoints?.length ?? 0) >= 2) return input.fitPoints as Point2D[];

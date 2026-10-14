@@ -1,4 +1,4 @@
-import { normalizeArcSpan } from "../../utils/geometry";
+import { isAngleInSweep, normalizeArcSpan } from "../../utils/geometry";
 import type { CadArc, CadBounds, CadEntity } from "../../types/cad";
 import { getEntityPoints } from "../entityGeometry";
 
@@ -34,12 +34,6 @@ function writePointsBounds(out: Float64Array, offset: number, points: readonly {
     if (p.y > maxY) maxY = p.y;
   }
   writeBounds(out, offset, minX - padding, minY - padding, maxX + padding, maxY + padding);
-}
-
-function isAngleInSweep(angle: number, start: number, span: number): boolean {
-  const twoPi = Math.PI * 2;
-  const delta = (((angle - start) % twoPi) + twoPi) % twoPi;
-  return delta <= span;
 }
 
 function writeArcBounds(out: Float64Array, offset: number, arc: CadArc): void {

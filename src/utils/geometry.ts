@@ -59,6 +59,13 @@ export function normalizeArcSpan(startAngle: number, endAngle: number): number {
   return span;
 }
 
+/** angleが、startからCCWにspanだけ進む弧の範囲内にあるか */
+export function isAngleInSweep(angle: number, start: number, span: number): boolean {
+  const twoPi = Math.PI * 2;
+  const delta = (((angle - start) % twoPi) + twoPi) % twoPi;
+  return delta <= span;
+}
+
 export function pointOnArc(center: Point2D, radius: number, angle: number): Point2D {
   return { x: center.x + radius * Math.cos(angle), y: center.y + radius * Math.sin(angle) };
 }

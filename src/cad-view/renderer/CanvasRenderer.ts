@@ -284,8 +284,9 @@ export class CanvasRenderer implements Renderer {
     const minWorldSize = MIN_ENTITY_SCREEN_SIZE_PX / k;
     const hasSelection = selectedEntityIds.size > 0;
 
-    // 画面に映る範囲(ワールド座標)。線幅分の余白を持たせる。画面が図面全体を含むなら絞り込み不要。
-    const margin = 2 / k;
+    // 画面に映る範囲(ワールド座標)。太い線や選択ハイライトの幅(画面上で数px)が画面端でも欠けないよう余白を持たせる。
+    // 画面が図面全体を含むなら絞り込み不要。
+    const margin = 6 / k;
     const viewMinX = (0 - camera.offsetX) / k - margin;
     const viewMaxX = (viewportWidth - camera.offsetX) / k + margin;
     const viewMinY = (camera.offsetY - viewportHeight) / k - margin;
@@ -343,7 +344,10 @@ export class CanvasRenderer implements Renderer {
       appendEntity(batch.path, entity, k, camera.offsetX, camera.offsetY);
     }
 
-    for (const batch of batches.values()) {
+    // 重なったときの上下関係が、拡大縮小や索引の使用有無で入れ替わらないよう、キーの順に固定して描く
+    const orderedKeys = Array.from(batches.keys()).sort();
+    for (const key of orderedKeys) {
+      const batch = batches.get(key) as StrokeBatch;
       ctx.strokeStyle = batch.color;
       ctx.lineWidth = batch.widthPx;
       ctx.setLineDash(batch.screenDash ?? []);

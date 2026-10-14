@@ -35,7 +35,9 @@ export class SpatialGrid {
     this.originY = worldBounds ? worldBounds.min.y : 0;
 
     const targetCells = Math.max(1, count / TARGET_ENTITIES_PER_CELL);
-    this.cellSize = Math.max(Math.sqrt((width * height) / targetCells), Math.max(width, height) / MAX_CELLS_PER_AXIS);
+    // 面積(width*height)を経由せず平方根ごとに掛けて、極端に大きな座標でもオーバーフローさせない
+    const averageCellSize = (Math.sqrt(width) * Math.sqrt(height)) / Math.sqrt(targetCells);
+    this.cellSize = Math.max(averageCellSize, Math.max(width, height) / MAX_CELLS_PER_AXIS);
     this.columns = Math.max(1, Math.min(MAX_CELLS_PER_AXIS, Math.ceil(width / this.cellSize)));
     this.rows = Math.max(1, Math.min(MAX_CELLS_PER_AXIS, Math.ceil(height / this.cellSize)));
 

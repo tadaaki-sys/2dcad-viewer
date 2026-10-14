@@ -1,5 +1,7 @@
 const LAYER_TABLE_START = /^[ \t]*0[ \t]*\r?\n[ \t]*TABLE[ \t]*\r?\n[ \t]*2[ \t]*\r?\n[ \t]*LAYER[ \t]*$/m;
 
+const LAYER_TABLE_END = /^[ \t]*0[ \t]*\r?\n[ \t]*ENDTAB[ \t]*$/m;
+
 /** レイヤー表に書かれた線種名と線の太さ(1/100mm。-3は既定値)。無ければnull */
 export type LayerStyle = {
   lineType: string | null;
@@ -16,8 +18,9 @@ export function extractLayerStyles(dxfText: string): Map<string, LayerStyle> {
 
   const start = LAYER_TABLE_START.exec(dxfText);
   if (!start) return layerStyles;
-  const end = dxfText.indexOf("ENDTAB", start.index);
-  const tableLines = dxfText.slice(start.index, end === -1 ? undefined : end).split(/\r?\n/);
+  // 「0 / ENDTAB」の組だけを表の終わりとみなす(レイヤー名などの値に"ENDTAB"を含んでいても途切れさせない)
+  const endMatch = LAYER_TABLE_END.exec(dxfText.slice(start.index));
+  const tableLines = dxfText.slice(start.index, endMatch ? start.index + endMatch.index : undefined).split(/\r?\n/);
 
   let currentName: string | null = null;
   let currentLineType: string | null = null;

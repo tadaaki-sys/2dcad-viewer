@@ -1,4 +1,11 @@
-import { pointToSegmentDistance, segmentsIntersect } from "../../utils/geometry";
+import {
+  distance,
+  isAngleInSweep,
+  normalizeArcSpan,
+  pointOnArc,
+  pointToSegmentDistance,
+  segmentsIntersect,
+} from "../../utils/geometry";
 import { distanceFromPointToText, getEntityPoints, getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 import type { SpatialIndex } from "../spatial/SpatialIndex";
@@ -16,6 +23,17 @@ export type BoxSelectionMode = "window" | "crossing";
  */
 function distanceFromEntity(entity: CadEntity, point: Point2D): number {
   if (entity.type === "TEXT") return distanceFromPointToText(entity, point);
+  // 円/円弧は折れ線近似ではなく解析的に距離を求める(半径が大きいと近似線分と実際の曲線の差が選択精度に響くため)
+  if (entity.type === "CIRCLE") return Math.abs(distance(point, entity.center) - entity.radius);
+  if (entity.type === "ARC") {
+    const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
+    const angle = Math.atan2(point.y - entity.center.y, point.x - entity.center.x);
+    if (isAngleInSweep(angle, entity.startAngle, span)) return Math.abs(distance(point, entity.center) - entity.radius);
+    return Math.min(
+      distance(point, pointOnArc(entity.center, entity.radius, entity.startAngle)),
+      distance(point, pointOnArc(entity.center, entity.radius, entity.startAngle + span)),
+    );
+  }
   let minDistance = Infinity;
   for (const [a, b] of getEntitySegments(entity)) {
     minDistance = Math.min(minDistance, pointToSegmentDistance(point, a, b));
@@ -100,6 +118,16 @@ export function isEntityFullyInsideBox(entity: CadEntity, box: SelectionBox): bo
 export function isEntityTouchingBox(entity: CadEntity, box: SelectionBox): boolean {
   const points = getEntityPoints(entity);
   if (points.some((point) => isPointInBox(point, box))) return true;
+  // 文字は詰まった矩形として扱う。選択範囲が文字の内側に収まっている場合も触れているとみなす
+  if (entity.type === "TEXT") {
+    const corners: Point2D[] = [
+      box.min,
+      box.max,
+      { x: box.min.x, y: box.max.y },
+      { x: box.max.x, y: box.min.y },
+    ];
+    if (corners.some((corner) => distanceFromPointToText(entity, corner) === 0)) return true;
+  }
   return getEntitySegments(entity).some(([a, b]) => segmentIntersectsBox(a, b, box));
 }
 

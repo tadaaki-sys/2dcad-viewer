@@ -27,6 +27,9 @@ type CandidateGenerator = (
 // 全周(または全周とみなせる誤差)のCIRCLE/ELLIPSEには自然な端点/中点がないため候補から除外する際の許容誤差
 const FULL_SWEEP_EPSILON = 1e-6;
 
+// カーソル近傍の線分数がこれを超える場合は交点スナップを計算しない(総当たりは線分数の2乗)
+const MAX_INTERSECTION_SEGMENTS = 600;
+
 function isFullSweep(span: number): boolean {
   return span >= Math.PI * 2 - FULL_SWEEP_EPSILON;
 }
@@ -140,6 +143,9 @@ function collectIntersectionCandidates(
       }
     }
   }
+
+  // 線分が極端に密集している箇所(ハッチングなど)で総当たりをすると操作が固まるため、交点スナップは諦める
+  if (nearbySegments.length > MAX_INTERSECTION_SEGMENTS) return [];
 
   const results: SnapCandidate[] = [];
   for (let i = 0; i < nearbySegments.length; i++) {

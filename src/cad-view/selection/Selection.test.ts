@@ -221,6 +221,36 @@ describe("findEntityAtPoint - CIRCLE/ARC", () => {
     expect(miss).toBeNull();
   });
 
+  it("measures distance to a large CIRCLE exactly, not to a polygon approximation", () => {
+    const big: CadEntity = { ...(circle as Extract<CadEntity, { type: "CIRCLE" }>), id: "big", radius: 100000 };
+    // 真の円周上の点(右上45度)は距離0。多角形近似なら弦の内側にずれて外れる
+    const onRim = { x: 100000 * Math.SQRT1_2, y: 100000 * Math.SQRT1_2 };
+    expect(findEntityAtPoint([big], visible, onRim, 0.01)?.id).toBe("big");
+  });
+
+  it("picks the nearer end of an ARC when the point is outside its swept range", () => {
+    // 弧(0〜180度)の終点(90,0)付近を、範囲外の下側からクリック
+    const nearEnd = findEntityAtPoint([arc], visible, { x: 90, y: -0.5 }, 1);
+    expect(nearEnd?.id).toBe("arc-1");
+  });
+
+  it("selects a TEXT via crossing box that lies entirely inside the TEXT", () => {
+    const text: CadEntity = {
+      id: "text-inner",
+      type: "TEXT",
+      layer: "A",
+      color: "#ffffff",
+      position: { x: 0, y: 0 },
+      text: "AB",
+      height: 10,
+      rotation: 0,
+      horizontalAlign: "left",
+      verticalAlign: "top",
+    };
+    const tiny = { min: { x: 4, y: -6 }, max: { x: 6, y: -4 } };
+    expect(findEntitiesInBox([text], visible, tiny, "crossing").map((e) => e.id)).toEqual(["text-inner"]);
+  });
+
   it("selects a CIRCLE fully inside a window box", () => {
     const box = { min: { x: -15, y: -15 }, max: { x: 15, y: 15 } };
     const result = findEntitiesInBox([circle], visible, box, "window");

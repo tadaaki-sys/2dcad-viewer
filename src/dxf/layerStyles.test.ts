@@ -27,6 +27,16 @@ describe("extractLayerStyles", () => {
     expect(map.size).toBe(3);
   });
 
+  it("does not stop at a layer whose name contains ENDTAB", () => {
+    const text = dxfWithLayerTable([
+      "0|LAYER|2|MY_ENDTAB_LAYER|70|0|62|1|6|CENTER|370|50",
+      "0|LAYER|2|NEXT|70|0|62|1|6|DASHED|370|25",
+    ]);
+    const map = extractLayerStyles(text);
+    expect(map.get("MY_ENDTAB_LAYER")).toEqual({ lineType: "CENTER", lineWeight: 50 });
+    expect(map.get("NEXT")).toEqual({ lineType: "DASHED", lineWeight: 25 });
+  });
+
   it("reports null for properties a layer record does not specify", () => {
     const map = extractLayerStyles(dxfWithLayerTable(["0|LAYER|2|A|70|0|62|7", "0|LAYER|2|B|70|0|370|25"]));
     expect(map.get("A")).toEqual({ lineType: null, lineWeight: null });
