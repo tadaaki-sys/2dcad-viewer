@@ -24,6 +24,18 @@ export function pointToSegmentDistance(point: Point2D, segStart: Point2D, segEnd
   return distance(point, closestPoint);
 }
 
+/** 線分segStart-segEnd上で、pointに最も近い点 */
+export function closestPointOnSegment(point: Point2D, segStart: Point2D, segEnd: Point2D): Point2D {
+  const segDx = segEnd.x - segStart.x;
+  const segDy = segEnd.y - segStart.y;
+  const segLengthSquared = segDx * segDx + segDy * segDy;
+  if (segLengthSquared === 0) return { x: segStart.x, y: segStart.y };
+
+  const t = ((point.x - segStart.x) * segDx + (point.y - segStart.y) * segDy) / segLengthSquared;
+  const clampedT = Math.max(0, Math.min(1, t));
+  return { x: segStart.x + clampedT * segDx, y: segStart.y + clampedT * segDy };
+}
+
 /** 2つの線分(端点含む)の交点を返す。交差しない/平行な場合はnull(完全重複ケースは扱わない) */
 export function intersectSegments(p1: Point2D, p2: Point2D, p3: Point2D, p4: Point2D): Point2D | null {
   const d1x = p2.x - p1.x;

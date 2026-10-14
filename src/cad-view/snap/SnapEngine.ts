@@ -1,6 +1,8 @@
 import {
+  closestPointOnSegment,
   distance,
   intersectSegments,
+  isAngleInSweep,
   normalizeArcSpan,
   pointOnArc,
   pointOnEllipse,
@@ -10,7 +12,7 @@ import { getEntitySegments } from "../entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 import type { SpatialIndex } from "../spatial/SpatialIndex";
 
-export type SnapType = "endpoint" | "midpoint" | "intersection";
+export type SnapType = "endpoint" | "midpoint" | "intersection" | "nearest";
 
 export type SnapCandidate = {
   point: Point2D;
@@ -164,6 +166,69 @@ function collectIntersectionCandidates(
   return results;
 }
 
+/** entity上でworldPointに最も近い点。TEXTなど線を持たない図形はnull */
+function nearestPointOnEntity(entity: CadEntity, worldPoint: Point2D): Point2D | null {
+  if (entity.type === "TEXT") return null;
+  if (entity.type === "CIRCLE" || entity.type === "ARC") {
+    const dx = worldPoint.x - entity.center.x;
+    const dy = worldPoint.y - entity.center.y;
+    const fromCenter = Math.hypot(dx, dy);
+    if (entity.type === "ARC") {
+      const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
+      if (!(fromCenter > 0) || !isAngleInSweep(Math.atan2(dy, dx), entity.startAngle, span)) {
+        // 弧の範囲外では、近い方の端点が最も近い点
+        const start = pointOnArc(entity.center, entity.radius, entity.startAngle);
+        const end = pointOnArc(entity.center, entity.radius, entity.startAngle + span);
+        return distance(start, worldPoint) <= distance(end, worldPoint) ? start : end;
+      }
+    }
+    if (!(fromCenter > 0)) return null; // 円の中心からは最近点が定まらない
+    return { x: entity.center.x + (dx / fromCenter) * entity.radius, y: entity.center.y + (dy / fromCenter) * entity.radius };
+  }
+
+  let best: Point2D | null = null;
+  let bestDistance = Infinity;
+  for (const [a, b] of getEntitySegments(entity)) {
+    const candidate = closestPointOnSegment(worldPoint, a, b);
+    const d = distance(candidate, worldPoint);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+/** 線の上の最も近い点(最近点スナップ)。端点・中点・交点が無いときの代わりに使う */
+function findNearestOnLine(
+  entities: readonly CadEntity[],
+  visibleLayerNames: ReadonlySet<string>,
+  worldPoint: Point2D,
+  toleranceWorld: number,
+): SnapCandidate | null {
+  let best: SnapCandidate | null = null;
+  let bestDistance = toleranceWorld;
+  for (const entity of entities) {
+    if (!visibleLayerNames.has(entity.layer)) continue;
+    const point = nearestPointOnEntity(entity, worldPoint);
+    if (!point) continue;
+    const d = distance(point, worldPoint);
+    if (d <= bestDistance) {
+      bestDistance = d;
+      best = { point, type: "nearest" };
+    }
+  }
+  return best;
+}
+
+export type SnapOptions = {
+  /**
+   * 端点・中点・交点が見つからなかったとき、この距離以内の線上の最も近い点へ吸い付く(ワールド単位)。
+   * toleranceWorldより大きくてもよい。未指定なら最近点スナップは行わない。
+   */
+  nearestToleranceWorld?: number;
+};
+
 const CANDIDATE_GENERATORS: CandidateGenerator[] = [
   collectEndpointCandidates,
   collectMidpointCandidates,
@@ -180,14 +245,17 @@ export function findSnapPoint(
   worldPoint: Point2D,
   toleranceWorld: number,
   index?: SpatialIndex | null,
+  options: SnapOptions = {},
 ): SnapCandidate | null {
   let best: SnapCandidate | null = null;
   let bestDistance = toleranceWorld;
+  const nearestTolerance = options.nearestToleranceWorld ?? 0;
 
-  // 端点・中点・交点はいずれも図形自身の上にあるので、カーソル周辺にバウンディングボックスがある図形だけ調べればよい
+  // 端点・中点・交点・最近点はいずれも図形自身の上にあるので、カーソル周辺にバウンディングボックスがある図形だけ調べればよい
+  const queryTolerance = Math.max(toleranceWorld, nearestTolerance);
   const nearbyEntities = index
     ? index.grid
-        .queryRect(worldPoint.x - toleranceWorld, worldPoint.y - toleranceWorld, worldPoint.x + toleranceWorld, worldPoint.y + toleranceWorld)
+        .queryRect(worldPoint.x - queryTolerance, worldPoint.y - queryTolerance, worldPoint.x + queryTolerance, worldPoint.y + queryTolerance)
         .map((i) => entities[i])
     : entities;
 
@@ -201,5 +269,9 @@ export function findSnapPoint(
     }
   }
 
+  // 端点・中点・交点が無いときだけ、近くの線の上の最も近い点へ吸い付く(端点などが常に優先)
+  if (!best && nearestTolerance > 0) {
+    return findNearestOnLine(nearbyEntities, visibleLayerNames, worldPoint, nearestTolerance);
+  }
   return best;
 }

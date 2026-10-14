@@ -5,6 +5,7 @@ import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
 import { findEntitiesInBox, findEntitiesNearPoint } from "./selection/Selection";
 import { findSnapPoint } from "./snap/SnapEngine";
+import type { SnapCandidate } from "./snap/SnapEngine";
 import { findMeasurementAtPoint } from "./measurement/Measurement";
 import { buildSpatialIndex } from "./spatial/SpatialIndex";
 
@@ -15,6 +16,8 @@ const SELECTION_TOLERANCE_PX = 6;
 const DRAG_THRESHOLD_PX = 4;
 const SAME_SPOT_TOLERANCE_PX = 3;
 const SNAP_TOLERANCE_PX = 10;
+// 測定時、線からこの距離(図面の単位=mm)以内なら、線の上の最も近い点へ吸い付く
+const NEAREST_SNAP_DISTANCE_WORLD = 5;
 
 type OverlapCycleState = {
   screenPoint: Point2D;
@@ -100,6 +103,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const dragSelectionBoxRef = useRef<DragSelectionBox | null>(null);
   const overlapCycleRef = useRef<OverlapCycleState | null>(null);
   const pendingMeasurementPointRef = useRef<Point2D | null>(null);
+  const snapMarkerRef = useRef<Point2D | null>(null);
   const perfRef = useRef<CadCanvasPerformanceStats & { lastDrawAt: number }>({
     renderMs: 0,
     fps: null,
@@ -177,6 +181,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       measurements: currentMeasurements,
       selectedMeasurementId: currentSelectedMeasurementId,
       pendingMeasurementPoint: pendingMeasurementPointRef.current,
+      snapMarkerPoint: snapMarkerRef.current,
       spatialIndex: currentSpatialIndex,
     });
 
@@ -224,6 +229,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     draw();
     overlapCycleRef.current = null;
     pendingMeasurementPointRef.current = null;
+    snapMarkerRef.current = null;
     // 新しい図面が読み込まれた時のみ再Fitする(レイヤー表示切替では現在の表示範囲を維持する)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
@@ -235,6 +241,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   useEffect(() => {
     if (!measurementModeEnabled) {
       pendingMeasurementPointRef.current = null;
+      snapMarkerRef.current = null;
       draw();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -330,17 +337,29 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       updatePanCursor();
     }
 
-    function computeWorldPointWithSnap(clientX: number, clientY: number): Point2D {
+    function findSnapAt(clientX: number, clientY: number): { worldPoint: Point2D; snap: SnapCandidate | null } {
       const screenPoint = getCanvasRelativePoint(canvas!, clientX, clientY);
       const worldPoint = cameraRef.current.screenToWorld(screenPoint);
       const { model: currentModel, visibleLayerNames: currentVisible, measurementModeEnabled: currentMeasurementModeEnabled } =
         stateRef.current;
-      if (currentMeasurementModeEnabled && currentModel) {
-        const toleranceWorld = SNAP_TOLERANCE_PX / cameraRef.current.scale;
-        const snap = findSnapPoint(currentModel.entities, currentVisible, worldPoint, toleranceWorld, stateRef.current.spatialIndex);
-        if (snap) return snap.point;
-      }
-      return worldPoint;
+      if (!currentMeasurementModeEnabled || !currentModel) return { worldPoint, snap: null };
+
+      const scale = cameraRef.current.scale;
+      const snap = findSnapPoint(
+        currentModel.entities,
+        currentVisible,
+        worldPoint,
+        SNAP_TOLERANCE_PX / scale,
+        stateRef.current.spatialIndex,
+        // 線の近く(図面上5mm以内、または画面上の吸着距離以内のどちらか広い方)なら、線の上の最も近い点へ吸い付く
+        { nearestToleranceWorld: Math.max(NEAREST_SNAP_DISTANCE_WORLD, SNAP_TOLERANCE_PX / scale) },
+      );
+      return { worldPoint, snap };
+    }
+
+    function computeWorldPointWithSnap(clientX: number, clientY: number): Point2D {
+      const { worldPoint, snap } = findSnapAt(clientX, clientY);
+      return snap ? snap.point : worldPoint;
     }
 
     function handleMeasurementClick(event: MouseEvent) {
@@ -534,12 +553,28 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       }
     }
 
+    // 吸着先の目印。測定モード中のホバーで、吸い付いた位置が分かるように表示する
+    function updateSnapMarker(point: Point2D | null) {
+      const previous = snapMarkerRef.current;
+      if (previous === point || (previous && point && previous.x === point.x && previous.y === point.y)) return;
+      snapMarkerRef.current = point;
+      requestDraw();
+    }
+
     function handleMouseMove(event: MouseEvent) {
-      if (!stateRef.current.onCursorMove) return;
-      scheduleCursorUpdate(computeWorldPointWithSnap(event.clientX, event.clientY));
+      if (!stateRef.current.measurementModeEnabled) {
+        updateSnapMarker(null);
+        if (!stateRef.current.onCursorMove) return;
+        scheduleCursorUpdate(computeWorldPointWithSnap(event.clientX, event.clientY));
+        return;
+      }
+      const { worldPoint, snap } = findSnapAt(event.clientX, event.clientY);
+      updateSnapMarker(isPanning ? null : snap ? snap.point : null);
+      if (stateRef.current.onCursorMove) scheduleCursorUpdate(snap ? snap.point : worldPoint);
     }
 
     function handleMouseLeave() {
+      updateSnapMarker(null);
       scheduleCursorUpdate(null);
     }
 

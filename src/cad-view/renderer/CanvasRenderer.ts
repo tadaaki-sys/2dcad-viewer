@@ -15,6 +15,8 @@ const WINDOW_BOX_COLOR = "#4a90e2";
 const CROSSING_BOX_COLOR = "#50c878";
 const MEASUREMENT_COLOR = "#ff8c00";
 const MEASUREMENT_MARKER_RADIUS_PX = 4;
+const SNAP_MARKER_COLOR = "#00e5ff";
+const SNAP_MARKER_HALF_SIZE_PX = 5;
 const MEASUREMENT_FONT = "11px sans-serif";
 
 // 画面上でこれより小さいフォントサイズになったTEXTは、視認できず描画コストだけかかるため省略する
@@ -271,6 +273,7 @@ export class CanvasRenderer implements Renderer {
     measurements,
     selectedMeasurementId,
     pendingMeasurementPoint,
+    snapMarkerPoint,
     spatialIndex,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
@@ -387,6 +390,16 @@ export class CanvasRenderer implements Renderer {
       ctx.save();
       ctx.strokeStyle = MEASUREMENT_COLOR;
       drawMeasurementMarker(ctx, camera.worldToScreen(pendingMeasurementPoint));
+      ctx.restore();
+    }
+
+    if (snapMarkerPoint) {
+      const screen = camera.worldToScreen(snapMarkerPoint);
+      ctx.save();
+      ctx.strokeStyle = SNAP_MARKER_COLOR;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.strokeRect(screen.x - SNAP_MARKER_HALF_SIZE_PX, screen.y - SNAP_MARKER_HALF_SIZE_PX, SNAP_MARKER_HALF_SIZE_PX * 2, SNAP_MARKER_HALF_SIZE_PX * 2);
       ctx.restore();
     }
   }

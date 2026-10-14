@@ -20,6 +20,8 @@ export type RenderParams = {
   measurements: readonly Measurement[];
   selectedMeasurementId: string | null;
   pendingMeasurementPoint: Point2D | null;
+  /** 測定モードでカーソルが吸い付いている位置。目印を描く。無ければnull(省略可) */
+  snapMarkerPoint?: Point2D | null;
   /** 画面外の図形を描画対象から外すための空間索引。無ければ全図形を走査する */
   spatialIndex: SpatialIndex | null;
 };
