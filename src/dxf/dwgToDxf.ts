@@ -2,6 +2,8 @@
 // 変換はブラウザ(Web Worker)内のWASMだけで完結し、DWGの中身は外部へ送信されない。
 import createModule from "../../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.js";
 
+import { stripObjectsSection } from "./stripObjectsSection";
+
 const DWG_WASM_URL = new URL("../../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.wasm", import.meta.url).href;
 
 // LibreDWGのエラーコードは、この値以上が致命的(出力できない)で、未満は警告(出力は有効)として扱われる。
@@ -44,7 +46,8 @@ export async function convertDwgToDxfBuffer(dwgBuffer: ArrayBuffer): Promise<Arr
       console.warn("[dwgToDxf] LibreDWG reported non-critical warnings", { errorCode });
     }
 
-    const output = wasm.FS.readFile(OUTPUT_FILE_NAME);
+    // 出力のうちOBJECTSセクション(空間索引など)はビューアが使わないのに、数百MBになることがあるので捨てる
+    const output = stripObjectsSection(wasm.FS.readFile(OUTPUT_FILE_NAME));
     return output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength) as ArrayBuffer;
   } finally {
     // 片方の後始末に失敗しても、もう片方の削除と元のエラーの伝播を妨げない
