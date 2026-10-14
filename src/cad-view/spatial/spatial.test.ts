@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { CadEntity } from "../../types/cad";
 import { findEntitiesInBox, findEntitiesNearPoint } from "../selection/Selection";
 import { findSnapPoint } from "../snap/SnapEngine";
-import { BOUNDS_STRIDE, computeAllEntityBounds, unionOfEntityBounds, writeEntityBounds } from "./entityBounds";
+import {
+  BOUNDS_STRIDE,
+  computeAllEntityBounds,
+  unionOfEntityBounds,
+  unionOfVisibleEntityBounds,
+  writeEntityBounds,
+} from "./entityBounds";
 import { SpatialGrid } from "./SpatialGrid";
 import { buildSpatialIndex } from "./SpatialIndex";
 
@@ -202,5 +208,36 @@ describe("indexed selection and snapping match a full scan", () => {
       const tol = [1, 5, 20][n % 3];
       expect(findSnapPoint(entities, visible, p, tol, index)).toEqual(findSnapPoint(entities, visible, p, tol));
     }
+  });
+});
+
+describe("unionOfVisibleEntityBounds", () => {
+  const line = (id: string, layer: string, x0: number, y0: number, x1: number, y1: number): CadEntity => ({
+    id,
+    type: "LINE",
+    layer,
+    color: "#fff",
+    start: { x: x0, y: y0 },
+    end: { x: x1, y: y1 },
+  });
+  const entities = [line("a", "SHOWN", 0, 0, 10, 10), line("b", "HIDDEN", 1000, 1000, 2000, 2000), line("c", "SHOWN", -5, 2, 3, 20)];
+  const bounds = computeAllEntityBounds(entities);
+
+  it("covers only the entities on visible layers", () => {
+    expect(unionOfVisibleEntityBounds(entities, bounds, new Set(["SHOWN"]))).toEqual({ min: { x: -5, y: 0 }, max: { x: 10, y: 20 } });
+    expect(unionOfVisibleEntityBounds(entities, bounds, new Set(["HIDDEN"]))).toEqual({ min: { x: 1000, y: 1000 }, max: { x: 2000, y: 2000 } });
+  });
+
+  it("covers everything when all layers are visible, and returns null when none are", () => {
+    expect(unionOfVisibleEntityBounds(entities, bounds, new Set(["SHOWN", "HIDDEN"]))).toEqual(unionOfEntityBounds(bounds));
+    expect(unionOfVisibleEntityBounds(entities, bounds, new Set())).toBeNull();
+  });
+
+  it("ignores visible entities whose bounds are not finite", () => {
+    const withBad = [...entities, line("d", "SHOWN", Number.NaN, 0, 1, 1)];
+    expect(unionOfVisibleEntityBounds(withBad, computeAllEntityBounds(withBad), new Set(["SHOWN"]))).toEqual({
+      min: { x: -5, y: 0 },
+      max: { x: 10, y: 20 },
+    });
   });
 });

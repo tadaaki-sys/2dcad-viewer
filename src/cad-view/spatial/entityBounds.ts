@@ -106,6 +106,32 @@ export function computeAllEntityBounds(entities: readonly CadEntity[]): Float64A
   return out;
 }
 
+/** 表示中のレイヤーの図形だけを含むバウンディングボックス(全体表示用)。該当する図形が1つも無ければnull */
+export function unionOfVisibleEntityBounds(
+  entities: readonly CadEntity[],
+  entityBounds: Float64Array,
+  visibleLayerNames: ReadonlySet<string>,
+): CadBounds | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < entities.length; i++) {
+    if (!visibleLayerNames.has(entities[i].layer)) continue;
+    const o = i * BOUNDS_STRIDE;
+    const bMinX = entityBounds[o];
+    const bMinY = entityBounds[o + 1];
+    const bMaxX = entityBounds[o + 2];
+    const bMaxY = entityBounds[o + 3];
+    if (!(Number.isFinite(bMinX) && Number.isFinite(bMaxX) && Number.isFinite(bMinY) && Number.isFinite(bMaxY))) continue;
+    if (bMinX < minX) minX = bMinX;
+    if (bMinY < minY) minY = bMinY;
+    if (bMaxX > maxX) maxX = bMaxX;
+    if (bMaxY > maxY) maxY = bMaxY;
+  }
+  return minX <= maxX ? { min: { x: minX, y: minY }, max: { x: maxX, y: maxY } } : null;
+}
+
 /** 有限な範囲を持つ図形すべてを含む全体のバウンディングボックス。1つも無ければnull */
 export function unionOfEntityBounds(entityBounds: Float64Array): CadBounds | null {
   let minX = Infinity;

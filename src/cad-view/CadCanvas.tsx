@@ -8,6 +8,7 @@ import { findSnapPoint } from "./snap/SnapEngine";
 import type { SnapCandidate } from "./snap/SnapEngine";
 import { findMeasurementAtPoint } from "./measurement/Measurement";
 import { buildSpatialIndex } from "./spatial/SpatialIndex";
+import { unionOfVisibleEntityBounds } from "./spatial/entityBounds";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -208,9 +209,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   function fitToModel() {
     const container = containerRef.current;
     const currentModel = stateRef.current.model;
-    if (container && currentModel?.bounds) {
-      cameraRef.current.fit(currentModel.bounds, container.clientWidth, container.clientHeight);
-    }
+    if (!container || !currentModel) return;
+    // 表示中のレイヤーの図形だけで範囲を決める(非表示の図形が遠くにあっても、見えている図面が小さくならない)。
+    // 表示中の図形が無いときは、図面全体の範囲にする。
+    const bounds =
+      unionOfVisibleEntityBounds(currentModel.entities, currentModel.entityBounds, stateRef.current.visibleLayerNames) ??
+      currentModel.bounds;
+    if (bounds) cameraRef.current.fit(bounds, container.clientWidth, container.clientHeight);
   }
 
   useImperativeHandle(ref, () => ({
