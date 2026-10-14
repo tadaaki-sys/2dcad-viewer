@@ -39,6 +39,7 @@ function isFullSweep(span: number): boolean {
 /** CIRCLE/TEXT、および全周のELLIPSEには自然な「端点」概念がないため候補を出さない。ARC/部分ELLIPSEは始点/終点の厳密座標を2点返す */
 function endpointsOf(entity: CadEntity): Point2D[] {
   if (entity.type === "LINE") return [entity.start, entity.end];
+  if (entity.type === "POINT") return [entity.position]; // 点そのものが「節点」スナップの対象
   if (entity.type === "CIRCLE" || entity.type === "TEXT") return [];
   // SPLINEは近似点列の中間点を端点として拾わず、開いている場合のみ両端を返す
   if (entity.type === "SPLINE") {
@@ -85,7 +86,7 @@ function collectMidpointCandidates(
     if (!visibleLayerNames.has(entity.layer)) continue;
 
     // CIRCLE/TEXT、および全周のELLIPSEには自然な中点がないため候補を出さない。ARC/部分ELLIPSEは弧の中央角度の厳密な1点のみ(テッセレーション頂点は使わない)
-    if (entity.type === "CIRCLE" || entity.type === "TEXT" || entity.type === "SPLINE") continue;
+    if (entity.type === "CIRCLE" || entity.type === "TEXT" || entity.type === "SPLINE" || entity.type === "POINT") continue;
     if (entity.type === "ARC") {
       const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
       const midpoint = pointOnArc(entity.center, entity.radius, entity.startAngle + span / 2);
@@ -169,6 +170,7 @@ function collectIntersectionCandidates(
 /** entity上でworldPointに最も近い点。TEXTなど線を持たない図形はnull */
 function nearestPointOnEntity(entity: CadEntity, worldPoint: Point2D): Point2D | null {
   if (entity.type === "TEXT") return null;
+  if (entity.type === "POINT") return entity.position;
   if (entity.type === "CIRCLE" || entity.type === "ARC") {
     const dx = worldPoint.x - entity.center.x;
     const dy = worldPoint.y - entity.center.y;

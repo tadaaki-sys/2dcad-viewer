@@ -1,4 +1,4 @@
-import type { CadEntity, CadText, LineDash, Measurement, Point2D } from "../../types/cad";
+import type { CadEntity, CadPoint, CadPointStyle, CadText, LineDash, Measurement, Point2D } from "../../types/cad";
 import { computeMeasurementDistances } from "../measurement/Measurement";
 import { formatMm } from "../../utils/format";
 import { normalizeArcSpan, pointOnEllipse } from "../../utils/geometry";
@@ -105,6 +105,55 @@ function appendEllipse(
   }
 }
 
+// 点(POINT)の表示。大きさが指定されていない場合の、画面上の記号の大きさ(半径、px)と、点(PDMODE 0)の大きさ
+const POINT_DEFAULT_HALF_SIZE_PX = 4;
+const POINT_MIN_HALF_SIZE_PX = 2;
+const POINT_MAX_HALF_SIZE_PX = 200;
+const POINT_DOT_HALF_SIZE_PX = 1;
+const POINT_HIGHLIGHT_HALF_SIZE_PX = 6;
+
+const DEFAULT_POINT_STYLE: CadPointStyle = { mode: 0, size: 0 };
+
+/** 記号の半径(px)。$PDSIZEが正なら図面上の大きさ(拡大に追従)、0以下なら画面上で一定 */
+function pointHalfSizePx(style: CadPointStyle, k: number): number {
+  if (!(style.size > 0)) return POINT_DEFAULT_HALF_SIZE_PX;
+  return Math.min(POINT_MAX_HALF_SIZE_PX, Math.max(POINT_MIN_HALF_SIZE_PX, (style.size * k) / 2));
+}
+
+/** 点を表示しない設定か($PDMODEが1で、円・四角の重ね描きも無い場合) */
+function isPointHidden(style: CadPointStyle): boolean {
+  return style.mode === 1;
+}
+
+/**
+ * 点1つの記号を、画面座標(x, y)にstrokePath(線)とfillPath(塗りつぶし)へ追加する。
+ * $PDMODE: 0=点、1=なし、2=+、3=×、4=上向きの縦線。32を足すと円、64を足すと四角が重なる。
+ */
+function appendPointMarker(strokePath: Path2D, fillPath: Path2D, x: number, y: number, mode: number, half: number): void {
+  const shape = mode % 32;
+  if (shape === 0) {
+    fillPath.rect(x - POINT_DOT_HALF_SIZE_PX, y - POINT_DOT_HALF_SIZE_PX, POINT_DOT_HALF_SIZE_PX * 2, POINT_DOT_HALF_SIZE_PX * 2);
+  } else if (shape === 2) {
+    strokePath.moveTo(x - half, y);
+    strokePath.lineTo(x + half, y);
+    strokePath.moveTo(x, y - half);
+    strokePath.lineTo(x, y + half);
+  } else if (shape === 3) {
+    strokePath.moveTo(x - half, y - half);
+    strokePath.lineTo(x + half, y + half);
+    strokePath.moveTo(x - half, y + half);
+    strokePath.lineTo(x + half, y - half);
+  } else if (shape === 4) {
+    strokePath.moveTo(x, y);
+    strokePath.lineTo(x, y - half);
+  }
+  if (mode & 32) {
+    strokePath.moveTo(x + half, y);
+    strokePath.arc(x, y, half, 0, Math.PI * 2);
+  }
+  if (mode & 64) strokePath.rect(x - half, y - half, half * 2, half * 2);
+}
+
 /** 図形1つ分のパスをpath(CanvasRenderingContext2DまたはPath2D)へ追加する */
 function appendEntity(path: CanvasPath, entity: Exclude<CadEntity, CadText>, k: number, ox: number, oy: number): void {
   switch (entity.type) {
@@ -180,6 +229,30 @@ function drawTextEntity(ctx: CanvasRenderingContext2D, camera: Camera, entity: C
   }
 
   ctx.restore();
+}
+
+/** 点を色ごとにまとめて描く(点の数だけstrokeすると、点が多い図面で遅くなるため) */
+function drawPoints(ctx: CanvasRenderingContext2D, camera: Camera, points: readonly CadPoint[], style: CadPointStyle): void {
+  const k = camera.scale;
+  const half = pointHalfSizePx(style, k);
+  const byColor = new Map<string, { stroke: Path2D; fill: Path2D }>();
+  for (const point of points) {
+    let paths = byColor.get(point.color);
+    if (!paths) {
+      paths = { stroke: new Path2D(), fill: new Path2D() };
+      byColor.set(point.color, paths);
+    }
+    appendPointMarker(paths.stroke, paths.fill, point.position.x * k + camera.offsetX, camera.offsetY - point.position.y * k, style.mode, half);
+  }
+  ctx.lineWidth = LINE_WIDTH_PX;
+  ctx.setLineDash([]);
+  for (const color of Array.from(byColor.keys()).sort()) {
+    const paths = byColor.get(color) as { stroke: Path2D; fill: Path2D };
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.stroke(paths.stroke);
+    ctx.fill(paths.fill);
+  }
 }
 
 function drawDragSelectionBox(ctx: CanvasRenderingContext2D, box: DragSelectionBox): void {
@@ -309,7 +382,9 @@ export class CanvasRenderer implements Renderer {
     const batches = new Map<string, StrokeBatch>();
     const screenDashByKey = new Map<string, number[] | null>();
     const texts: CadText[] = [];
+    const points: CadPoint[] = [];
     const selectedEntities: CadEntity[] = [];
+    const pointStyle = model.pointStyle ?? DEFAULT_POINT_STYLE;
 
     for (let n = 0; n < candidateCount; n++) {
       const i = candidateIndices ? candidateIndices[n] : n;
@@ -317,6 +392,12 @@ export class CanvasRenderer implements Renderer {
       if (!visibleLayerNames.has(entity.layer)) continue;
       if (hasSelection && selectedEntityIds.has(entity.id)) {
         selectedEntities.push(entity);
+        continue;
+      }
+
+      // 点は大きさを持たないので、小さい図形を省く判定の前に別扱いにする
+      if (entity.type === "POINT") {
+        points.push(entity);
         continue;
       }
 
@@ -362,12 +443,36 @@ export class CanvasRenderer implements Renderer {
       drawTextEntity(ctx, camera, text, text.color);
     }
 
+    if (points.length > 0 && !isPointHidden(pointStyle)) {
+      drawPoints(ctx, camera, points, pointStyle);
+    }
+
     if (selectedEntities.length > 0) {
       ctx.strokeStyle = HIGHLIGHT_COLOR;
       ctx.lineWidth = HIGHLIGHT_LINE_WIDTH_PX;
       for (const entity of selectedEntities) {
         if (entity.type === "TEXT") {
           drawTextEntity(ctx, camera, entity, HIGHLIGHT_COLOR);
+          continue;
+        }
+        if (entity.type === "POINT") {
+          // 選択した点は、本来の記号を強調色で描き直し、表示設定に関わらず見つけやすい大きさの四角で囲む
+          const screen = camera.worldToScreen(entity.position);
+          ctx.lineWidth = HIGHLIGHT_LINE_WIDTH_PX;
+          if (!isPointHidden(pointStyle)) {
+            const strokePath = new Path2D();
+            const fillPath = new Path2D();
+            appendPointMarker(strokePath, fillPath, screen.x, screen.y, pointStyle.mode, pointHalfSizePx(pointStyle, k));
+            ctx.fillStyle = HIGHLIGHT_COLOR;
+            ctx.stroke(strokePath);
+            ctx.fill(fillPath);
+          }
+          ctx.strokeRect(
+            screen.x - POINT_HIGHLIGHT_HALF_SIZE_PX,
+            screen.y - POINT_HIGHLIGHT_HALF_SIZE_PX,
+            POINT_HIGHLIGHT_HALF_SIZE_PX * 2,
+            POINT_HIGHLIGHT_HALF_SIZE_PX * 2,
+          );
           continue;
         }
         // 元の線が太いときも、ハイライトが細くならないよう元より少し太く描く

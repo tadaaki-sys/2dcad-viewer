@@ -130,7 +130,25 @@ export type CadSpline = {
   closed: boolean;
 };
 
-export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline;
+/** 点。見た目(点・十字・円など)と大きさは図面全体の設定(CadModel.pointStyle)に従い、図形ごとの線種・線幅は持たない */
+export type CadPoint = {
+  id: string;
+  type: "POINT";
+  layer: string;
+  color: string;
+  // 他の図形と同じ書き方でプロパティを参照できるよう、未指定として宣言しておく
+  lineDash?: undefined;
+  lineWeight?: undefined;
+  position: Point2D;
+};
+
+/** 点の表示設定。modeはDXFの$PDMODE(0=点,1=非表示,2=+,3=×,4=縦線。+32で円、+64で四角を重ねる)、sizeは$PDSIZE */
+export type CadPointStyle = {
+  mode: number;
+  size: number;
+};
+
+export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline | CadPoint;
 
 export type CadBounds = {
   min: Point2D;
@@ -149,6 +167,8 @@ export type CadModel = {
   /** entities[i]のバウンディングボックス [minX,minY,maxX,maxY] を4要素ずつ並べたもの(選択・描画の絞り込み用) */
   entityBounds: Float64Array;
   layers: CadLayer[];
+  /** 点(POINT)の表示設定。省略時は点(PDMODE 0)として扱う */
+  pointStyle?: CadPointStyle;
   bounds: CadBounds | null;
   stats: CadModelStats;
 };

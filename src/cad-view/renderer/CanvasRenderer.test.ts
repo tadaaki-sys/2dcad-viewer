@@ -14,6 +14,7 @@ class RecordingPath {
   lineTo(x: number, y: number) { this.ops.push(["lineTo", x, y]); }
   arc(x: number, y: number, r: number, a0: number, a1: number, ccw?: boolean) { this.ops.push(["arc", x, y, r, a0, a1, ccw ? 1 : 0]); }
   closePath() { this.ops.push(["closePath"]); }
+  rect(x: number, y: number, w: number, h: number) { this.ops.push(["rect", x, y, w, h]); }
 }
 
 class RecordingContext extends RecordingPath {
@@ -30,6 +31,8 @@ class RecordingContext extends RecordingPath {
   stroke(path?: RecordingPath) {
     this.strokes.push({ style: this.strokeStyle, path: path ?? null, width: this.lineWidth, dash: [...this.currentDash] });
   }
+  fills: Array<{ style: string; path: RecordingPath | null }> = [];
+  fill(path?: RecordingPath) { this.fills.push({ style: this.fillStyle, path: path ?? null }); }
   fillRect() {}
   strokeRect() {}
   save() {}
@@ -294,5 +297,62 @@ describe("CanvasRenderer viewport culling", () => {
     const visibleXs = withoutIndex.strokes[0].path!.ops.filter((op) => op[0] === "moveTo" && op[1] <= 200).map((op) => op[1]);
     const indexedXs = withIndex.strokes[0].path!.ops.filter((op) => op[0] === "moveTo").map((op) => op[1]);
     for (const x of visibleXs) expect(indexedXs).toContain(x);
+  });
+});
+
+describe("CanvasRenderer points", () => {
+  const point = (id: string, x: number, y: number, color = "#ff0000"): CadEntity => ({
+    id,
+    type: "POINT",
+    ...common,
+    color,
+    position: { x, y },
+  });
+  const withStyle = (entities: CadEntity[], pointStyle: { mode: number; size: number }): CadModel => ({
+    ...makeModel(entities),
+    pointStyle,
+  });
+
+  it("draws a POINT (default PDMODE 0) as a small filled dot even though it has no size", () => {
+    const ctx = render(makeModel([point("p", 10, 20)]), camera(1, 0, 100));
+    expect(ctx.fills).toHaveLength(1);
+    expect(ctx.fills[0].style).toBe("#ff0000");
+    // 画面座標(10,80)の中心に2x2の四角
+    expect(ctx.fills[0].path!.ops).toEqual([["rect", 9, 79, 2, 2]]);
+  });
+
+  it("draws one fill per color regardless of the number of points", () => {
+    const entities = [point("a", 10, 10), point("b", 20, 20), point("c", 30, 30, "#00ff00")];
+    const ctx = render(makeModel(entities), camera());
+    expect(ctx.fills.map((f) => f.style).sort()).toEqual(["#00ff00", "#ff0000"]);
+  });
+
+  it("draws crosses for PDMODE 3 and a circle for PDMODE 32+2", () => {
+    const cross = render(withStyle([point("p", 10, 20)], { mode: 3, size: 0 }), camera(1, 0, 100));
+    expect(cross.fills).toHaveLength(1); // 塗りは空のパスだが、呼び出しは色ごとに1回
+    expect(cross.fills[0].path!.ops).toEqual([]);
+    const crossOps = cross.strokes[0].path!.ops;
+    expect(crossOps.filter((op) => op[0] === "moveTo")).toHaveLength(2);
+
+    const circle = render(withStyle([point("p", 10, 20)], { mode: 34, size: 0 }), camera(1, 0, 100));
+    expect(circle.strokes[0].path!.ops.some((op) => op[0] === "arc")).toBe(true);
+  });
+
+  it("scales the marker with zoom when PDSIZE is a positive drawing size", () => {
+    const small = render(withStyle([point("p", 10, 20)], { mode: 64, size: 10 }), camera(1, 0, 100));
+    const large = render(withStyle([point("p", 10, 20)], { mode: 64, size: 10 }), camera(4, 0, 100));
+    const width = (ctx: RecordingContext) => (ctx.strokes[0].path!.ops.find((op) => op[0] === "rect") as Op)[3];
+    expect(width(small)).toBe(10);
+    expect(width(large)).toBe(40);
+  });
+
+  it("does not draw points when PDMODE is 1 (not displayed)", () => {
+    const ctx = render(withStyle([point("p", 10, 20)], { mode: 1, size: 0 }), camera());
+    expect(ctx.fills).toHaveLength(0);
+  });
+
+  it("skips points on hidden layers", () => {
+    const ctx = render(makeModel([point("p", 10, 20)]), camera(), { visibleLayerNames: new Set() });
+    expect(ctx.fills).toHaveLength(0);
   });
 });

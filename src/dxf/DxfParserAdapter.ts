@@ -9,7 +9,16 @@ import type { ITextEntity } from "dxf-parser";
 import type { IMtextEntity } from "dxf-parser";
 import type { IEllipseEntity } from "dxf-parser";
 import type { ISplineEntity } from "dxf-parser";
-import type { CadEntity, CadHorizontalAlign, LineDash, CadLayer, CadModel, CadVerticalAlign, Point2D } from "../types/cad";
+import type {
+  CadEntity,
+  CadHorizontalAlign,
+  LineDash,
+  CadLayer,
+  CadModel,
+  CadPointStyle,
+  CadVerticalAlign,
+  Point2D,
+} from "../types/cad";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
 import type { Matrix2D } from "../utils/matrix2d";
 import { computeAllEntityBounds, unionOfEntityBounds } from "../cad-view/spatial/entityBounds";
@@ -141,6 +150,7 @@ export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadM
     entities: context.entities,
     entityBounds,
     layers,
+    pointStyle: readPointStyle(raw),
     bounds: unionOfEntityBounds(entityBounds),
     stats: {
       totalEntityCount: context.totalEntityCount,
@@ -189,7 +199,7 @@ function walkEntities(
     context.totalEntityCount++;
     const converted = convertEntity(entity, context.layerColorByName, matrix, byBlock.color, () => `e${context.nextId++}`);
     if (converted) {
-      if (converted.type !== "TEXT") {
+      if (converted.type !== "TEXT" && converted.type !== "POINT") {
         const lineTypeName = resolveLineTypeName(entity, context.layerStyleByName, byBlock.lineType);
         const dash = resolveLineDash(lineTypeName, entity.lineTypeScale, context);
         if (dash) converted.lineDash = dash;
@@ -315,6 +325,16 @@ function buildLineTypePatternMap(raw: IDxf): Map<string, number[]> {
 function readLineTypeScale(raw: IDxf): number {
   const value = raw.header?.["$LTSCALE"];
   return typeof value === "number" && value > 0 && Number.isFinite(value) ? value : 1;
+}
+
+/** 点の表示設定($PDMODE/$PDSIZE)。未指定・不正値は、CADの既定(点・サイズ0)にする */
+function readPointStyle(raw: IDxf): CadPointStyle {
+  const mode = raw.header?.["$PDMODE"];
+  const size = raw.header?.["$PDSIZE"];
+  return {
+    mode: typeof mode === "number" && Number.isFinite(mode) ? Math.trunc(mode) : 0,
+    size: typeof size === "number" && Number.isFinite(size) ? size : 0,
+  };
 }
 
 /**
@@ -595,6 +615,14 @@ function convertEntity(
     if (!params) return null;
 
     return { id: nextId(), type: "ELLIPSE", layer, color, center, ...params };
+  }
+
+  if (entity.type === "POINT") {
+    const point = entity as IEntity & { position?: { x: number; y: number } };
+    if (!point.position) return null;
+    const position = applyMatrix(toPoint2D(point.position), matrix);
+    if (!Number.isFinite(position.x + position.y)) return null;
+    return { id: nextId(), type: "POINT", layer, color, position };
   }
 
   if (entity.type === "SPLINE") {

@@ -72,6 +72,9 @@ export function writeEntityBounds(entity: CadEntity, out: Float64Array, offset: 
     case "SPLINE":
       writePointsBounds(out, offset, entity.points);
       return;
+    case "POINT":
+      writeBounds(out, offset, entity.position.x, entity.position.y, entity.position.x, entity.position.y);
+      return;
     case "CIRCLE":
       writeBounds(
         out,

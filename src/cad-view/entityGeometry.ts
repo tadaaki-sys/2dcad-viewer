@@ -113,6 +113,7 @@ export function getEntityPoints(entity: CadEntity): Point2D[] {
   }
   if (entity.type === "TEXT") return getTextBoundingBoxCorners(entity);
   if (entity.type === "SPLINE") return entity.points;
+  if (entity.type === "POINT") return [entity.position];
   return entity.vertices;
 }
 

@@ -184,7 +184,7 @@ describe("DxfParserAdapter", () => {
         "21",
         "0.0",
         "0",
-        "POINT",
+        "SOLID",
         "8",
         "0",
         "10",
@@ -200,7 +200,7 @@ describe("DxfParserAdapter", () => {
         "20",
         "0.0",
         "0",
-        "POINT",
+        "SOLID",
         "8",
         "0",
         "10",
@@ -215,7 +215,7 @@ describe("DxfParserAdapter", () => {
     expect(model.stats.totalEntityCount).toBe(4);
     expect(model.stats.supportedEntityCount).toBe(1);
     expect(model.stats.unsupportedEntityCount).toBe(3);
-    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 2, SOLID: 1 });
+    expect(model.stats.unsupportedBreakdown).toEqual({ SOLID: 3 });
   });
 
   it("excludes paper space entities from the model", () => {
@@ -304,7 +304,7 @@ describe("DxfParserAdapter", () => {
   });
 
   it("returns null bounds when there are no supported entities", () => {
-    const dxf = buildDxf(["0", "POINT", "8", "0", "10", "0.0", "20", "0.0"].join("\n"));
+    const dxf = buildDxf(["0", "SOLID", "8", "0", "10", "0.0", "20", "0.0"].join("\n"));
 
     const model = parseDxfText(dxf);
 
@@ -400,7 +400,7 @@ describe("DxfParserAdapter - INSERT/BLOCK expansion", () => {
   });
 
   it("counts entities inside a block towards total/unsupported stats", () => {
-    const pointInBlock = ["0", "POINT", "8", "0", "10", "0.0", "20", "0.0"].join("\n");
+    const pointInBlock = ["0", "SOLID", "8", "0", "10", "0.0", "20", "0.0"].join("\n");
     const dxf = buildDxfWithBlocks(
       insertRef("SYMBOL", { x: 0, y: 0 }),
       blockDef("SYMBOL", { x: 0, y: 0 }, [lineInBlock, pointInBlock].join("\n")),
@@ -410,7 +410,7 @@ describe("DxfParserAdapter - INSERT/BLOCK expansion", () => {
 
     expect(model.stats.totalEntityCount).toBe(2);
     expect(model.stats.supportedEntityCount).toBe(1);
-    expect(model.stats.unsupportedBreakdown).toEqual({ POINT: 1 });
+    expect(model.stats.unsupportedBreakdown).toEqual({ SOLID: 1 });
   });
 
   it("counts an INSERT referencing a missing block as unsupported instead of crashing", () => {

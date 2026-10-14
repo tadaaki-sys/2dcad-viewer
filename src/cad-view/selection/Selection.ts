@@ -23,6 +23,7 @@ export type BoxSelectionMode = "window" | "crossing";
  */
 function distanceFromEntity(entity: CadEntity, point: Point2D): number {
   if (entity.type === "TEXT") return distanceFromPointToText(entity, point);
+  if (entity.type === "POINT") return distance(point, entity.position);
   // 円/円弧は折れ線近似ではなく解析的に距離を求める(半径が大きいと近似線分と実際の曲線の差が選択精度に響くため)
   if (entity.type === "CIRCLE") return Math.abs(distance(point, entity.center) - entity.radius);
   if (entity.type === "ARC") {

@@ -18,7 +18,7 @@ function entityLength(entity: CadEntity): number {
   if (entity.type === "LINE") return distance(entity.start, entity.end);
   if (entity.type === "CIRCLE") return 2 * Math.PI * entity.radius;
   if (entity.type === "ARC") return entity.radius * normalizeArcSpan(entity.startAngle, entity.endAngle);
-  if (entity.type === "TEXT") return 0;
+  if (entity.type === "TEXT" || entity.type === "POINT") return 0;
   // 楕円(弧)の正確な弧長は楕円積分が必要なため、既存のテッセレーション点を使った近似で済ませる
   if (entity.type === "ELLIPSE") return polylineLength(getEntityPoints(entity), false);
   if (entity.type === "SPLINE") return polylineLength(entity.points, entity.closed);
@@ -30,10 +30,10 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
     { label: "Entity Type", value: entity.type },
     { label: "Layer", value: entity.layer },
   ];
-  if (entity.type !== "TEXT" && entity.lineDash) {
+  if (entity.type !== "TEXT" && entity.type !== "POINT" && entity.lineDash) {
     rows.push({ label: "Linetype", value: entity.lineDash.name });
   }
-  if (entity.type !== "TEXT" && entity.lineWeight !== undefined) {
+  if (entity.type !== "TEXT" && entity.type !== "POINT" && entity.lineWeight !== undefined) {
     rows.push({ label: "Lineweight", value: `${(entity.lineWeight / 100).toFixed(2)} mm` });
   }
 
@@ -56,6 +56,8 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
       { label: "Start/End Angle", value: `${radiansToDegrees(entity.startAngle).toFixed(1)}°, ${radiansToDegrees(entity.endAngle).toFixed(1)}°` },
       { label: "Arc Length", value: formatMm(entityLength(entity)) },
     );
+  } else if (entity.type === "POINT") {
+    rows.push({ label: "Position X/Y", value: `${formatMm(entity.position.x)}, ${formatMm(entity.position.y)}` });
   } else if (entity.type === "TEXT") {
     rows.push(
       { label: "Position X/Y", value: `${formatMm(entity.position.x)}, ${formatMm(entity.position.y)}` },
