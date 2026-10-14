@@ -50,7 +50,7 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
     }
 
     postProgress("converting", raw.entities?.length ?? null);
-    const cadModel = convertToCadModel(raw, { layerStyles: extractLayerStyles(text) });
+    const cadModel = convertToCadModel(raw, { layerStyles: extractLayerStyles(text), ignoreLayerOffFlag: dwgVersion !== null });
     console.log("[dxf.worker] converted CadModel stats", cadModel.stats);
 
     postProgress("preparing", cadModel.stats.totalEntityCount);

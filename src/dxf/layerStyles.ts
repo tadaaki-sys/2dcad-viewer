@@ -2,15 +2,20 @@ const LAYER_TABLE_START = /^[ \t]*0[ \t]*\r?\n[ \t]*TABLE[ \t]*\r?\n[ \t]*2[ \t]
 
 const LAYER_TABLE_END = /^[ \t]*0[ \t]*\r?\n[ \t]*ENDTAB[ \t]*$/m;
 
-/** レイヤー表に書かれた線種名と線の太さ(1/100mm。-3は既定値)。無ければnull */
+/**
+ * レイヤー表に書かれた線種名・線の太さ(1/100mm。-3は既定値)・表示状態。
+ * offは色番号(62)が負(レイヤーOFF)、frozenは状態フラグ(70)のビット1(フリーズ)。
+ */
 export type LayerStyle = {
   lineType: string | null;
   lineWeight: number | null;
+  off: boolean;
+  frozen: boolean;
 };
 
 /**
- * DXFのLAYERテーブルから「レイヤー名 → 線種・線の太さ」を取り出す。
- * dxf-parserはレイヤーの線種(グループコード6)と線の太さ(370)を保持しないため、ByLayerの解決用にここで別途読む。
+ * DXFのLAYERテーブルから「レイヤー名 → 線種・線の太さ・表示状態」を取り出す。
+ * dxf-parserはレイヤーの線種(グループコード6)と線の太さ(370)を保持しないため、ByLayerの解決用にここで別途読む。表示状態もここで読む(dxf-parserは状態フラグのビット2も「フリーズ」とみなすため)。
  * LAYERテーブルはファイル先頭付近にある小さな領域なので、全文を行分割せずその範囲だけを走査する。
  */
 export function extractLayerStyles(dxfText: string): Map<string, LayerStyle> {
@@ -25,15 +30,19 @@ export function extractLayerStyles(dxfText: string): Map<string, LayerStyle> {
   let currentName: string | null = null;
   let currentLineType: string | null = null;
   let currentLineWeight: number | null = null;
+  let currentOff = false;
+  let currentFrozen = false;
   let inLayerRecord = false;
 
   const flush = () => {
     if (inLayerRecord && currentName !== null) {
-      layerStyles.set(currentName, { lineType: currentLineType, lineWeight: currentLineWeight });
+      layerStyles.set(currentName, { lineType: currentLineType, lineWeight: currentLineWeight, off: currentOff, frozen: currentFrozen });
     }
     currentName = null;
     currentLineType = null;
     currentLineWeight = null;
+    currentOff = false;
+    currentFrozen = false;
   };
 
   for (let i = 0; i + 1 < tableLines.length; i += 2) {
@@ -46,6 +55,10 @@ export function extractLayerStyles(dxfText: string): Map<string, LayerStyle> {
       currentName = value;
     } else if (inLayerRecord && code === "6") {
       currentLineType = value;
+    } else if (inLayerRecord && code === "62") {
+      currentOff = Number(value) < 0;
+    } else if (inLayerRecord && code === "70") {
+      currentFrozen = (Number(value) & 1) !== 0;
     } else if (inLayerRecord && code === "370") {
       const weight = Number(value);
       currentLineWeight = Number.isFinite(weight) ? weight : null;

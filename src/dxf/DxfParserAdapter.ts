@@ -91,6 +91,11 @@ export function parseDxfText(text: string): CadModel {
 export type ConvertOptions = {
   /** レイヤー名→線種・線の太さ。dxf-parserが読まないLAYERテーブルの値を、ByLayer解決用に渡す */
   layerStyles?: ReadonlyMap<string, LayerStyle>;
+  /**
+   * レイヤーのOFF(色番号が負)を無視する。DWGをLibreDWGで変換したDXFは、実際にはONのレイヤーまで
+   * 一律に負で出力するため当てにならない。フリーズ(状態フラグ)は読む。
+   */
+  ignoreLayerOffFlag?: boolean;
 };
 
 /** ByBlockで指定された属性が継承する、直近のINSERT側で解決済みの値 */
@@ -140,7 +145,7 @@ export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadM
 
   walkEntities(modelSpaceEntities, IDENTITY_MATRIX, NO_BYBLOCK_STYLE, new Set(), 0, context);
 
-  const layers = buildLayers(raw, layerColorByName, context.usedLayerNames);
+  const layers = buildLayers(raw, layerColorByName, context.usedLayerNames, context.layerStyleByName, options.ignoreLayerOffFlag === true);
   const supportedEntityCount = context.entities.length;
   const unsupportedEntityCount = context.totalEntityCount - supportedEntityCount;
 
@@ -327,6 +332,12 @@ function readLineTypeScale(raw: IDxf): number {
   return typeof value === "number" && value > 0 && Number.isFinite(value) ? value : 1;
 }
 
+/** 図面を開いた時点でそのレイヤーを非表示にするか。レイヤー表に無い(図形だけが参照している)レイヤーは表示する */
+function isLayerHidden(style: LayerStyle | undefined, ignoreLayerOffFlag: boolean): boolean {
+  if (!style) return false;
+  return style.frozen || (style.off && !ignoreLayerOffFlag);
+}
+
 /** 点の表示設定($PDMODE/$PDSIZE)。未指定・不正値は、CADの既定(点・サイズ0)にする */
 function readPointStyle(raw: IDxf): CadPointStyle {
   const mode = raw.header?.["$PDMODE"];
@@ -393,14 +404,21 @@ function resolveLineDash(name: string | null, entityScale: number | undefined, c
   return dash ?? undefined;
 }
 
-function buildLayers(raw: IDxf, layerColorByName: Map<string, string>, usedLayerNames: Set<string>): CadLayer[] {
+function buildLayers(
+  raw: IDxf,
+  layerColorByName: Map<string, string>,
+  usedLayerNames: Set<string>,
+  layerStyleByName: ReadonlyMap<string, LayerStyle>,
+  ignoreLayerOffFlag: boolean,
+): CadLayer[] {
   const rawLayerNames = Object.keys(raw.tables?.layer?.layers ?? {});
   const allLayerNames = new Set([...rawLayerNames, ...usedLayerNames]);
 
   const layers: CadLayer[] = Array.from(allLayerNames).map((name) => ({
     name,
     color: layerColorByName.get(name) ?? DEFAULT_COLOR,
-    visible: true,
+    // 図面を開いた時点で、CADでOFF・フリーズされているレイヤーは非表示にしておく(レイヤー一覧のチェックで表示できる)
+    visible: !isLayerHidden(layerStyleByName.get(name), ignoreLayerOffFlag),
   }));
   return layers.sort((a, b) => a.name.localeCompare(b.name));
 }
