@@ -146,6 +146,28 @@ describe("DxfParserAdapter - layer 0 inheritance and attributes", () => {
     expect(model.entities[0].color).toBe("#ff0000");
   });
 
+  it("uses a true color even when the color index says ByLayer (256), and ignores ByLayer without true color", () => {
+    const layers = ["0", "TABLE", "2", "LAYER", "0", "LAYER", "2", "RED", "70", "0", "62", "1", "6", "CONTINUOUS", "0", "ENDTAB"];
+    const lineWith = (extra: string[]) => ["0", "LINE", "8", "RED", ...extra, "10", "0", "20", "0", "11", "1", "21", "0"].join("\n");
+    const dxf = [
+      "0", "SECTION", "2", "TABLES", ...layers, "0", "ENDSEC",
+      "0", "SECTION", "2", "ENTITIES",
+      lineWith(["62", "256", "420", "65280"]),
+      lineWith(["62", "256"]),
+      "0", "ENDSEC", "0", "EOF",
+    ].join("\n");
+    const model = parseDxfText(dxf);
+    expect(model.entities.map((e) => e.color)).toEqual(["#00ff00", "#ff0000"]);
+  });
+
+  it("keeps a circle finite under an extreme but finite scale", () => {
+    const circle = ["0", "CIRCLE", "8", "0", "10", "0", "20", "0", "40", "1"].join("\n");
+    const model = parseDxfText(buildDxfWithBlocks(insert("S", ["41", "1e200", "42", "1e200"]), blockDef("S", circle)));
+    const result = model.entities[0];
+    expect(result.type).toBe("CIRCLE");
+    if (result.type === "CIRCLE") expect(Number.isFinite(result.radius)).toBe(true);
+  });
+
   it("skips entities marked invisible (group 60 = 1)", () => {
     const hidden = ["0", "LINE", "8", "0", "60", "1", "10", "0", "20", "0", "11", "1", "21", "0"].join("\n");
     const model = parseDxfText(buildDxfWithBlocks(hidden + "\n" + lineIn("0")));

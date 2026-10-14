@@ -23,6 +23,8 @@ export function arcPointsBetween(p: Point2D, q: Point2D, bulge: number): Point2D
   const offset = (chord / 2) * ((1 - bulge * bulge) / (2 * bulge));
   const center = { x: (p.x + q.x) / 2 - (dy / chord) * offset, y: (p.y + q.y) / 2 + (dx / chord) * offset };
   const radius = Math.hypot(p.x - center.x, p.y - center.y);
+  // 極端なbulgeで中心がオーバーフローした場合は、弧にせず直線のままにする
+  if (!Number.isFinite(center.x + center.y + radius)) return [];
   const startAngle = Math.atan2(p.y - center.y, p.x - center.x);
 
   const segments = Math.min(MAX_ARC_SEGMENTS, Math.max(MIN_ARC_SEGMENTS, Math.ceil(Math.abs(sweep) / MAX_SEGMENT_ANGLE)));

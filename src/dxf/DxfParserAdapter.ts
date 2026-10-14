@@ -395,8 +395,13 @@ function resolveEntityColor(
   byBlockColor: string | null = null,
 ): string {
   const colorIndex = entity.colorIndex;
-  // 色番号が無くtrue color(420)だけが指定された図形は、その色を使う
-  const isExplicitColor = colorIndex === undefined || (colorIndex !== 0 && colorIndex !== 256);
+  // 色番号に対応するRGBが無い場合(番号が無い/256=ByLayer)にentity.colorがあれば、それはtrue color(420)。
+  // ByBlock(0)はdxf-parserが仮の値0を入れるので、0以外ならtrue colorとみなす。
+  const isExplicitColor =
+    colorIndex === undefined ||
+    (colorIndex === 256 && entity.color !== undefined) ||
+    (colorIndex === 0 && entity.color !== undefined && entity.color !== 0) ||
+    (colorIndex !== 0 && colorIndex !== 256);
   if (isExplicitColor && entity.color !== undefined) {
     return toHexColor(entity.color);
   }
@@ -493,8 +498,9 @@ function convertEntity(
       return { id: nextId(), type: "ELLIPSE", layer, color, center, ...ellipse };
     }
 
-    const radius = shape.radius * Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
-    if (!(radius > 0)) return null;
+    // 相似変換の倍率は基底ベクトルの長さ。行列式の平方根だと、極端に大きな縮尺でオーバーフローする
+    const radius = shape.radius * Math.hypot(matrix.a, matrix.b);
+    if (!(radius > 0) || !Number.isFinite(radius) || !Number.isFinite(center.x + center.y)) return null;
     if (entity.type === "CIRCLE") {
       return { id: nextId(), type: "CIRCLE", layer, color, center, radius };
     }

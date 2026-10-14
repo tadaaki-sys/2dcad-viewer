@@ -9,6 +9,14 @@ describe("arcPointsBetween", () => {
     expect(arcPointsBetween({ x: 3, y: 3 }, { x: 3, y: 3 }, 1)).toEqual([]);
   });
 
+  it("stays finite for an absurdly large bulge", () => {
+    const points = arcPointsBetween({ x: 0, y: 0 }, { x: 1, y: 0 }, 1e200);
+    for (const p of points) {
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.y)).toBe(true);
+    }
+  });
+
   it("builds a CCW semicircle for bulge +1: the arc bulges to the right of the chord direction", () => {
     // 原点→(10,0)のCCW半円は、中心(5,0)の下側(Yが負)を通る
     const points = arcPointsBetween({ x: 0, y: 0 }, { x: 10, y: 0 }, 1);
