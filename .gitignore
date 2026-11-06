@@ -26,3 +26,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 回帰テスト用の実図面・基準値(お客様の業務データを含みうるのでリポジトリに含めない)
+regression-local/
+
+# Playwrightの出力
+test-results/
+playwright-report/

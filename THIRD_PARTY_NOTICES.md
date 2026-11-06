@@ -1,7 +1,7 @@
 # 第三者ライセンス一覧(THIRD_PARTY_NOTICES)
 
 2D CAD Viewer が配布物(ビルド後の `dist`)に含める、または開発に使う第三者ソフトウェアのライセンス一覧です。
-調査日: 2026-10-14 / 対象: `package.json` に記載の依存関係と、インストール済みの全パッケージ(52個)
+調査日: 2026-10-14(Playwright の追記: 2026-11-06) / 対象: `package.json` に記載の依存関係と、インストール済みの全パッケージ(55個)
 
 > この文書は技術的な調査の記録で、法的な助言ではありません。社外への提供や商用化の前には、専門家(弁理士・弁護士)に確認してください。
 
@@ -133,12 +133,12 @@ SOFTWARE.
 
 ## 4. 開発時だけ使うもの(配布物には含まれません)
 
-Vite、TypeScript、Vitest、oxlint、`@vitejs/plugin-react`、`@types/*` などと、それらが使う部品(合計46個)です。ライセンスの内訳は次のとおりです。
+Vite、TypeScript、Vitest、oxlint、`@vitejs/plugin-react`、`@types/*`、Playwright(`@playwright/test` 1.64.1、Apache-2.0。E2E テスト用)などと、それらが使う部品(合計49個)です。ライセンスの内訳は次のとおりです。
 
-| ライセンス | 数(配布物の6個を除く、全体では52個) |
+| ライセンス | 数(配布物の6個を除く、全体では55個) |
 |---|---|
 | MIT | 38 |
-| Apache-2.0 | 3 |
+| Apache-2.0 | 6(Playwright 関連の3個を含む) |
 | ISC | 2 |
 | BSD-3-Clause | 1 |
 | MPL-2.0 | 2(`lightningcss`、CSS のビルド用。配布物には含まれません) |
