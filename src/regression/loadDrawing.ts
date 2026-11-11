@@ -4,7 +4,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import DxfParser from "dxf-parser";
-import { convertToCadModel } from "../dxf/DxfParserAdapter";
+import { convertToCadModelWithOrigin } from "../dxf/DxfParserAdapter";
+import type { EntityOrigin } from "../io/dxf/origin";
+import type { IDxf } from "dxf-parser";
 import { decodeDxfBuffer } from "../dxf/dxfEncoding";
 import { detectDwgVersion } from "../dxf/dwgFormat";
 import { convertDwgToDxfBuffer } from "../dxf/dwgToDxf";
@@ -27,6 +29,11 @@ export function readManifest(): ManifestEntry[] {
 
 export type LoadedDrawing = {
   model: CadModel;
+  /** 各図形がraw.entitiesのどれから来たか(Phase 1b) */
+  origin: EntityOrigin;
+  raw: IDxf;
+  /** 解析に使ったDXFのバイト列(DWGなら変換後のDXF) */
+  dxfBytes: Uint8Array;
   isDwg: boolean;
   timings: { dwgConvertMs: number; parseMs: number; convertMs: number };
 };
@@ -37,14 +44,15 @@ export async function loadDrawing(file: string): Promise<LoadedDrawing> {
 
   let dwgConvertMs = 0;
   const isDwg = detectDwgVersion(arrayBuffer) !== null;
-  let text: string;
+  let dxfBuffer: ArrayBuffer;
   if (isDwg) {
     const started = performance.now();
-    text = decodeDxfBuffer(await convertDwgToDxfBuffer(arrayBuffer));
+    dxfBuffer = await convertDwgToDxfBuffer(arrayBuffer);
     dwgConvertMs = performance.now() - started;
   } else {
-    text = decodeDxfBuffer(arrayBuffer);
+    dxfBuffer = arrayBuffer;
   }
+  const text = decodeDxfBuffer(dxfBuffer);
 
   const parseStarted = performance.now();
   const raw = new DxfParser().parseSync(text);
@@ -52,18 +60,22 @@ export async function loadDrawing(file: string): Promise<LoadedDrawing> {
   const parseMs = performance.now() - parseStarted;
 
   const convertStarted = performance.now();
-  const model = convertToCadModel(raw, { layerStyles: extractLayerStyles(text), ignoreLayerOffFlag: isDwg });
+  const { model, origin } = convertToCadModelWithOrigin(raw, { layerStyles: extractLayerStyles(text), ignoreLayerOffFlag: isDwg });
   const convertMs = performance.now() - convertStarted;
 
-  return { model, isDwg, timings: { dwgConvertMs, parseMs, convertMs } };
+  return { model, origin, raw, dxfBytes: new Uint8Array(dxfBuffer), isDwg, timings: { dwgConvertMs, parseMs, convertMs } };
 }
 
 const round3 = (n: number) => Math.round(n * 1e3) / 1e3;
 
 /** 図形の座標・属性を丸めて連結し、ハッシュにする(idは連番なので除く)。図形が1つでも変われば値が変わる */
-export function geometryHash(model: CadModel): string {
+export function geometryHash(model: Pick<CadModel, "entities">): string {
+  return hashEntities(model.entities);
+}
+
+export function hashEntities(entities: readonly CadModel["entities"][number][]): string {
   const hash = createHash("sha256");
-  for (const entity of model.entities) {
+  for (const entity of entities) {
     const { id: _id, ...rest } = entity;
     void _id;
     hash.update(JSON.stringify(rest, (_key, value) => (typeof value === "number" ? round3(value) : value)));

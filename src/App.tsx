@@ -15,6 +15,10 @@ import { validateDxfFile } from "./dxf/validateDxfFile";
 import { isDwgFileName } from "./dxf/dwgFormat";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
 import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
+import { documentFromCadModel } from "./core/model";
+import type { CadDocument } from "./core/model";
+import { summarizeSource } from "./io/dxf/source";
+import type { DxfSource, SourceSummary } from "./io/dxf/source";
 import "./App.css";
 
 const DXF_ERROR_MESSAGE =
@@ -43,6 +47,10 @@ export default function App() {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedMeasurementId, setSelectedMeasurementId] = useState<string | null>(null);
   const [parseTimeMs, setParseTimeMs] = useState<number | null>(null);
+  // 編集機能(Phase 2以降)のために保持する。いまは表示に使わない。図面を閉じる・開き直すときに解放する
+  const documentRef = useRef<CadDocument | null>(null);
+  const sourceRef = useRef<DxfSource | null>(null);
+  const [sourceSummary, setSourceSummary] = useState<SourceSummary | null>(null);
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
   const { recentFiles, addRecentFile } = useRecentFiles();
 
@@ -77,6 +85,9 @@ export default function App() {
 
     const worker = new Worker(new URL("./dxf/dxf.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
+    // このワーカーが、図面のデータ(success)を送り終えたか。送った後の異常で、表示中の図面を止めないために使う
+    let succeeded = false;
+    let pendingModel: CadModel | null = null;
 
     worker.onmessage = (event: MessageEvent<DxfWorkerResponse>) => {
       const message = event.data;
@@ -93,10 +104,22 @@ export default function App() {
         addRecentFile(file.name);
         setLayers(message.cadModel.layers);
         setCadModel(message.cadModel);
+        // 元データは、図面の表示を遅らせないよう、続けて届く(sourceメッセージ)。それまでは、前の図面の分を残さない
+        sourceRef.current = null;
+        documentRef.current = null;
+        setSourceSummary(null);
+        succeeded = true;
+        pendingModel = message.cadModel;
         setSelectedEntityIds(new Set());
         setMeasurements([]);
         setSelectedMeasurementId(null);
         setParseTimeMs(message.elapsedMs);
+        // ワーカーは、元データを送り終えるまで止めない(sourceメッセージで止める)
+      } else if (message.type === "source") {
+        sourceRef.current = message.source;
+        if (pendingModel) documentRef.current = documentFromCadModel(pendingModel);
+        pendingModel = null;
+        setSourceSummary(summarizeSource(message.source));
         terminateWorker();
       } else if (message.type === "error") {
         console.error("[App] DXF parse failed", message.message);
@@ -109,6 +132,11 @@ export default function App() {
 
     worker.onerror = (event) => {
       console.error("[App] DXF worker crashed", event.message);
+      // 図面の表示が済んだあとの異常(元データを作る途中など)では、表示中の図面を止めない
+      if (succeeded) {
+        terminateWorker();
+        return;
+      }
       setLoadingProgress(null);
       setLoadStartedAt(null);
       setErrorMessage(loadErrorMessageFor(file));
@@ -136,6 +164,9 @@ export default function App() {
     setFileInfo(null);
     setLayers([]);
     setCadModel(null);
+    sourceRef.current = null;
+    documentRef.current = null;
+    setSourceSummary(null);
     setCursorWorld(null);
     setSelectedEntityIds(new Set());
     setMeasurements([]);
@@ -307,6 +338,7 @@ export default function App() {
             <PerformanceOverlay
               cadCanvasRef={cadCanvasRef}
               parseTimeMs={parseTimeMs}
+              sourceSummary={sourceSummary}
               entityCount={
                 cadModel
                   ? { total: cadModel.stats.totalEntityCount, supported: cadModel.stats.supportedEntityCount }

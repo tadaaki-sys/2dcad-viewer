@@ -1,14 +1,17 @@
 /// <reference lib="webworker" />
 import DxfParser from "dxf-parser";
-import { convertToCadModel } from "./DxfParserAdapter";
+import { convertToCadModelWithOrigin } from "./DxfParserAdapter";
 import { decodeDxfBuffer } from "./dxfEncoding";
 import { detectDwgVersion } from "./dwgFormat";
 import { extractLayerStyles } from "./layerStyles";
 import { convertDwgToDxfBuffer } from "./dwgToDxf";
+import { buildDxfSource, transferablesOf } from "../io/dxf/source";
+import type { DxfSource } from "../io/dxf/source";
 import type {
   DxfWorkerErrorMessage,
   DxfWorkerProgressMessage,
   DxfWorkerRequest,
+  DxfWorkerSourceMessage,
   DxfWorkerSuccessMessage,
 } from "./dxfWorkerProtocol";
 
@@ -33,14 +36,16 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
 
     // 拡張子ではなく先頭のバージョン識別子でDWGを判別し、DXFへ変換してから既存のDXF処理に流す
     const dwgVersion = detectDwgVersion(buffer);
-    let text: string;
+    // 保存のために保持する元データ。DXFならファイルそのもの、DWGなら変換後のDXF
+    let dxfBuffer: ArrayBuffer;
     if (dwgVersion) {
       console.log("[dxf.worker] DWG detected", dwgVersion);
       postProgress("dwgConverting", null);
-      text = decodeDxfBuffer(await convertDwgToDxfBuffer(buffer));
+      dxfBuffer = await convertDwgToDxfBuffer(buffer);
     } else {
-      text = decodeDxfBuffer(buffer);
+      dxfBuffer = buffer;
     }
+    const text = decodeDxfBuffer(dxfBuffer);
 
     postProgress("parsing", null);
     const parser = new DxfParser();
@@ -50,7 +55,10 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
     }
 
     postProgress("converting", raw.entities?.length ?? null);
-    const cadModel = convertToCadModel(raw, { layerStyles: extractLayerStyles(text), ignoreLayerOffFlag: dwgVersion !== null });
+    const { model: cadModel, origin } = convertToCadModelWithOrigin(raw, {
+      layerStyles: extractLayerStyles(text),
+      ignoreLayerOffFlag: dwgVersion !== null,
+    });
     console.log("[dxf.worker] converted CadModel stats", cadModel.stats);
 
     postProgress("preparing", cadModel.stats.totalEntityCount);
@@ -60,8 +68,23 @@ ctx.onmessage = async (event: MessageEvent<DxfWorkerRequest>) => {
       cadModel,
       elapsedMs: performance.now() - startedAt,
     };
-    // 図形ごとの範囲配列は大きいので、コピーせずメインスレッドへ所有権を移す
+    // 範囲配列は大きいので、コピーせずメインスレッドへ所有権を移す
     ctx.postMessage(successMessage, [cadModel.entityBounds.buffer]);
+
+    // 図面が表示されたあとに、元データ(バイト列、記録の索引、解析結果との対応表)を作って送る。
+    // 作れなくても、ビューアの表示はそのまま続ける(編集が無効になるだけ)
+    let source: DxfSource | null = null;
+    try {
+      source = buildDxfSource(
+        new Uint8Array(dxfBuffer),
+        (raw.entities ?? []).map((entity) => ({ type: entity.type, handle: entity.handle === undefined ? undefined : String(entity.handle) })),
+        origin,
+      );
+    } catch (sourceError) {
+      console.warn("[dxf.worker] 元データを作れませんでした", sourceError);
+    }
+    const sourceMessage: DxfWorkerSourceMessage = { type: "source", source };
+    ctx.postMessage(sourceMessage, source ? transferablesOf(source) : []);
   } catch (error) {
     const errorMessage: DxfWorkerErrorMessage = {
       type: "error",

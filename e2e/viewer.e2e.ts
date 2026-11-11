@@ -35,6 +35,51 @@ test.describe("opening drawings", () => {
   });
 });
 
+test.describe("raw source kept for saving (Phase 1b)", () => {
+  const overlay = (page: import("@playwright/test").Page) => page.locator(".performance-overlay");
+
+  test("keeps the original bytes and record index, and classifies the records", async ({ page }) => {
+    await openDrawing(page, "factory.dxf", factoryLayoutDxf());
+    // 見本図面: 記録17個(編集できる13、読み取り専用4 = INSERT 3と寸法1、未対応0)
+    await expect(overlay(page)).toContainText("17 rec");
+    await expect(overlay(page)).toContainText("editable 13 / readOnly 4 / unsupported 0");
+  });
+
+  test("counts records that are not drawn as unsupported, and keeps drawing the rest", async ({ page }) => {
+    await openDrawing(page, "unsupported.dxf", unsupportedDxf());
+    await expect(overlay(page)).toContainText("editable 1 / readOnly 0 / unsupported 1");
+    expect(await countNonBlackPixels(page)).toBeGreaterThan(20);
+  });
+
+  test("replaces the source when another drawing is opened, and clears it when the drawing is closed", async ({ page }) => {
+    await openDrawing(page, "factory.dxf", factoryLayoutDxf());
+    await expect(overlay(page)).toContainText("17 rec");
+
+    // 別の図面を開くと、元データも入れ替わる
+    await page.locator('input[type="file"]').setInputFiles({ name: "small.dxf", mimeType: "application/dxf", buffer: Buffer.from(smallDxf(), "utf8") });
+    await expect(page.locator(".status-bar")).toContainText("small.dxf");
+    await expect(overlay(page)).toContainText("1 rec");
+    await expect(overlay(page)).toContainText("editable 1 / readOnly 0 / unsupported 0");
+
+    // 閉じて、開き直しても、新しい図面の元データになる(前の図面の内容が残らない)
+    await page.getByRole("button", { name: "図面を閉じる" }).click();
+    await expect(page.locator(".start-screen")).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles({ name: "unsupported.dxf", mimeType: "application/dxf", buffer: Buffer.from(unsupportedDxf(), "utf8") });
+    await expect(page.locator(".status-bar")).toContainText("unsupported.dxf");
+    await expect(overlay(page)).toContainText("2 rec");
+    await expect(overlay(page)).toContainText("editable 1 / readOnly 0 / unsupported 1");
+  });
+
+  test("draws the drawing without page errors while the source is kept", async ({ page }) => {
+    // 元データの保持が、表示を妨げないこと。(対応づけに失敗した場合に、編集不可になるだけで表示は続く動作は、単体テストで確認している)
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await openDrawing(page, "factory.dxf", factoryLayoutDxf());
+    expect(await countNonBlackPixels(page)).toBeGreaterThan(500);
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe("camera", () => {
   test("zooms with the wheel keeping the point under the cursor, and pans with Space+drag and the middle button", async ({ page }) => {
     await openDrawing(page, "factory.dxf", factoryLayoutDxf());

@@ -28,6 +28,7 @@ import type { LayerStyle } from "./layerStyles";
 import { normalizeDashPattern } from "../utils/lineDash";
 import { THIN_LINE_WEIGHT_LIMIT } from "../utils/lineWeight";
 import { tessellateSpline } from "../utils/spline";
+import type { EntityOrigin } from "../io/dxf/origin";
 import { ellipseFromConjugateDiameters, isReflection, isSimilarityTransform, linearBasis } from "../utils/ellipseTransform";
 import { expandBulges } from "../utils/polylineBulge";
 
@@ -123,10 +124,24 @@ type ConversionContext = {
   unsupportedBreakdown: Record<string, number>;
   totalEntityCount: number;
   nextId: number;
+  /** 各図形の出どころ(CadModel.entitiesと同じ順)。raw.entities内の位置と、ブロック展開で作られたかどうか */
+  originParserIndex: number[];
+  originNested: number[];
+  /** raw.entities内の位置(最上位の図形ごと) */
+  topIndexByEntity: Map<IEntity, number>;
+  currentTopIndex: number;
 };
 
+/** 描画用モデルを作る(出どころの対応表は不要な呼び出し側用) */
 export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadModel {
+  return convertToCadModelWithOrigin(raw, options).model;
+}
+
+/** 描画用モデルと、各図形がraw.entitiesのどれから来たかの対応表を作る */
+export function convertToCadModelWithOrigin(raw: IDxf, options: ConvertOptions = {}): { model: CadModel; origin: EntityOrigin } {
   const layerColorByName = buildLayerColorMap(raw);
+  const topIndexByEntity = new Map<IEntity, number>();
+  (raw.entities ?? []).forEach((entity, index) => topIndexByEntity.set(entity, index));
   const modelSpaceEntities = (raw.entities ?? []).filter((entity) => !entity.inPaperSpace);
 
   const context: ConversionContext = {
@@ -141,6 +156,10 @@ export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadM
     unsupportedBreakdown: {},
     totalEntityCount: 0,
     nextId: 0,
+    originParserIndex: [],
+    originNested: [],
+    topIndexByEntity,
+    currentTopIndex: -1,
   };
 
   walkEntities(modelSpaceEntities, IDENTITY_MATRIX, NO_BYBLOCK_STYLE, new Set(), 0, context);
@@ -151,7 +170,7 @@ export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadM
 
   const entityBounds = computeAllEntityBounds(context.entities);
 
-  return {
+  const model: CadModel = {
     entities: context.entities,
     entityBounds,
     layers,
@@ -164,6 +183,11 @@ export function convertToCadModel(raw: IDxf, options: ConvertOptions = {}): CadM
       unsupportedBreakdown: context.unsupportedBreakdown,
     },
   };
+  const origin: EntityOrigin = {
+    parserIndex: Int32Array.from(context.originParserIndex),
+    nested: Uint8Array.from(context.originNested),
+  };
+  return { model, origin };
 }
 
 /**
@@ -179,6 +203,8 @@ function walkEntities(
   context: ConversionContext,
 ): void {
   for (const rawEntity of entities) {
+    // 最上位の図形が、raw.entitiesの何番目かを覚えておく(その中身から作られた図形の出どころになる)
+    if (depth === 0) context.currentTopIndex = context.topIndexByEntity.get(rawEntity) ?? -1;
     // グループコード60(非表示)が立っている図形は描かない
     if (rawEntity.visible === false) continue;
     if (context.totalEntityCount > MAX_EXPANDED_ENTITIES) {
@@ -212,6 +238,8 @@ function walkEntities(
         if (weight !== null && weight > THIN_LINE_WEIGHT_LIMIT) converted.lineWeight = weight;
       }
       context.entities.push(converted);
+      context.originParserIndex.push(context.currentTopIndex);
+      context.originNested.push(depth > 0 ? 1 : 0);
       context.usedLayerNames.add(converted.layer);
     } else {
       const type = entity.type ?? "UNKNOWN";
