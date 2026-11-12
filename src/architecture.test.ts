@@ -4,6 +4,7 @@
 //   io/     ファイル形式の読み書き(ワーカーの中の処理を含む)。io/・core/・types/ と、決めたパッケージだけを使う。
 //           画面(DOM)は使わない。ワーカーで使える機能(TextDecoder、WebAssemblyなど)は使ってよい。
 //   types/  共通の型。型の宣言だけを置き、types/ 以外は読み込まない。
+//   app/    アプリの動き(コマンドなど)。app/・core/・types/ だけを使う。React・ブラウザの機能は使わない。
 //
 // 検査には TypeScript 自身を使う(文字の検索ではないので、コメント・文字列・変数名に惑わされない)。
 //   - 依存の向き: 構文解析で import・export・動的import・型のimport・new URL(...) を取り出して調べる
@@ -17,6 +18,7 @@ import { describe, expect, it } from "vitest";
 const ROOT = path.resolve(".");
 const SRC = path.join(ROOT, "src");
 const CORE = path.join(SRC, "core");
+const APP = path.join(SRC, "app");
 const IO = path.join(SRC, "io");
 const TYPES = path.join(SRC, "types");
 /** DWG変換のWASMは、パッケージの公開範囲の外にあるため、このフォルダだけは相対パスで読み込んでよい(io のみ) */
@@ -41,6 +43,11 @@ const IO_RULE: LayerRule = {
   allowedPackages: ["dxf-parser", "@mlightcad/libredwg-web"],
 };
 const TYPES_RULE: LayerRule = { name: "types", root: TYPES, allowedRoots: [TYPES], allowedPackages: [], typesOnly: true };
+/**
+ * アプリの層: コマンドなど、画面と中核の間の「アプリの動き」。React・画面の機能は使わない(だから単体テストできる)。
+ * 今は core/ と types/ だけを読み込む。保存(io/)とつなぐ段階で、必要になれば io/ を加える(規則の変更として承認を得る)。
+ */
+const APP_RULE: LayerRule = { name: "app", root: APP, allowedRoots: [APP, CORE, TYPES], allowedPackages: [] };
 
 /** rootの中か(rootそのものを含む)。「..cache.ts」のような、..で始まるだけの名前は中として扱う */
 function isInside(root: string, target: string): boolean {
@@ -209,11 +216,19 @@ describe("dependency boundaries", () => {
   it("types contains only type declarations and imports only types", () => {
     expect(violationsIn(TYPES_RULE)).toEqual([]);
   });
+
+  it("app imports only app, core and types", () => {
+    expect(violationsIn(APP_RULE)).toEqual([]);
+  });
 });
 
 describe("browser and runtime features (checked by TypeScript with restricted libraries)", () => {
   it("core and types type-check with plain ECMAScript only (no browser, no Node)", () => {
     expect(typeCheckWithLibs([...listSourceFiles(CORE), ...listSourceFiles(TYPES)], ES_ONLY)).toEqual([]);
+  }, 60_000);
+
+  it("app type-checks with plain ECMAScript only (no browser, no React)", () => {
+    expect(typeCheckWithLibs(listSourceFiles(APP), ES_ONLY)).toEqual([]);
   }, 60_000);
 
   it("io type-checks with ECMAScript and the web worker environment only (no DOM)", () => {
@@ -274,6 +289,32 @@ describe("the checkers themselves", () => {
     expect(findBoundaryViolations(TYPES_RULE, typesFile, `export { Toolbar } from "../components/Toolbar";`).length).toBeGreaterThan(0);
     expect(findBoundaryViolations(TYPES_RULE, typesFile, `export const value = 1;`)).toHaveLength(1);
   });
+
+  it("app may use core and types, but not io, the UI or any package (React included)", () => {
+    const appFile = path.join(APP, "commands", "sample.ts");
+    const check = (source: string) => findBoundaryViolations(APP_RULE, appFile, source);
+    expect(check(`import { CommandRegistry } from "../../core/commands";\nimport type { Point2D } from "../../types/cad";\nimport { a } from "./builtinCommands";`)).toEqual([]);
+    expect(check(`import { source } from "../../io/dxf/source";`)).toHaveLength(1);
+    expect(check(`import { Toolbar } from "../../components/Toolbar";`)).toHaveLength(1);
+    expect(check(`import { useState } from "react";`)).toHaveLength(1);
+    expect(check(`import { x } from "./builtinCommands.test";`)).toHaveLength(1);
+  });
+
+  it("core and io cannot reach app (the dependency goes from the UI down to app, never up)", () => {
+    expect(coreViolations(`import { createAppCommandSession } from "../../app/commands/builtinCommands";`)).toHaveLength(1);
+    expect(findBoundaryViolations(IO_RULE, ioFile, `import { createAppCommandSession } from "../../app/commands/builtinCommands";`)).toHaveLength(1);
+  });
+
+  it("detects browser features in app through type checking", () => {
+    const dir = fs.mkdtempSync(path.join(APP, ".tmp-arch-"));
+    try {
+      const file = path.join(dir, "a.ts");
+      fs.writeFileSync(file, `export const w = window.innerWidth;`);
+      expect(typeCheckWithLibs([file], ES_ONLY).length).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("treats a file name that only starts with '..' as inside the folder", () => {
     expect(coreViolations(`import { a } from "./..cache";`)).toEqual([]);

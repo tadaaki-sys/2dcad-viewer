@@ -9,6 +9,9 @@
 画面(React)  App.tsx / components/ / cad-view/
      │
      ▼
+app/  アプリの動き(コマンドなど。画面の機能は使わない)
+     │
+     ▼
 io/  ファイル形式の読み書き(DXF・DWG、ワーカーの中の処理)
      │
      ▼
@@ -27,8 +30,9 @@ types/  共通の型(CadEntity など)
 |---|---|---|---|
 | `src/core/` | CAD の中核。画面にも、ファイル形式にも依存しない。 | `core/`、`types/` だけ。外部パッケージは使わない。 | ECMAScript の標準だけ(ブラウザの `window`・`document`・Canvas も、Node の機能も使わない) |
 | `src/io/` | ファイル形式の読み書き。DXF・DWG の解析、元データの保持、**ワーカーの中で動く処理**。 | `io/`、`core/`、`types/`、決めたパッケージ(`dxf-parser`、`@mlightcad/libredwg-web`)。画面は読み込まない。 | ECMAScript の標準と、ワーカーで使える機能(`TextDecoder`、`WebAssembly`、`console` など)。DOM(画面)は使わない。 |
+| `src/app/` | アプリの動き。コマンド(名前・別名・段階・依頼)など、画面と中核の間で「何をするか」を決める。React や画面の機能は使わない(だから単体テストできる)。 | `app/`、`core/`、`types/` だけ。外部パッケージは使わない。(`io/` は、保存とつなぐ段階で必要になったら、規則の変更として加える) | ECMAScript の標準だけ |
 | `src/types/` | 共通の型。**型の宣言だけ**を置く(値・関数・クラスは置かない)。 | `types/` の型だけ(`import type`)。 | － |
-| `src/cad-view/`、`src/components/`、`App.tsx`、`src/hooks/`、`src/utils/format.ts` | 画面(React と Canvas の描画)。**ワーカーを起動・管理するのも画面の側**(`App.tsx`)。 | すべて。ほかの層からは読み込まれない。 | すべて |
+| `src/cad-view/`、`src/components/`、`App.tsx`、`src/hooks/`、`src/utils/` | 画面(React と Canvas の描画)。**ワーカーを起動・管理するのも画面の側**(`App.tsx`)。 | すべて。ほかの層からは読み込まれない。 | すべて |
 
 ### 例外
 
@@ -62,7 +66,9 @@ types/  共通の型(CadEntity など)
 | `core/measurement/` | 測定 |
 | `core/view/` | 表示の拡大と位置(カメラ) |
 
-これから作るもの(予定): `core/commands/`(コマンド、Phase 2)、`core/history/`(Undo/Redo、Phase 3)。
+| `core/commands/` | コマンドの登録簿、コマンドの進め方(段階)、実行の状態、座標入力の読み取り、入力の履歴(Phase 2) |
+
+これから作るもの(予定): `core/history/`(Undo/Redo、Phase 3)。
 
 ## `io/` の中身
 
@@ -70,11 +76,20 @@ types/  共通の型(CadEntity など)
 |---|---|
 | `io/dxf/` | DXF の解析(`DxfParserAdapter`)、文字コード、レイヤーの表、DWG→DXF の変換、ワーカーの中の処理、元データの索引と差分の適用(保存の土台) |
 
+## `app/` の中身
+
+| フォルダ | 内容 |
+|---|---|
+| `app/commands/` | アプリに最初から入っているコマンド(OPEN・CLOSE・FIT・MEASURE・FULLSCREEN・ID)。コマンドが返す「アプリへの依頼」(`AppRequest`)の型。依頼を実際に実行するのは画面の側(`App.tsx`)。 |
+
+ツールバーのボタン、ショートカット(F・M)、コマンドライン、図面のクリックは、どれも `CommandSession` という1つの入口からコマンドを動かします。
+
 ## 新しいコードを置く場所の決め方
 
 1. 画面に関係なく、CAD としての計算や状態の変更か → `core/`
 2. ファイル形式(DXF、DWG、将来の独自形式・PDF)に関わるか → `io/`
-3. 画面の部品や、マウス・キーボードの扱い、ワーカーの起動か → 画面の側(今は `cad-view/`、`components/`、`App.tsx`)
+3. 「どのコマンドが、何をするか」など、画面に関係しないアプリの動きか → `app/`
+4. 画面の部品や、マウス・キーボードの扱い、ワーカーの起動か → 画面の側(今は `cad-view/`、`components/`、`App.tsx`)
 
 迷ったら、下の層(`core/`)に置けないかを先に考えます。下の層に置いたほうが、テストしやすく、壊れにくくなります。
 
