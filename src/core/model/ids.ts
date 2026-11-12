@@ -12,3 +12,11 @@ const NEW_ENTITY_ID_PREFIX = "n";
 export function newEntityId(counter: number): EntityId {
   return `${NEW_ENTITY_ID_PREFIX}${counter}`;
 }
+
+/** 新しく作る図形のID(`n<番号>`)から、払い出し番号を取り出す。そうでないIDは null */
+export function parseNewEntityCounter(id: EntityId): number | null {
+  const match = /^n(0|[1-9]\d*)$/.exec(id);
+  if (match === null) return null;
+  const counter = Number(match[1]);
+  return Number.isSafeInteger(counter) ? counter : null;
+}
