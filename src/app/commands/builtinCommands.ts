@@ -80,3 +80,20 @@ export function createAppCommandRegistry(): CommandRegistry<AppRequest, AppComma
 export function createAppCommandSession(getContext: () => AppCommandContext): AppCommandSession {
   return new CommandSession(createAppCommandRegistry(), getContext);
 }
+
+export type AppCommands = {
+  session: AppCommandSession;
+  /** アプリの状態が変わったときに知らせる(次にコマンドを始めるときから反映される) */
+  setContext: (context: AppCommandContext) => void;
+};
+
+/** 画面の側が使う入口。アプリの状態は setContext で更新する */
+export function createAppCommands(initialContext: AppCommandContext): AppCommands {
+  let context = initialContext;
+  return {
+    session: createAppCommandSession(() => context),
+    setContext: (next) => {
+      context = next;
+    },
+  };
+}

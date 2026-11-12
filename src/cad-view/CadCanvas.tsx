@@ -9,6 +9,7 @@ import type { SnapCandidate } from "../core/snap/SnapEngine";
 import { findMeasurementAtPoint } from "../core/measurement/Measurement";
 import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
 import { unionOfVisibleEntityBounds } from "../core/spatial/entityBounds";
+import { isTypingTarget } from "../utils/dom";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -53,11 +54,14 @@ type CadCanvasProps = {
   selectedEntityIds: ReadonlySet<string>;
   selectionEnabled: boolean;
   measurementModeEnabled: boolean;
+  /** コマンドが点の指示を待っている間 true。クリックは選択・測定より先に、コマンドへ渡す(測定と同じ吸着を使う) */
+  pointPickEnabled: boolean;
   measurements: readonly Measurement[];
   selectedMeasurementId: string | null;
   onSelectionChange: (entityIds: ReadonlySet<string>) => void;
   onMeasurementComplete: (measurement: Measurement) => void;
   onMeasurementSelect: (measurementId: string | null) => void;
+  onPointPick: (worldPoint: Point2D) => void;
   onCursorMove?: (worldPoint: Point2D | null) => void;
 };
 
@@ -88,11 +92,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
+    pointPickEnabled,
     measurements,
     selectedMeasurementId,
     onSelectionChange,
     onMeasurementComplete,
     onMeasurementSelect,
+    onPointPick,
     onCursorMove,
   },
   ref,
@@ -127,11 +133,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
+    pointPickEnabled,
     measurements,
     selectedMeasurementId,
     onSelectionChange,
     onMeasurementComplete,
     onMeasurementSelect,
+    onPointPick,
     onCursorMove,
   });
   stateRef.current = {
@@ -141,11 +149,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
+    pointPickEnabled,
     measurements,
     selectedMeasurementId,
     onSelectionChange,
     onMeasurementComplete,
     onMeasurementSelect,
+    onPointPick,
     onCursorMove,
   };
 
@@ -253,6 +263,15 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   }, [measurementModeEnabled]);
 
   useEffect(() => {
+    // 点の指示が終わったとき、測定モードでなければ吸着の目印を消す
+    if (!pointPickEnabled && !stateRef.current.measurementModeEnabled) {
+      snapMarkerRef.current = null;
+      draw();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointPickEnabled]);
+
+  useEffect(() => {
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measurements, selectedMeasurementId]);
@@ -317,11 +336,6 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       canvas!.style.cursor = isPanning ? "grabbing" : isSpaceHeld ? "grab" : "";
     }
 
-    function isTypingTarget(target: EventTarget | null): boolean {
-      if (!(target instanceof HTMLElement)) return false;
-      return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
-    }
-
     function handleKeyDown(event: KeyboardEvent) {
       if (event.code !== "Space" || isSpaceHeld || isTypingTarget(event.target)) return;
       isSpaceHeld = true;
@@ -345,9 +359,14 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     function findSnapAt(clientX: number, clientY: number): { worldPoint: Point2D; snap: SnapCandidate | null } {
       const screenPoint = getCanvasRelativePoint(canvas!, clientX, clientY);
       const worldPoint = cameraRef.current.screenToWorld(screenPoint);
-      const { model: currentModel, visibleLayerNames: currentVisible, measurementModeEnabled: currentMeasurementModeEnabled } =
-        stateRef.current;
-      if (!currentMeasurementModeEnabled || !currentModel) return { worldPoint, snap: null };
+      const {
+        model: currentModel,
+        visibleLayerNames: currentVisible,
+        measurementModeEnabled: currentMeasurementModeEnabled,
+        pointPickEnabled: currentPointPickEnabled,
+      } = stateRef.current;
+      // 吸着は、測定中と、コマンドが点の指示を待っている間だけ
+      if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel) return { worldPoint, snap: null };
 
       const scale = cameraRef.current.scale;
       const snap = findSnapPoint(
@@ -491,6 +510,12 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         updatePanCursor();
         return;
       }
+      // コマンドが点の指示を待っているときは、クリックをコマンドへ渡す(測定・選択より優先)
+      if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.pointPickEnabled) {
+        event.preventDefault();
+        stateRef.current.onPointPick(computeWorldPointWithSnap(event.clientX, event.clientY));
+        return;
+      }
       if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.measurementModeEnabled) {
         handleMeasurementClick(event);
         return;
@@ -567,7 +592,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function handleMouseMove(event: MouseEvent) {
-      if (!stateRef.current.measurementModeEnabled) {
+      if (!stateRef.current.measurementModeEnabled && !stateRef.current.pointPickEnabled) {
         updateSnapMarker(null);
         if (!stateRef.current.onCursorMove) return;
         scheduleCursorUpdate(computeWorldPointWithSnap(event.clientX, event.clientY));

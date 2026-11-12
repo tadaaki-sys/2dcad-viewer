@@ -265,8 +265,10 @@ test.describe("measurement", () => {
     const snapped = await hoverAndRead(page, nearLine);
     expect(snapped.y).toBe(0);
     // 線から離れた場所では吸い付かない(座標は生のまま)
-    const away = await hoverAndRead(page, mapping.toPage({ x: 600, y: 350 }));
-    expect(Math.abs(away.y - 350)).toBeLessThan(2);
+    // (Phase 2: コマンドラインで表示領域が低くなり、吸着の範囲(画面上10px)が約12mmに広がったため、
+    //  最も近い図形(円弧)まで約28mm離れた点に変えた。以前の点(600,350)は円弧まで11.8mmで、範囲に入ってしまう)
+    const away = await hoverAndRead(page, mapping.toPage({ x: 600, y: 380 }));
+    expect(Math.abs(away.y - 380)).toBeLessThan(2);
 
     // 測定結果を削除すると、一覧が空になる
     await page.getByTitle("この測定結果を削除").click();

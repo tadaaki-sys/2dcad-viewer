@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BUILTIN_COMMANDS, createAppCommandRegistry, createAppCommandSession, formatCoordinate } from "./builtinCommands";
+import {
+  BUILTIN_COMMANDS,
+  createAppCommandRegistry,
+  createAppCommands,
+  createAppCommandSession,
+  formatCoordinate,
+} from "./builtinCommands";
 
 function session(isDocumentOpen = true) {
   const state = { isDocumentOpen };
@@ -64,6 +70,15 @@ describe("built-in commands", () => {
     expect(bad.active?.name).toBe("ID");
     expect(bad.requests).toEqual([]);
     expect(s.submitText("1,2").messages).toEqual(["X = 1.000, Y = 2.000"]);
+  });
+
+  it("createAppCommands follows the context set later (document opened/closed)", () => {
+    const commands = createAppCommands({ isDocumentOpen: false });
+    expect(commands.session.submitText("fit").messages).toEqual(["図面が開かれていません"]);
+    commands.setContext({ isDocumentOpen: true });
+    expect(commands.session.submitText("fit").requests).toEqual([{ type: "fitDrawing" }]);
+    commands.setContext({ isDocumentOpen: false });
+    expect(commands.session.submitText("fit").requests).toEqual([]);
   });
 
   it("formatCoordinate prints 3 decimals and never -0.000", () => {

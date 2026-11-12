@@ -5,6 +5,7 @@ import { PropertyPanel } from "./components/PropertyPanel";
 import { MeasurementPanel } from "./components/MeasurementPanel";
 import { StatusBar } from "./components/StatusBar";
 import { StartScreen } from "./components/StartScreen";
+import { CommandLine } from "./components/CommandLine";
 import { ResizablePanel } from "./components/ResizablePanel";
 import { LoadingOverlay } from "./components/LoadingOverlay";
 import { CadCanvas } from "./cad-view/CadCanvas";
@@ -16,6 +17,10 @@ import { isDwgFileName } from "./io/dxf/dwgFormat";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./io/dxf/dxfWorkerProtocol";
 import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
 import { documentFromCadModel } from "./core/model";
+import type { ActiveCommand, SessionResult } from "./core/commands";
+import { createAppCommands } from "./app/commands/builtinCommands";
+import type { AppRequest } from "./app/commands/builtinCommands";
+import { isTypingTarget } from "./utils/dom";
 import type { CadDocument } from "./core/model";
 import { summarizeSource } from "./io/dxf/source";
 import type { DxfSource, SourceSummary } from "./io/dxf/source";
@@ -30,6 +35,9 @@ const DWG_ERROR_MESSAGE =
 function loadErrorMessageFor(file: File): string {
   return isDwgFileName(file.name) ? DWG_ERROR_MESSAGE : DXF_ERROR_MESSAGE;
 }
+
+/** コマンドラインに残すメッセージの最大行数 */
+const COMMAND_LOG_LIMIT = 100;
 
 type LoadingProgress = {
   stage: DxfLoadingStage;
@@ -72,6 +80,16 @@ export default function App() {
 
   const isDocumentOpen = fileInfo !== null;
 
+  // コマンド(ツールバー・ショートカット・コマンドライン・図面のクリックは、すべてこの1つの入口から動く)
+  const [commands] = useState(() => createAppCommands({ isDocumentOpen }));
+  const commandSession = commands.session;
+  useEffect(() => {
+    commands.setContext({ isDocumentOpen });
+  }, [commands, isDocumentOpen]);
+  const [commandLog, setCommandLog] = useState<string[]>([]);
+  const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
+  const commandInputRef = useRef<HTMLInputElement>(null);
+
   const terminateWorker = useCallback(() => {
     workerRef.current?.terminate();
     workerRef.current = null;
@@ -111,6 +129,9 @@ export default function App() {
         sourceRef.current = null;
         documentRef.current = null;
         setSourceSummary(null);
+        // 前の図面のコマンドの途中経過と直前の点は、新しい図面には持ち越さない
+        commandSession.reset();
+        setActiveCommand(null);
         succeeded = true;
         pendingModel = message.cadModel;
         setSelectedEntityIds(new Set());
@@ -149,7 +170,7 @@ export default function App() {
 
     const request: DxfWorkerRequest = { type: "parse", file };
     worker.postMessage(request);
-  }, [terminateWorker, addRecentFile]);
+  }, [terminateWorker, addRecentFile, commandSession]);
 
   const handleFileSelected = useCallback(
     async (file: File) => {
@@ -176,7 +197,9 @@ export default function App() {
     setMeasurements([]);
     setSelectedMeasurementId(null);
     setIsMeasurementMode(false);
-  }, [terminateWorker]);
+    commandSession.reset();
+    setActiveCommand(null);
+  }, [terminateWorker, commandSession]);
 
   const handleOpenFileRequest = useCallback(() => {
     openFileInputRef.current?.click();
@@ -245,9 +268,82 @@ export default function App() {
     );
   }, []);
 
+  const executeRequest = useCallback(
+    (request: AppRequest) => {
+      switch (request.type) {
+        case "openFile":
+          handleOpenFileRequest();
+          break;
+        case "closeDocument":
+          handleCloseDocument();
+          break;
+        case "fitDrawing":
+          handleFitDrawing();
+          break;
+        case "toggleMeasurement":
+          handleToggleMeasurementMode();
+          break;
+        case "toggleFullscreen":
+          handleToggleFullscreen();
+          break;
+      }
+    },
+    [handleOpenFileRequest, handleCloseDocument, handleFitDrawing, handleToggleMeasurementMode, handleToggleFullscreen],
+  );
+
+  /** コマンドの結果を反映する(メッセージの表示、実行中の状態、アプリへの依頼の実行)。echo は、入力した文字の表示 */
+  const applyCommandResult = useCallback(
+    (result: SessionResult<AppRequest>, echo?: string) => {
+      const lines = echo === undefined ? result.messages : [`> ${echo}`, ...result.messages];
+      if (lines.length > 0) setCommandLog((prev) => [...prev, ...lines].slice(-COMMAND_LOG_LIMIT));
+      setActiveCommand(result.active);
+      for (const request of result.requests) executeRequest(request);
+    },
+    [executeRequest],
+  );
+
+  /** 名前を指定してコマンドを動かす(ツールバーのボタンとショートカット用) */
+  const runCommand = useCallback(
+    (name: string) => {
+      applyCommandResult(commandSession.run(name));
+    },
+    [applyCommandResult, commandSession],
+  );
+
+  const handleCommandSubmit = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      applyCommandResult(commandSession.submitText(text), trimmed === "" ? undefined : trimmed);
+    },
+    [applyCommandResult, commandSession],
+  );
+
+  const handleCommandCancel = useCallback(() => {
+    applyCommandResult(commandSession.cancel());
+  }, [applyCommandResult, commandSession]);
+
+  /** 図面のクリックで点が指示された */
+  const handlePointPick = useCallback(
+    (worldPoint: Point2D) => {
+      const result = commandSession.submitPoint(worldPoint);
+      applyCommandResult(result);
+      // 続けて入力を待つなら、座標を打てるように入力欄へ。終わったなら、ショートカット(F・M)が効くように入力欄を外す
+      if (result.active) commandInputRef.current?.focus();
+      else commandInputRef.current?.blur();
+    },
+    [applyCommandResult, commandSession],
+  );
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      // 入力欄に文字を打っているときは、ショートカットとして扱わない(コマンドラインへの「f」で全体表示しないように)
+      if (isTypingTarget(event.target)) return;
       if (event.key === "Escape") {
+        // コマンドの実行中は、コマンドの取り消しだけを行う(測定の終了・選択の解除は、次のEscで)
+        if (commandSession.active) {
+          applyCommandResult(commandSession.cancel());
+          return;
+        }
         if (isMeasurementMode) setIsMeasurementMode(false);
         setSelectedEntityIds(new Set());
         setSelectedMeasurementId(null);
@@ -256,11 +352,22 @@ export default function App() {
         handleDeleteMeasurement(selectedMeasurementId);
       } else if (event.key === "o" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
-        if (isDocumentOpen) handleOpenFileRequest();
+        if (isDocumentOpen) runCommand("OPEN");
       } else if (event.key === "f" && isDocumentOpen) {
-        handleFitDrawing();
+        runCommand("FIT");
       } else if (event.key === "m" && isDocumentOpen) {
-        handleToggleMeasurementMode();
+        runCommand("MEASURE");
+      } else if (
+        event.key === "Enter" &&
+        isDocumentOpen &&
+        event.target === document.body &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        // Enterキーで、コマンドラインの入力欄へ移る
+        event.preventDefault();
+        commandInputRef.current?.focus();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -269,9 +376,9 @@ export default function App() {
     isDocumentOpen,
     isMeasurementMode,
     selectedMeasurementId,
-    handleFitDrawing,
-    handleToggleMeasurementMode,
-    handleOpenFileRequest,
+    commandSession,
+    applyCommandResult,
+    runCommand,
     handleDeleteMeasurement,
   ]);
 
@@ -306,11 +413,11 @@ export default function App() {
       <Toolbar
         isDocumentOpen={isDocumentOpen}
         isMeasurementMode={isMeasurementMode}
-        onOpenFile={handleOpenFileRequest}
-        onCloseDocument={handleCloseDocument}
-        onToggleMeasurementMode={handleToggleMeasurementMode}
-        onFitDrawing={handleFitDrawing}
-        onToggleFullscreen={handleToggleFullscreen}
+        onOpenFile={() => runCommand("OPEN")}
+        onCloseDocument={() => runCommand("CLOSE")}
+        onToggleMeasurementMode={() => runCommand("MEASURE")}
+        onFitDrawing={() => runCommand("FIT")}
+        onToggleFullscreen={() => runCommand("FULLSCREEN")}
       />
       <div className="app-cad-layout__body">
         <ResizablePanel
@@ -331,11 +438,13 @@ export default function App() {
             selectedEntityIds={selectedEntityIds}
             selectionEnabled={!isMeasurementMode}
             measurementModeEnabled={isMeasurementMode}
+            pointPickEnabled={activeCommand?.expect === "point"}
             measurements={measurements}
             selectedMeasurementId={selectedMeasurementId}
             onSelectionChange={handleSelectionChange}
             onMeasurementComplete={handleMeasurementComplete}
             onMeasurementSelect={handleMeasurementSelect}
+            onPointPick={handlePointPick}
             onCursorMove={handleCursorMove}
           />
           {import.meta.env.DEV && (
@@ -371,6 +480,13 @@ export default function App() {
           </div>
         </ResizablePanel>
       </div>
+      <CommandLine
+        log={commandLog}
+        active={activeCommand}
+        inputRef={commandInputRef}
+        onSubmit={handleCommandSubmit}
+        onCancel={handleCommandCancel}
+      />
       <StatusBar fileInfo={fileInfo} cursorWorld={cursorWorld} stats={cadModel?.stats ?? null} />
       {loadingProgress && loadStartedAt !== null && (
         <LoadingOverlay stage={loadingProgress.stage} entityCount={loadingProgress.entityCount} startedAt={loadStartedAt} />
