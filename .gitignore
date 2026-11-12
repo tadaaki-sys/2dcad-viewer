@@ -33,3 +33,6 @@ regression-local/
 # Playwrightの出力
 test-results/
 playwright-report/
+
+# 境界テスト(src/architecture.test.ts)が一時的に作る検査用フォルダー
+src/**/.tmp-arch-*/
