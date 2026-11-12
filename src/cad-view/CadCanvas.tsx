@@ -50,6 +50,8 @@ const FPS_IDLE_GAP_MS = 500;
 
 type CadCanvasProps = {
   model: CadModel | null;
+  /** 開いた図面ごとの番号。変わったときだけ全体表示する(編集・Undoでモデルが変わっても、表示位置は動かさない) */
+  drawingKey: number;
   layers: CadLayer[];
   selectedEntityIds: ReadonlySet<string>;
   selectionEnabled: boolean;
@@ -88,6 +90,7 @@ function getCanvasRelativePoint(canvas: HTMLCanvasElement, clientX: number, clie
 export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function CadCanvas(
   {
     model,
+    drawingKey,
     layers,
     selectedEntityIds,
     selectionEnabled,
@@ -239,15 +242,21 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     },
   }));
 
+  const fittedDrawingKeyRef = useRef<number | null>(null);
+
   useEffect(() => {
-    fitToModel();
+    // 新しい図面が読み込まれた時のみ再Fitする(レイヤー表示切替・編集・Undoでは現在の表示範囲を維持する)
+    const isNewDrawing = fittedDrawingKeyRef.current !== drawingKey;
+    fittedDrawingKeyRef.current = drawingKey;
+    if (isNewDrawing) {
+      fitToModel();
+      pendingMeasurementPointRef.current = null;
+      snapMarkerRef.current = null;
+    }
     draw();
     overlapCycleRef.current = null;
-    pendingMeasurementPointRef.current = null;
-    snapMarkerRef.current = null;
-    // 新しい図面が読み込まれた時のみ再Fitする(レイヤー表示切替では現在の表示範囲を維持する)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model]);
+  }, [model, drawingKey]);
 
   useEffect(() => {
     overlapCycleRef.current = null;

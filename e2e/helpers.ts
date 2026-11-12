@@ -87,6 +87,41 @@ export async function hasColorNear(page: Page, at: Pt, color: [number, number, n
   );
 }
 
+/**
+ * キャンバスの指定位置の周囲に、指定した色と「同じ色相」の画素があるか。
+ * 細い線が画素の境目に重なると、2列に薄く(約半分の明るさで)描かれるため、明るさではなく色の比率で比べる
+ * (最も強い成分を1に直して、指定色と各成分の差が tolerance 以内。ただし、暗すぎる画素は無視する)。
+ */
+export async function hasHueNear(page: Page, at: Pt, color: [number, number, number], radiusPx = 4, tolerance = 0.25): Promise<boolean> {
+  return page.evaluate(
+    ({ at, color, radiusPx, tolerance }) => {
+      const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+      const rect = canvas.getBoundingClientRect();
+      const ratio = canvas.width / rect.width;
+      const cx = Math.round((at.x - rect.left) * ratio);
+      const cy = Math.round((at.y - rect.top) * ratio);
+      const r = Math.round(radiusPx * ratio);
+      const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+      const data = ctx.getImageData(Math.max(0, cx - r), Math.max(0, cy - r), 2 * r + 1, 2 * r + 1).data;
+      const targetMax = Math.max(...color);
+      const target = color.map((c) => c / targetMax);
+      for (let i = 0; i < data.length; i += 4) {
+        const max = Math.max(data[i], data[i + 1], data[i + 2]);
+        if (max < 90) continue;
+        if (
+          Math.abs(data[i] / max - target[0]) <= tolerance &&
+          Math.abs(data[i + 1] / max - target[1]) <= tolerance &&
+          Math.abs(data[i + 2] / max - target[2]) <= tolerance
+        ) {
+          return true;
+        }
+      }
+      return false;
+    },
+    { at, color, radiusPx, tolerance },
+  );
+}
+
 /** キャンバス全体で、黒以外の画素がいくつあるか */
 export async function countNonBlackPixels(page: Page): Promise<number> {
   return page.evaluate(() => {

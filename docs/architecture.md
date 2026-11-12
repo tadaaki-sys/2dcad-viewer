@@ -32,7 +32,7 @@ types/  共通の型(CadEntity など)
 | `src/io/` | ファイル形式の読み書き。DXF・DWG の解析、元データの保持、**ワーカーの中で動く処理**。 | `io/`、`core/`、`types/`、決めたパッケージ(`dxf-parser`、`@mlightcad/libredwg-web`)。画面は読み込まない。 | ECMAScript の標準と、ワーカーで使える機能(`TextDecoder`、`WebAssembly`、`console` など)。DOM(画面)は使わない。 |
 | `src/app/` | アプリの動き。コマンド(名前・別名・段階・依頼)など、画面と中核の間で「何をするか」を決める。React や画面の機能は使わない(だから単体テストできる)。 | `app/`、`core/`、`types/` だけ。外部パッケージは使わない。(`io/` は、保存とつなぐ段階で必要になったら、規則の変更として加える) | ECMAScript の標準だけ |
 | `src/types/` | 共通の型。**型の宣言だけ**を置く(値・関数・クラスは置かない)。 | `types/` の型だけ(`import type`)。 | － |
-| `src/cad-view/`、`src/components/`、`App.tsx`、`src/hooks/`、`src/utils/` | 画面(React と Canvas の描画)。**ワーカーを起動・管理するのも画面の側**(`App.tsx`)。 | すべて。ほかの層からは読み込まれない。 | すべて |
+| `src/cad-view/`、`src/components/`、`App.tsx`、`src/hooks/`、`src/utils/`、`src/devHooks.ts` | 画面(React と Canvas の描画)。**ワーカーを起動・管理するのも画面の側**(`App.tsx`)。 | すべて。ほかの層からは読み込まれない。 | すべて |
 
 ### 例外
 
@@ -67,8 +67,16 @@ types/  共通の型(CadEntity など)
 | `core/view/` | 表示の拡大と位置(カメラ) |
 
 | `core/commands/` | コマンドの登録簿、コマンドの進め方(段階)、実行の状態、座標入力の読み取り、入力の履歴(Phase 2) |
+| `core/history/` | 図面の変更の内容(`ChangeSet`: 追加・削除・置き換え)、原子的な適用、反転、Undo/Redo の履歴(上限200段階)(Phase 3) |
 
-これから作るもの(予定): `core/history/`(Undo/Redo、Phase 3)。
+### 変更の内容(`ChangeSet`)の約束事(Phase 3)
+
+- 変更は、**必ず `ChangeSet` として** `DocumentSession.apply()` を通す。図面(`CadDocument`)を直接書き換えない。
+- 位置(`index`)は、その変更を適用する直前の、描画順の配列での位置。1つの `ChangeSet` の中の変更は、書かれた順に適用する。
+- 削除・置き換えは、その位置にある図形が「同じオブジェクト」であることを確かめる。一致しなければ、何も変えずに失敗する(図面が履歴と食い違ったまま進むことを防ぐ)。
+- 新しい図形のID(`n<番号>`)は、`DocumentSession.allocateEntityId()` で払い出す。Undo しても払い出し番号は戻らず、同じIDを別の図形に使い回さない。
+- コマンドは `addEntitiesChangeSet`・`removeEntitiesChangeSet`・`replaceEntitiesChangeSet` で変更を作る(位置の計算を間違えないため)。
+- **編集系のコマンド(Phase 4以降)の約束:** 展開済みのブロックの図形や、寸法など「読み取り専用」の図形は、編集しない。判断に使う分類(editable / readOnly)は `io/` にあるので、`app/` の層が受け取ってコマンドに渡す(`core/` は `io/` を読み込めないため)。
 
 ## `io/` の中身
 
@@ -80,7 +88,8 @@ types/  共通の型(CadEntity など)
 
 | フォルダ | 内容 |
 |---|---|
-| `app/commands/` | アプリに最初から入っているコマンド(OPEN・CLOSE・FIT・MEASURE・FULLSCREEN・ID)。コマンドが返す「アプリへの依頼」(`AppRequest`)の型。依頼を実際に実行するのは画面の側(`App.tsx`)。 |
+| `app/commands/` | アプリに最初から入っているコマンド(OPEN・CLOSE・FIT・MEASURE・FULLSCREEN・UNDO・REDO・ID)。コマンドが返す「アプリへの依頼」(`AppRequest`)の型。依頼を実際に実行するのは画面の側(`App.tsx`)。 |
+| `app/document/` | `DocumentSession`(開いている図面のドキュメントと変更の履歴を持ち、変更を購読者に知らせる)、元に戻す結果のメッセージ、ドキュメントから描画用モデルを作る処理。 |
 
 ツールバーのボタン、ショートカット(F・M)、コマンドライン、図面のクリックは、どれも `CommandSession` という1つの入口からコマンドを動かします。
 
@@ -105,3 +114,10 @@ types/  共通の型(CadEntity など)
 
 - 画面の側(`cad-view/`、`components/`)は、今の場所のままです。画面を作り直す Phase で、`render/`(描画)と `ui/`(React の部品)に分ける予定です。
 - `core/model/convert.ts` は、範囲の計算を引数で受け取っています(Phase 1a で core の外にあったため)。Phase 1c で同じ `core/` に移ったので、直接呼ぶ形に簡単にできます(処理を変えないため、今はそのまま)。
+
+## 開発用の入口(`src/devHooks.ts`)
+
+`window.__cadDev` は、図面を編集するコマンドがまだ無い間に、「変更 → 表示 → Undo → Redo」をE2Eで確かめるための入口です。
+
+- 開発サーバーのときだけ、`App.tsx` が動的に読み込みます(`import.meta.env.DEV`)。**本番ビルドには含まれません。** ビルドの成果物を検索して、含まれていないことを確認します(docs/regression-checklist.md)。
+- 作図・編集のコマンド(Phase 4以降)ができたら、E2Eはそちらを使い、この入口は不要になれば削除します。

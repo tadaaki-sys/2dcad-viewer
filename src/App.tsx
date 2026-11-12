@@ -16,12 +16,14 @@ import { validateDxfFile } from "./io/dxf/validateDxfFile";
 import { isDwgFileName } from "./io/dxf/dwgFormat";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./io/dxf/dxfWorkerProtocol";
 import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
-import { documentFromCadModel } from "./core/model";
+import { documentFromCadModel, hasEntity } from "./core/model";
+import { describeHistoryOutcome, DOCUMENT_NOT_READY_MESSAGE, DocumentSession } from "./app/document/documentSession";
+import type { DocumentChange } from "./app/document/documentSession";
+import { renderModelFromDocument } from "./app/document/renderModel";
 import type { ActiveCommand, SessionResult } from "./core/commands";
 import { createAppCommands } from "./app/commands/builtinCommands";
 import type { AppRequest } from "./app/commands/builtinCommands";
 import { isTypingTarget } from "./utils/dom";
-import type { CadDocument } from "./core/model";
 import { summarizeSource } from "./io/dxf/source";
 import type { DxfSource, SourceSummary } from "./io/dxf/source";
 import "./App.css";
@@ -34,6 +36,15 @@ const DWG_ERROR_MESSAGE =
 
 function loadErrorMessageFor(file: File): string {
   return isDwgFileName(file.name) ? DWG_ERROR_MESSAGE : DXF_ERROR_MESSAGE;
+}
+
+/** Ctrl+Z(元に戻す)、Ctrl+YまたはCtrl+Shift+Z(やり直し)。該当しなければ null */
+function historyShortcutOf(event: KeyboardEvent): "undo" | "redo" | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+  const key = event.key.toLowerCase();
+  if (key === "z") return event.shiftKey ? "redo" : "undo";
+  if (key === "y" && !event.shiftKey) return "redo";
+  return null;
 }
 
 /** コマンドラインに残すメッセージの最大行数 */
@@ -55,8 +66,11 @@ export default function App() {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedMeasurementId, setSelectedMeasurementId] = useState<string | null>(null);
   const [parseTimeMs, setParseTimeMs] = useState<number | null>(null);
-  // 編集機能(Phase 2以降)のために保持する。いまは表示に使わない。図面を閉じる・開き直すときに解放する
-  const documentRef = useRef<CadDocument | null>(null);
+  // 開いている図面のドキュメントと変更の履歴(Undo/Redo)。元データの準備(sourceメッセージ)が終わってから作る。
+  // 図面を閉じる・開き直すときに解放する(履歴も一緒に捨てる)
+  const documentSessionRef = useRef<DocumentSession | null>(null);
+  // 開いた図面ごとの番号。画面は、番号が変わったときだけ全体表示する(編集・Undoでは表示位置を動かさない)
+  const [drawingKey, setDrawingKey] = useState(0);
   const sourceRef = useRef<DxfSource | null>(null);
   const [sourceSummary, setSourceSummary] = useState<SourceSummary | null>(null);
   const cadCanvasRef = useRef<CadCanvasHandle>(null);
@@ -95,6 +109,16 @@ export default function App() {
     workerRef.current = null;
   }, []);
 
+  /** 図面(ドキュメント)が変わった(変更・Undo・Redo)ので、表示用のモデルを作り直して画面へ反映する */
+  const handleDocumentChange = useCallback((change: DocumentChange) => {
+    setCadModel(renderModelFromDocument(change.document));
+    // 消えた図形が選択に残らないようにする(選択が変わらないときは、同じ集合のままにして余計な再描画を避ける)
+    setSelectedEntityIds((previous) => {
+      const kept = [...previous].filter((id) => hasEntity(change.document, id));
+      return kept.length === previous.size ? previous : new Set(kept);
+    });
+  }, []);
+
   const startDxfLoad = useCallback((file: File) => {
     terminateWorker();
     setErrorMessage(null);
@@ -127,7 +151,8 @@ export default function App() {
         setCadModel(message.cadModel);
         // 元データは、図面の表示を遅らせないよう、続けて届く(sourceメッセージ)。それまでは、前の図面の分を残さない
         sourceRef.current = null;
-        documentRef.current = null;
+        documentSessionRef.current = null;
+        setDrawingKey((key) => key + 1);
         setSourceSummary(null);
         // 前の図面のコマンドの途中経過と直前の点は、新しい図面には持ち越さない
         commandSession.reset();
@@ -141,7 +166,11 @@ export default function App() {
         // ワーカーは、元データを送り終えるまで止めない(sourceメッセージで止める)
       } else if (message.type === "source") {
         sourceRef.current = message.source;
-        if (pendingModel) documentRef.current = documentFromCadModel(pendingModel);
+        if (pendingModel) {
+          const session = new DocumentSession(documentFromCadModel(pendingModel));
+          session.subscribe(handleDocumentChange);
+          documentSessionRef.current = session;
+        }
         pendingModel = null;
         setSourceSummary(summarizeSource(message.source));
         terminateWorker();
@@ -170,7 +199,7 @@ export default function App() {
 
     const request: DxfWorkerRequest = { type: "parse", file };
     worker.postMessage(request);
-  }, [terminateWorker, addRecentFile, commandSession]);
+  }, [terminateWorker, addRecentFile, commandSession, handleDocumentChange]);
 
   const handleFileSelected = useCallback(
     async (file: File) => {
@@ -190,7 +219,7 @@ export default function App() {
     setLayers([]);
     setCadModel(null);
     sourceRef.current = null;
-    documentRef.current = null;
+    documentSessionRef.current = null;
     setSourceSummary(null);
     setCursorWorld(null);
     setSelectedEntityIds(new Set());
@@ -268,6 +297,29 @@ export default function App() {
     );
   }, []);
 
+  const appendCommandLog = useCallback((lines: readonly string[]) => {
+    if (lines.length > 0) setCommandLog((prev) => [...prev, ...lines].slice(-COMMAND_LOG_LIMIT));
+  }, []);
+
+  /** 元に戻す・やり直しを実行して、結果をコマンドラインに表示する */
+  const performHistoryStep = useCallback(
+    (kind: "undo" | "redo") => {
+      const session = documentSessionRef.current;
+      if (session === null) {
+        appendCommandLog([DOCUMENT_NOT_READY_MESSAGE]);
+        return;
+      }
+      try {
+        appendCommandLog([describeHistoryOutcome(kind, kind === "undo" ? session.undo() : session.redo())]);
+      } catch (error) {
+        // 図面と履歴は更新済みだが、表示の更新で失敗した
+        console.error("[App] failed to update the view after undo/redo", error);
+        appendCommandLog(["表示の更新に失敗しました。図面を開き直してください"]);
+      }
+    },
+    [appendCommandLog],
+  );
+
   const executeRequest = useCallback(
     (request: AppRequest) => {
       switch (request.type) {
@@ -286,20 +338,33 @@ export default function App() {
         case "toggleFullscreen":
           handleToggleFullscreen();
           break;
+        case "undo":
+          performHistoryStep("undo");
+          break;
+        case "redo":
+          performHistoryStep("redo");
+          break;
       }
     },
-    [handleOpenFileRequest, handleCloseDocument, handleFitDrawing, handleToggleMeasurementMode, handleToggleFullscreen],
+    [
+      handleOpenFileRequest,
+      handleCloseDocument,
+      handleFitDrawing,
+      handleToggleMeasurementMode,
+      handleToggleFullscreen,
+      performHistoryStep,
+    ],
   );
 
   /** コマンドの結果を反映する(メッセージの表示、実行中の状態、アプリへの依頼の実行)。echo は、入力した文字の表示 */
   const applyCommandResult = useCallback(
     (result: SessionResult<AppRequest>, echo?: string) => {
       const lines = echo === undefined ? result.messages : [`> ${echo}`, ...result.messages];
-      if (lines.length > 0) setCommandLog((prev) => [...prev, ...lines].slice(-COMMAND_LOG_LIMIT));
+      appendCommandLog(lines);
       setActiveCommand(result.active);
       for (const request of result.requests) executeRequest(request);
     },
-    [executeRequest],
+    [appendCommandLog, executeRequest],
   );
 
   /** 名前を指定してコマンドを動かす(ツールバーのボタンとショートカット用) */
@@ -338,6 +403,15 @@ export default function App() {
     function handleKeyDown(event: KeyboardEvent) {
       // 入力欄に文字を打っているときは、ショートカットとして扱わない(コマンドラインへの「f」で全体表示しないように)
       if (isTypingTarget(event.target)) return;
+      const historyShortcut = historyShortcutOf(event);
+      if (historyShortcut !== null) {
+        if (!isDocumentOpen) return;
+        event.preventDefault();
+        // コマンドが入力を待っている間は、図面を戻さない(先にEscでコマンドを取り消す)
+        if (commandSession.active) return;
+        runCommand(historyShortcut === "undo" ? "UNDO" : "REDO");
+        return;
+      }
       if (event.key === "Escape") {
         // コマンドの実行中は、コマンドの取り消しだけを行う(測定の終了・選択の解除は、次のEscで)
         if (commandSession.active) {
@@ -381,6 +455,21 @@ export default function App() {
     runCommand,
     handleDeleteMeasurement,
   ]);
+
+  // 開発サーバーのときだけ、E2Eテスト用の入口(window.__cadDev)を用意する。本番ビルドには含まれない
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    let cancelled = false;
+    let dispose: (() => void) | null = null;
+    import("./devHooks").then((module) => {
+      if (cancelled) return;
+      dispose = module.installDevHooks({ getSession: () => documentSessionRef.current });
+    });
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, []);
 
   useEffect(() => {
     return () => terminateWorker();
@@ -434,6 +523,7 @@ export default function App() {
           <CadCanvas
             ref={cadCanvasRef}
             model={cadModel}
+            drawingKey={drawingKey}
             layers={layers}
             selectedEntityIds={selectedEntityIds}
             selectionEnabled={!isMeasurementMode}
