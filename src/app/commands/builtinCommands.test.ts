@@ -15,7 +15,7 @@ function session(isDocumentOpen = true) {
 describe("built-in commands", () => {
   it("registers every command without name conflicts", () => {
     const registry = createAppCommandRegistry();
-    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "ID"]);
+    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "ID"]);
     expect(BUILTIN_COMMANDS.every((d) => d.description.length > 0)).toBe(true);
   });
 
@@ -30,11 +30,14 @@ describe("built-in commands", () => {
     expect(requestOf("m")).toEqual([{ type: "toggleMeasurement" }]);
     expect(requestOf("DI")).toEqual([{ type: "toggleMeasurement" }]);
     expect(requestOf("fullscreen")).toEqual([{ type: "toggleFullscreen" }]);
+    expect(requestOf("undo")).toEqual([{ type: "undo" }]);
+    expect(requestOf("u")).toEqual([{ type: "undo" }]);
+    expect(requestOf("redo")).toEqual([{ type: "redo" }]);
   });
 
   it("needs an open document, except for OPEN and FULLSCREEN", () => {
     const { s } = session(false);
-    for (const name of ["close", "fit", "measure", "id"]) {
+    for (const name of ["close", "fit", "measure", "id", "undo", "u", "redo"]) {
       const result = s.submitText(name);
       expect(result.requests, name).toEqual([]);
       expect(result.messages, name).toEqual(["図面が開かれていません"]);

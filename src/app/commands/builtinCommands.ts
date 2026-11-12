@@ -9,7 +9,9 @@ export type AppRequest =
   | { type: "closeDocument" }
   | { type: "fitDrawing" }
   | { type: "toggleMeasurement" }
-  | { type: "toggleFullscreen" };
+  | { type: "toggleFullscreen" }
+  | { type: "undo" }
+  | { type: "redo" };
 
 /** コマンドを始める時点のアプリの状態 */
 export type AppCommandContext = {
@@ -51,6 +53,8 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
   documentCommand("FIT", ["F"], "全体表示", { type: "fitDrawing" }),
   documentCommand("MEASURE", ["M", "DI"], "測定の開始・終了", { type: "toggleMeasurement" }),
   { name: "FULLSCREEN", description: "全画面表示の切り替え", start: () => ({ type: "done", requests: [{ type: "toggleFullscreen" }] }) },
+  documentCommand("UNDO", ["U"], "元に戻す", { type: "undo" }),
+  documentCommand("REDO", [], "やり直し", { type: "redo" }),
   {
     // 点の指示(図面のクリックと座標の入力)の動作確認用のコマンド。図面は変更しない
     name: "ID",
