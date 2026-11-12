@@ -34,7 +34,7 @@ export function addHandles(text: string, start = 0x100): string {
     lines.splice(2, 0, "5", (start + position).toString(16).toUpperCase());
     replace.set(position, encode(lines.join("\n")));
   }
-  return decode(applyDxfEdits(bytes, index, { replace }));
+  return decode(applyDxfEdits({ bytes: bytes, index: index }, { replace }));
 }
 
 export type Opened = {

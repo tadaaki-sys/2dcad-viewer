@@ -78,6 +78,36 @@ test.describe("raw source kept for saving (Phase 1b)", () => {
     expect(await countNonBlackPixels(page)).toBeGreaterThan(500);
     expect(errors).toEqual([]);
   });
+
+  test("opening another drawing before the first one finishes ends with the second drawing and its own source", async ({ page }) => {
+    // 1つ目の読み込みの途中で2つ目を選ぶ。1つ目のワーカーから遅れて届くメッセージは捨てられ、2つ目が最後まで読み込まれる
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/");
+    const input = page.locator('input[type="file"]');
+    await input.setInputFiles({ name: "factory.dxf", mimeType: "application/dxf", buffer: Buffer.from(factoryLayoutDxf(), "utf8") });
+    await input.setInputFiles({ name: "small.dxf", mimeType: "application/dxf", buffer: Buffer.from(smallDxf(), "utf8") });
+    await expect(page.locator(".status-bar")).toContainText("small.dxf", { timeout: 30_000 });
+    await expect(overlay(page)).toContainText("1 rec");
+    await expect(overlay(page)).toContainText("editable 1 / readOnly 0 / unsupported 0");
+    await expect(page.locator(".loading-overlay")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("closing right after the drawing appears leaves no stale source behind", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await openDrawing(page, "factory.dxf", factoryLayoutDxf());
+    // 元データが届く前かもしれない、表示直後に閉じる
+    await page.getByRole("button", { name: "図面を閉じる" }).click();
+    await expect(page.locator(".start-screen")).toBeVisible();
+    // 次に開いた図面には、その図面の元データだけが付く
+    await page.locator('input[type="file"]').setInputFiles({ name: "unsupported.dxf", mimeType: "application/dxf", buffer: Buffer.from(unsupportedDxf(), "utf8") });
+    await expect(page.locator(".status-bar")).toContainText("unsupported.dxf");
+    await expect(overlay(page)).toContainText("2 rec");
+    await expect(overlay(page)).toContainText("editable 1 / readOnly 0 / unsupported 1");
+    expect(errors).toEqual([]);
+  });
 });
 
 test.describe("camera", () => {

@@ -117,5 +117,64 @@ describe("indexDxf: sections and records", () => {
     const index = indexDxf(encode(entitiesDxf([])));
     expect(listRecords(index)).toEqual([]);
     expect(index.entitiesAppendOffset).not.toBeNull();
+    expect(index.malformed).toBeNull();
+  });
+});
+
+describe("indexDxf: structure checks (a broken structure makes the drawing read only)", () => {
+  const polylineWithVertices = [
+    "0", "POLYLINE", "8", "0", "66", "1",
+    "0", "VERTEX", "8", "0", "10", "0", "20", "0",
+    "0", "SEQEND", "8", "0",
+  ];
+
+  it("reports no problem for well-formed drawings", () => {
+    const withAttrib = ["0", "INSERT", "8", "0", "2", "B", "66", "1", "0", "ATTRIB", "1", "v", "0", "SEQEND", "8", "0"];
+    const index = indexDxf(encode(toCrlf(padCodes(addHandles(entitiesDxf([line("0", 0, 0, 1, 1), polylineWithVertices, withAttrib, insert("0", "B", 0, 0)]))))));
+    expect(index.malformed).toBeNull();
+    expect(listRecords(index).map((r) => r.type)).toEqual(["LINE", "POLYLINE", "INSERT", "INSERT"]);
+  });
+
+  it("keeps a child record that its parent cannot have (ATTRIB after LINE) as its own record, and flags it (Codex finding 4)", () => {
+    const strayAttrib = ["0", "ATTRIB", "8", "0", "1", "x"];
+    const bytes = encode(entitiesDxf([line("0", 0, 0, 1, 1), strayAttrib, circle("0", 5, 5, 1)]));
+    const index = indexDxf(bytes);
+    // ATTRIBはLINEに吸収されない(LINEを消しても、ATTRIBは残る)
+    expect(listRecords(index).map((r) => r.type)).toEqual(["LINE", "ATTRIB", "CIRCLE"]);
+    expect(decode(bytes.subarray(listRecords(index)[0].start, listRecords(index)[0].end))).not.toContain("ATTRIB");
+    expect(index.malformed).toContain("続けられない ATTRIB");
+  });
+
+  it("flags child records after SEQEND, a POLYLINE without SEQEND, and a leading child record", () => {
+    const afterSeqend = [...polylineWithVertices, "0", "VERTEX", "10", "1", "20", "1"];
+    expect(indexDxf(encode(entitiesDxf([afterSeqend]))).malformed).toContain("続けられない VERTEX");
+
+    const noSeqend = ["0", "POLYLINE", "8", "0", "0", "VERTEX", "10", "0", "20", "0"];
+    expect(indexDxf(encode(entitiesDxf([noSeqend, line("0", 0, 0, 1, 1)]))).malformed).toContain("SEQEND で終わっていません");
+
+    expect(indexDxf(encode(entitiesDxf([["0", "SEQEND", "8", "0"], line("0", 0, 0, 1, 1)]))).malformed).not.toBeNull();
+  });
+
+  it("flags a file whose ENTITIES section is not closed, missing, or ends in the middle of a pair (Codex finding 3)", () => {
+    const unclosed = encode(["0", "SECTION", "2", "ENTITIES", "0", "LINE", "8", "0", "10", "1", "20", "1"].join("\n"));
+    expect(indexDxf(unclosed).malformed).toContain("閉じられていません");
+
+    expect(indexDxf(encode("0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nEOF\n")).malformed).toContain("ありません");
+    expect(indexDxf(new Uint8Array(0)).malformed).not.toBeNull();
+
+    const danglingCode = encode(entitiesDxf([line("0", 0, 0, 1, 1)]) + "\n0\n");
+    expect(indexDxf(danglingCode).malformed).not.toBeNull();
+  });
+
+  it("does not wrap around when there are more than 65,536 kinds of record types (Codex finding 5)", () => {
+    const kinds = 65_540;
+    const lines = ["0", "SECTION", "2", "ENTITIES"];
+    for (let i = 0; i < kinds; i++) lines.push("0", `T${i}`);
+    lines.push("0", "ENDSEC", "0", "EOF", "");
+    const index = indexDxf(encode(lines.join("\n")));
+    expect(index.recordCount).toBe(kinds);
+    expect(index.typeNames).toHaveLength(kinds);
+    expect(listRecords(index)[kinds - 1].type).toBe(`T${kinds - 1}`);
+    expect(listRecords(index)[65_536].type).toBe("T65536");
   });
 });

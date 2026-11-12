@@ -54,7 +54,7 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("real drawings: raw sour
       expect(buildMs).toBeLessThan(10_000);
 
       // 差分なしの保存は、元とバイトで同じ
-      expect(applyDxfEdits(dxfBytes, source.index, {})).toBe(dxfBytes);
+      expect(applyDxfEdits({ bytes: dxfBytes, index: source.index }, {})).toBe(dxfBytes);
 
       // 記録 → その記録から作られた図形の位置
       const map = source.recordOfParserEntity!;
@@ -79,7 +79,7 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("real drawings: raw sour
       ].filter((position): position is number => position !== undefined);
 
       for (const target of new Set(targets)) {
-        const out = applyDxfEdits(dxfBytes, source.index, { remove: new Set([target]) });
+        const out = applyDxfEdits({ bytes: dxfBytes, index: source.index }, { remove: new Set([target]) });
         const reopened = reopen(out, isDwg);
         const expected = model.entities.filter((_, i) => recordOfEntity(i) !== target);
         expect(reopened.entities.length).toBe(expected.length);

@@ -24,7 +24,8 @@ export type DxfSource = {
 export function buildDxfSource(bytes: Uint8Array, parserEntities: readonly ParserEntityRef[], origin: EntityOrigin): DxfSource | null {
   try {
     const index = indexDxf(bytes);
-    const recordOfParserEntity = mapParserEntitiesToRecords(index, parserEntities);
+    // 構造に問題がある図面は、記録の境界を信用できないので対応づけをしない(=編集不可。表示はそのまま)
+    const recordOfParserEntity = index.malformed === null ? mapParserEntitiesToRecords(index, parserEntities) : null;
     const classification = recordOfParserEntity ? classifyRecords(index, recordOfParserEntity, origin) : null;
     return { bytes, index, recordOfParserEntity, origin, classification };
   } catch (error) {

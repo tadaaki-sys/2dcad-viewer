@@ -116,6 +116,16 @@ describe("buildDxfSource and its summary", () => {
     expect(summarizeSource(source)).toMatchObject({ mapped: false, editable: 0 });
   });
 
+  it("does not map (= read only) a drawing whose structure is broken, even if the parser result would match (Codex finding 3)", () => {
+    const truncated = encode(["0", "SECTION", "2", "ENTITIES", "0", "LINE", "8", "0", "10", "1"].join("\n"));
+    const origin = { parserIndex: Int32Array.of(0), nested: Uint8Array.of(0) };
+    const source = buildDxfSource(truncated, [{ type: "LINE" }], origin)!;
+    expect(source.index.malformed).not.toBeNull();
+    expect(source.recordOfParserEntity).toBeNull();
+    expect(source.classification).toBeNull();
+    expect(summarizeSource(source)).toMatchObject({ mapped: false });
+  });
+
   it("lists every buffer to transfer exactly once", () => {
     const { source } = openDxf(factoryLayoutDxf());
     const buffers = transferablesOf(source);

@@ -90,6 +90,9 @@ export default function App() {
     let pendingModel: CadModel | null = null;
 
     worker.onmessage = (event: MessageEvent<DxfWorkerResponse>) => {
+      // 別の図面を開き直した・閉じた後に、前のワーカーから遅れて届いたメッセージは捨てる
+      // (受け付けると、前の図面の元データが混ざったり、今読み込み中のワーカーを止めてしまう)
+      if (workerRef.current !== worker) return;
       const message = event.data;
       if (message.type === "progress") {
         setLoadingProgress({ stage: message.stage, entityCount: message.entityCount });
@@ -131,6 +134,7 @@ export default function App() {
     };
 
     worker.onerror = (event) => {
+      if (workerRef.current !== worker) return;
       console.error("[App] DXF worker crashed", event.message);
       // 図面の表示が済んだあとの異常(元データを作る途中など)では、表示中の図面を止めない
       if (succeeded) {
