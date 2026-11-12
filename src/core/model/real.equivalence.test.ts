@@ -1,7 +1,7 @@
 // 実図面での往復テスト(手元だけ)。CAD_REGRESSION_REAL=1 のとき、regression-local/manifest.json の図面で
 // CadModel -> CadDocument -> CadModel が完全に同じになること、作成の時間とメモリの目安を確認する。
 import { describe, expect, it } from "vitest";
-import { computeAllEntityBounds, unionOfEntityBounds } from "../../cad-view/spatial/entityBounds";
+import { computeAllEntityBounds, unionOfEntityBounds } from "../spatial/entityBounds";
 import { REAL_ENABLED, loadDrawing, readManifest, summarizeModel } from "../../regression/loadDrawing";
 import type { CadEntity } from "../../types/cad";
 import { cadModelFromDocument, documentFromCadModel } from "./convert";

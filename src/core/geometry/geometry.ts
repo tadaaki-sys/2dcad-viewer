@@ -1,4 +1,4 @@
-import type { Point2D } from "../types/cad";
+import type { Point2D } from "../../types/cad";
 
 export function distance(a: Point2D, b: Point2D): number {
   return Math.hypot(b.x - a.x, b.y - a.y);

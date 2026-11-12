@@ -1,4 +1,4 @@
-import type { Point2D } from "../types/cad";
+import type { Point2D } from "../../types/cad";
 
 /** 2Dアフィン変換行列。x' = a*x + c*y + e, y' = b*x + d*y + f */
 export type Matrix2D = {

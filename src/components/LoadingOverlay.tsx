@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DxfLoadingStage } from "../dxf/dxfWorkerProtocol";
+import type { DxfLoadingStage } from "../io/dxf/dxfWorkerProtocol";
 import "./LoadingOverlay.css";
 
 const STAGE_LABELS: Record<DxfLoadingStage, string> = {

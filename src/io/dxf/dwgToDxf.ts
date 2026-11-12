@@ -1,10 +1,10 @@
 // パッケージのexportsは本体(wrapper)しか公開していないため、WASMのglueコードと.wasmは相対パスで直接参照する。
 // 変換はブラウザ(Web Worker)内のWASMだけで完結し、DWGの中身は外部へ送信されない。
-import createModule from "../../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.js";
+import createModule from "../../../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.js";
 
 import { stripObjectsSection } from "./stripObjectsSection";
 
-const DWG_WASM_URL = new URL("../../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.wasm", import.meta.url).href;
+const DWG_WASM_URL = new URL("../../../node_modules/@mlightcad/libredwg-web/wasm/libredwg-web.wasm", import.meta.url).href;
 
 // LibreDWGのエラーコードは、この値以上が致命的(出力できない)で、未満は警告(出力は有効)として扱われる。
 const LIBREDWG_ERR_CRITICAL = 128;

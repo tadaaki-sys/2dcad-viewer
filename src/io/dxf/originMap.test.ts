@@ -93,7 +93,7 @@ describe("origin of each model entity and classification of records", () => {
   });
 
   it("does not change the model compared with the plain conversion (the origin is a separate output)", async () => {
-    const { parseDxfText } = await import("../../dxf/DxfParserAdapter");
+    const { parseDxfText } = await import("./DxfParserAdapter");
     const text = factoryLayoutDxf();
     expect(openDxf(text).model).toEqual(parseDxfText(text));
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDxfText } from "./DxfParserAdapter";
-import { normalizeArcSpan } from "../utils/geometry";
+import { normalizeArcSpan } from "../../core/geometry/geometry";
 
 function buildDxf(entitiesSection: string, tablesSection = ""): string {
   return [

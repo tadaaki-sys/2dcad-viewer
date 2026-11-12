@@ -5,8 +5,8 @@ import { decodeDxfBuffer } from "./dxfEncoding";
 import { detectDwgVersion } from "./dwgFormat";
 import { extractLayerStyles } from "./layerStyles";
 import { convertDwgToDxfBuffer } from "./dwgToDxf";
-import { buildDxfSource, transferablesOf } from "../io/dxf/source";
-import type { DxfSource } from "../io/dxf/source";
+import { buildDxfSource, transferablesOf } from "./source";
+import type { DxfSource } from "./source";
 import type {
   DxfWorkerErrorMessage,
   DxfWorkerProgressMessage,

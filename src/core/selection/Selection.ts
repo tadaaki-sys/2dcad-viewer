@@ -5,8 +5,8 @@ import {
   pointOnArc,
   pointToSegmentDistance,
   segmentsIntersect,
-} from "../../utils/geometry";
-import { distanceFromPointToText, getEntityPoints, getEntitySegments } from "../entityGeometry";
+} from "../geometry/geometry";
+import { distanceFromPointToText, getEntityPoints, getEntitySegments } from "../geometry/entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 import type { SpatialIndex } from "../spatial/SpatialIndex";
 

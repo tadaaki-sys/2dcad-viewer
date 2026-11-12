@@ -1,9 +1,9 @@
 // CanvasRendererの描画命令を記録するための偽のCanvasコンテキスト。実際に描かず、呼ばれた命令だけを残す。
 import { CanvasRenderer } from "../cad-view/renderer/CanvasRenderer";
 import type { RenderParams } from "../cad-view/renderer/Renderer";
-import { Camera } from "../cad-view/camera/Camera";
+import { Camera } from "../core/view/Camera";
 import type { CadModel } from "../types/cad";
-import { buildSpatialIndex } from "../cad-view/spatial/SpatialIndex";
+import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
 
 export type Op = [string, ...number[]];
 

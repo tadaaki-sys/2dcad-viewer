@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import type { CadEntity, CadModel } from "../../types/cad";
-import { Camera } from "../camera/Camera";
-import { computeAllEntityBounds, unionOfEntityBounds } from "../spatial/entityBounds";
-import { buildSpatialIndex } from "../spatial/SpatialIndex";
+import { Camera } from "../../core/view/Camera";
+import { computeAllEntityBounds, unionOfEntityBounds } from "../../core/spatial/entityBounds";
+import { buildSpatialIndex } from "../../core/spatial/SpatialIndex";
 import { CanvasRenderer } from "./CanvasRenderer";
 import type { RenderParams } from "./Renderer";
 

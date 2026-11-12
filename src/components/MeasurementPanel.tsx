@@ -1,5 +1,5 @@
 import type { Measurement } from "../types/cad";
-import { computeMeasurementDistances } from "../cad-view/measurement/Measurement";
+import { computeMeasurementDistances } from "../core/measurement/Measurement";
 import { formatMm } from "../utils/format";
 import "./MeasurementPanel.css";
 

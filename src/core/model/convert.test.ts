@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseDxfText } from "../../dxf/DxfParserAdapter";
-import { computeAllEntityBounds, unionOfEntityBounds } from "../../cad-view/spatial/entityBounds";
+import { parseDxfText } from "../../io/dxf/DxfParserAdapter";
+import { computeAllEntityBounds, unionOfEntityBounds } from "../spatial/entityBounds";
 import { factoryLayoutDxf, nestedBlocksDxf, smallDxf, unsupportedDxf } from "../../regression/fixtures";
 import type { CadEntity, CadModel } from "../../types/cad";
 import { cadModelFromDocument, documentFromCadModel } from "./convert";

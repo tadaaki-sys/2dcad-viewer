@@ -1,5 +1,5 @@
-import { normalizeArcSpan, pointOnArc, pointOnEllipse } from "../utils/geometry";
-import type { CadEntity, CadText, Point2D } from "../types/cad";
+import { normalizeArcSpan, pointOnArc, pointOnEllipse } from "./geometry";
+import type { CadEntity, CadText, Point2D } from "../../types/cad";
 
 // 選択のヒットテストやWindow/Crossing判定用の固定分割数(描画時の解像度とは別、ズームに依存しない)
 const FIXED_ARC_SEGMENTS_PER_FULL_CIRCLE = 48;

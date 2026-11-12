@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseDxfText } from "./DxfParserAdapter";
-import { findEntityAtPoint, findEntitiesInBox } from "../cad-view/selection/Selection";
-import { findSnapPoint } from "../cad-view/snap/SnapEngine";
+import { findEntityAtPoint, findEntitiesInBox } from "../../core/selection/Selection";
+import { findSnapPoint } from "../../core/snap/SnapEngine";
 
 function dxf(entities: string[], header: string[] = [], blocks: string[] = []): string {
   return [

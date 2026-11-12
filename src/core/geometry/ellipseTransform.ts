@@ -1,4 +1,4 @@
-import type { Point2D } from "../types/cad";
+import type { Point2D } from "../../types/cad";
 import type { Matrix2D } from "./matrix2d";
 
 const SIMILARITY_TOLERANCE = 1e-9;

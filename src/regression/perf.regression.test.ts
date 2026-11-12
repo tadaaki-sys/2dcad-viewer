@@ -3,9 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildSpatialIndex } from "../cad-view/spatial/SpatialIndex";
-import { findEntitiesInBox, findEntitiesNearPoint } from "../cad-view/selection/Selection";
-import { findSnapPoint } from "../cad-view/snap/SnapEngine";
+import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
+import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Selection";
+import { findSnapPoint } from "../core/snap/SnapEngine";
 import type { CadModel } from "../types/cad";
 import { REAL_ENABLED, REGRESSION_DIR, UPDATE_BASELINE, loadDrawing, readManifest } from "./loadDrawing";
 import { cameraAt, installRecordingPath2D, renderModel } from "./recordingContext";

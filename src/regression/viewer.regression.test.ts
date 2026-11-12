@@ -1,12 +1,12 @@
 // 既存ビューアの動作を固定する回帰テスト(Phase 0.5)。
 // 意図して挙動を変えたときだけ、スナップショットを更新する(`vitest -u`)。更新は事前に承認を取ること。
 import { beforeAll, describe, expect, it } from "vitest";
-import { parseDxfText } from "../dxf/DxfParserAdapter";
-import { unionOfVisibleEntityBounds } from "../cad-view/spatial/entityBounds";
-import { buildSpatialIndex } from "../cad-view/spatial/SpatialIndex";
-import { findEntitiesInBox, findEntitiesNearPoint } from "../cad-view/selection/Selection";
-import { findSnapPoint } from "../cad-view/snap/SnapEngine";
-import { Camera } from "../cad-view/camera/Camera";
+import { parseDxfText } from "../io/dxf/DxfParserAdapter";
+import { unionOfVisibleEntityBounds } from "../core/spatial/entityBounds";
+import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
+import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Selection";
+import { findSnapPoint } from "../core/snap/SnapEngine";
+import { Camera } from "../core/view/Camera";
 import type { CadEntity, CadModel } from "../types/cad";
 import { factoryLayoutDxf, nestedBlocksDxf, smallDxf, unsupportedDxf } from "./fixtures";
 import { cameraAt, installRecordingPath2D, renderModel, summarizeStrokes } from "./recordingContext";

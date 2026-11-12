@@ -1,14 +1,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import type { CadLayer, CadModel, Measurement, Point2D } from "../types/cad";
-import { Camera } from "./camera/Camera";
+import { Camera } from "../core/view/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
-import { findEntitiesInBox, findEntitiesNearPoint } from "./selection/Selection";
-import { findSnapPoint } from "./snap/SnapEngine";
-import type { SnapCandidate } from "./snap/SnapEngine";
-import { findMeasurementAtPoint } from "./measurement/Measurement";
-import { buildSpatialIndex } from "./spatial/SpatialIndex";
-import { unionOfVisibleEntityBounds } from "./spatial/entityBounds";
+import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Selection";
+import { findSnapPoint } from "../core/snap/SnapEngine";
+import type { SnapCandidate } from "../core/snap/SnapEngine";
+import { findMeasurementAtPoint } from "../core/measurement/Measurement";
+import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
+import { unionOfVisibleEntityBounds } from "../core/spatial/entityBounds";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;

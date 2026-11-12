@@ -1,4 +1,4 @@
-import { distance, pointToSegmentDistance } from "../../utils/geometry";
+import { distance, pointToSegmentDistance } from "../geometry/geometry";
 import type { Measurement, Point2D } from "../../types/cad";
 
 export type MeasurementDistances = {

@@ -1,12 +1,12 @@
 import type { CadEntity, CadPoint, CadPointStyle, CadText, LineDash, Measurement, Point2D } from "../../types/cad";
-import { computeMeasurementDistances } from "../measurement/Measurement";
+import { computeMeasurementDistances } from "../../core/measurement/Measurement";
 import { formatMm } from "../../utils/format";
-import { normalizeArcSpan, pointOnEllipse } from "../../utils/geometry";
-import { lineWeightToScreenWidthPx } from "../../utils/lineWeight";
-import type { Camera } from "../camera/Camera";
+import { normalizeArcSpan, pointOnEllipse } from "../../core/geometry/geometry";
+import { lineWeightToScreenWidthPx } from "../../core/style/lineWeight";
+import type { Camera } from "../../core/view/Camera";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
-import { TEXT_LINE_HEIGHT_FACTOR } from "../entityGeometry";
-import { BOUNDS_STRIDE } from "../spatial/entityBounds";
+import { TEXT_LINE_HEIGHT_FACTOR } from "../../core/geometry/entityGeometry";
+import { BOUNDS_STRIDE } from "../../core/spatial/entityBounds";
 
 const LINE_WIDTH_PX = 1;
 const HIGHLIGHT_LINE_WIDTH_PX = 2.5;

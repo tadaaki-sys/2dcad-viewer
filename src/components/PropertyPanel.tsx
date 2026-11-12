@@ -1,7 +1,7 @@
 import type { CadEntity } from "../types/cad";
-import { polylineLength, distance, normalizeArcSpan } from "../utils/geometry";
+import { polylineLength, distance, normalizeArcSpan } from "../core/geometry/geometry";
 import { formatMm } from "../utils/format";
-import { getEntityPoints } from "../cad-view/entityGeometry";
+import { getEntityPoints } from "../core/geometry/entityGeometry";
 import "./PropertyPanel.css";
 
 type PropertyPanelProps = {

@@ -1,5 +1,5 @@
-import type { CadModel } from "../types/cad";
-import type { DxfSource } from "../io/dxf/source";
+import type { CadModel } from "../../types/cad";
+import type { DxfSource } from "./source";
 
 export type DxfLoadingStage = "reading" | "dwgConverting" | "parsing" | "converting" | "preparing";
 

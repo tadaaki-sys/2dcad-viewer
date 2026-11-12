@@ -7,8 +7,8 @@ import {
   pointOnArc,
   pointOnEllipse,
   pointToSegmentDistance,
-} from "../../utils/geometry";
-import { getEntitySegments } from "../entityGeometry";
+} from "../geometry/geometry";
+import { getEntitySegments } from "../geometry/entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 import type { SpatialIndex } from "../spatial/SpatialIndex";
 

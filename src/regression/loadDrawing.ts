@@ -4,13 +4,13 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import DxfParser from "dxf-parser";
-import { convertToCadModelWithOrigin } from "../dxf/DxfParserAdapter";
+import { convertToCadModelWithOrigin } from "../io/dxf/DxfParserAdapter";
 import type { EntityOrigin } from "../io/dxf/origin";
 import type { IDxf } from "dxf-parser";
-import { decodeDxfBuffer } from "../dxf/dxfEncoding";
-import { detectDwgVersion } from "../dxf/dwgFormat";
-import { convertDwgToDxfBuffer } from "../dxf/dwgToDxf";
-import { extractLayerStyles } from "../dxf/layerStyles";
+import { decodeDxfBuffer } from "../io/dxf/dxfEncoding";
+import { detectDwgVersion } from "../io/dxf/dwgFormat";
+import { convertDwgToDxfBuffer } from "../io/dxf/dwgToDxf";
+import { extractLayerStyles } from "../io/dxf/layerStyles";
 import type { CadModel } from "../types/cad";
 
 export const REGRESSION_DIR = path.resolve("regression-local");

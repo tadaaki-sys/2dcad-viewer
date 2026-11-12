@@ -18,19 +18,19 @@ import type {
   CadPointStyle,
   CadVerticalAlign,
   Point2D,
-} from "../types/cad";
-import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../utils/matrix2d";
-import type { Matrix2D } from "../utils/matrix2d";
-import { computeAllEntityBounds, unionOfEntityBounds } from "../cad-view/spatial/entityBounds";
+} from "../../types/cad";
+import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../../core/geometry/matrix2d";
+import type { Matrix2D } from "../../core/geometry/matrix2d";
+import { computeAllEntityBounds, unionOfEntityBounds } from "../../core/spatial/entityBounds";
 import { stripMtextFormatting } from "./mtextFormatting";
 import { extractLayerStyles } from "./layerStyles";
 import type { LayerStyle } from "./layerStyles";
-import { normalizeDashPattern } from "../utils/lineDash";
-import { THIN_LINE_WEIGHT_LIMIT } from "../utils/lineWeight";
-import { tessellateSpline } from "../utils/spline";
-import type { EntityOrigin } from "../io/dxf/origin";
-import { ellipseFromConjugateDiameters, isReflection, isSimilarityTransform, linearBasis } from "../utils/ellipseTransform";
-import { expandBulges } from "../utils/polylineBulge";
+import { normalizeDashPattern } from "../../core/style/lineDash";
+import { THIN_LINE_WEIGHT_LIMIT } from "../../core/style/lineWeight";
+import { tessellateSpline } from "../../core/geometry/spline";
+import type { EntityOrigin } from "./origin";
+import { ellipseFromConjugateDiameters, isReflection, isSimilarityTransform, linearBasis } from "../../core/geometry/ellipseTransform";
+import { expandBulges } from "../../core/geometry/polylineBulge";
 
 const DEFAULT_COLOR = "#ffffff";
 const DEFAULT_TEXT_HEIGHT = 2.5;

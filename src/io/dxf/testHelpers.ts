@@ -1,7 +1,7 @@
 // io/dxf のテスト用の補助(アプリ本体からは使わない)。
 import DxfParser from "dxf-parser";
-import { convertToCadModelWithOrigin } from "../../dxf/DxfParserAdapter";
-import { extractLayerStyles } from "../../dxf/layerStyles";
+import { convertToCadModelWithOrigin } from "./DxfParserAdapter";
+import { extractLayerStyles } from "./layerStyles";
 import type { CadEntity, CadModel } from "../../types/cad";
 import type { EntityOrigin } from "./origin";
 import { applyDxfEdits } from "./patch";

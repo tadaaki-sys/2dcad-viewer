@@ -1,6 +1,6 @@
 import type { CadModel, Measurement, Point2D } from "../../types/cad";
-import type { Camera } from "../camera/Camera";
-import type { SpatialIndex } from "../spatial/SpatialIndex";
+import type { Camera } from "../../core/view/Camera";
+import type { SpatialIndex } from "../../core/spatial/SpatialIndex";
 
 export type DragSelectionBox = {
   screenMin: Point2D;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDxfText } from "./DxfParserAdapter";
-import { normalizeArcSpan, pointOnEllipse } from "../utils/geometry";
+import { normalizeArcSpan, pointOnEllipse } from "../../core/geometry/geometry";
 
 function buildDxfWithBlocks(entitiesSection: string, blocksSection = ""): string {
   return [

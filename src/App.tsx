@@ -11,9 +11,9 @@ import { CadCanvas } from "./cad-view/CadCanvas";
 import type { CadCanvasHandle } from "./cad-view/CadCanvas";
 import { PerformanceOverlay } from "./components/PerformanceOverlay";
 import { useRecentFiles } from "./hooks/useRecentFiles";
-import { validateDxfFile } from "./dxf/validateDxfFile";
-import { isDwgFileName } from "./dxf/dwgFormat";
-import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./dxf/dxfWorkerProtocol";
+import { validateDxfFile } from "./io/dxf/validateDxfFile";
+import { isDwgFileName } from "./io/dxf/dwgFormat";
+import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./io/dxf/dxfWorkerProtocol";
 import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
 import { documentFromCadModel } from "./core/model";
 import type { CadDocument } from "./core/model";
@@ -83,7 +83,7 @@ export default function App() {
     setLoadStartedAt(Date.now());
     setLoadingProgress({ stage: "reading", entityCount: null });
 
-    const worker = new Worker(new URL("./dxf/dxf.worker.ts", import.meta.url), { type: "module" });
+    const worker = new Worker(new URL("./io/dxf/dxf.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
     // このワーカーが、図面のデータ(success)を送り終えたか。送った後の異常で、表示中の図面を止めないために使う
     let succeeded = false;

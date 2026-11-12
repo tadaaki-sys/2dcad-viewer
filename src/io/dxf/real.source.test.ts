@@ -5,9 +5,9 @@
 // を確認する。
 import DxfParser from "dxf-parser";
 import { describe, expect, it } from "vitest";
-import { convertToCadModelWithOrigin } from "../../dxf/DxfParserAdapter";
-import { decodeDxfBuffer } from "../../dxf/dxfEncoding";
-import { extractLayerStyles } from "../../dxf/layerStyles";
+import { convertToCadModelWithOrigin } from "./DxfParserAdapter";
+import { decodeDxfBuffer } from "./dxfEncoding";
+import { extractLayerStyles } from "./layerStyles";
 import { REAL_ENABLED, hashEntities, loadDrawing, readManifest } from "../../regression/loadDrawing";
 import { applyDxfEdits } from "./patch";
 import { buildDxfSource } from "./source";

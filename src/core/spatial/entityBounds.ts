@@ -1,6 +1,6 @@
-import { isAngleInSweep, normalizeArcSpan } from "../../utils/geometry";
+import { isAngleInSweep, normalizeArcSpan } from "../geometry/geometry";
 import type { CadArc, CadBounds, CadEntity } from "../../types/cad";
-import { getEntityPoints } from "../entityGeometry";
+import { getEntityPoints } from "../geometry/entityGeometry";
 
 export const BOUNDS_STRIDE = 4; // [minX, minY, maxX, maxY]
 

@@ -1,4 +1,4 @@
-import type { Point2D } from "../types/cad";
+import type { Point2D } from "../../types/cad";
 
 // 円弧区間を折れ線へ近似するときの1分割あたりの最大角(ラジアン)。10度ごと
 const MAX_SEGMENT_ANGLE = Math.PI / 18;

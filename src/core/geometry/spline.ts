@@ -1,4 +1,4 @@
-import type { Point2D } from "../types/cad";
+import type { Point2D } from "../../types/cad";
 import { pointToSegmentDistance } from "./geometry";
 
 // 1本のスプラインの総点数の上限。大きな図面ではスプラインが数千本あり、点数がそのまま描画負荷になる。
