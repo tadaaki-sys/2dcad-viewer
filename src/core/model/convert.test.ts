@@ -7,7 +7,7 @@ import { cadModelFromDocument, documentFromCadModel } from "./convert";
 import type { DeriveBounds } from "./convert";
 import { createDocument } from "./document";
 
-// 本番と同じ範囲の求め方(cad-viewの関数)を渡す。coreはcad-viewを読み込まないので、テストから注入する
+// 本番と同じ範囲の求め方(core/spatial/entityBoundsの関数)を渡す
 const deriveBounds: DeriveBounds = (entities: readonly CadEntity[]) => {
   const entityBounds = computeAllEntityBounds(entities);
   return { entityBounds, bounds: unionOfEntityBounds(entityBounds) };

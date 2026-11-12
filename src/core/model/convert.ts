@@ -5,9 +5,10 @@ import { createDocument } from "./document";
 import type { CadDocument } from "./document";
 
 /**
- * 図形の範囲(バウンディングボックス)を求める関数。`cad-view/spatial/entityBounds` の
+ * 図形の範囲(バウンディングボックス)を求める関数。`core/spatial/entityBounds` の
  * computeAllEntityBounds と unionOfEntityBounds を組み合わせたものを、呼び出し側が渡す。
- * (coreがcad-viewに依存しないよう、関数を引数で受け取る)
+ * (Phase 1aでは範囲の計算がcoreの外にあったため、関数を引数で受け取る形にした。
+ *  Phase 1cで同じcoreに移ったので、直接呼ぶ形に簡単にできる。処理を変えないため、今は引数のまま)
  */
 export type DeriveBounds = (entities: readonly CadEntity[]) => { entityBounds: Float64Array; bounds: CadBounds | null };
 
