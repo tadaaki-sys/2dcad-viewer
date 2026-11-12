@@ -26,11 +26,13 @@ type Running<R> = { name: string; step: PromptStep<R> };
 export class CommandSession<R, C> {
   private running: Running<R> | null = null;
   private lastPoint: Point2D | null = null;
+  private readonly registry: CommandRegistry<R, C>;
+  private readonly getContext: () => C;
 
-  constructor(
-    private readonly registry: CommandRegistry<R, C>,
-    private readonly getContext: () => C,
-  ) {}
+  constructor(registry: CommandRegistry<R, C>, getContext: () => C) {
+    this.registry = registry;
+    this.getContext = getContext;
+  }
 
   /** 実行中のコマンドの状態。実行中でなければ null */
   get active(): ActiveCommand | null {

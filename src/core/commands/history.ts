@@ -6,8 +6,11 @@ export class CommandHistory {
   /** 呼び出し中の位置。null は「履歴をたどっていない(いま入力中の文字)」 */
   private cursor: number | null = null;
   private draft = "";
+  private readonly limit: number;
 
-  constructor(private readonly limit: number = DEFAULT_HISTORY_LIMIT) {}
+  constructor(limit: number = DEFAULT_HISTORY_LIMIT) {
+    this.limit = limit;
+  }
 
   get size(): number {
     return this.entries.length;
