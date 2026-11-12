@@ -53,9 +53,11 @@ export class CommandSession<R, C> {
   /** 図面のクリックなどで、点が指示された。点を待っていないときは、何もしない */
   submitPoint(point: Point2D): SessionResult<R> {
     const running = this.running;
-    if (running === null || running.step.expect !== "point") return this.empty();
+    if (running === null) return this.empty();
+    const step = running.step;
+    if (step.expect !== "point") return this.empty();
     this.lastPoint = point;
-    return this.advance(running.name, running.step.onInput({ kind: "point", point }));
+    return this.advance(running.name, step.onInput({ kind: "point", point }));
   }
 
   /** 実行中のコマンドを取り消す(Esc)。実行中でなければ何もしない */
@@ -89,24 +91,24 @@ export class CommandSession<R, C> {
   }
 
   private feedText(running: Running<R>, text: string): SessionResult<R> {
-    const { expect, onInput } = running.step;
-    if (expect === "text") return this.advance(running.name, onInput({ kind: "text", text }));
+    const step = running.step;
+    if (step.expect === "text") return this.advance(running.name, step.onInput({ kind: "text", text }));
 
     // 点・距離を待っているときの、空のEnterは何もしない
     if (text.trim() === "") return this.empty();
 
     const parsed = parseCoordinateInput(text, this.lastPoint);
     if (!parsed.ok) return this.reprompt(running, parsed.error);
-    if (expect === "point") {
+    if (step.expect === "point") {
       if (parsed.kind !== "point") {
         return this.reprompt(running, "点の座標を入力するか、図面をクリックしてください(例: 1000,500)");
       }
       this.lastPoint = parsed.point;
-      return this.advance(running.name, onInput({ kind: "point", point: parsed.point }));
+      return this.advance(running.name, step.onInput({ kind: "point", point: parsed.point }));
     }
-    // expect === "distance": 数値だけの入力を受け取る
+    // step.expect === "distance": 数値だけの入力を受け取る
     if (parsed.kind !== "distance") return this.reprompt(running, "長さを数値で入力してください(例: 500)");
-    return this.advance(running.name, onInput({ kind: "distance", value: parsed.value }));
+    return this.advance(running.name, step.onInput({ kind: "distance", value: parsed.value }));
   }
 
   /** 入力が正しくなかったとき。理由を表示して、同じ段階のまま待つ */

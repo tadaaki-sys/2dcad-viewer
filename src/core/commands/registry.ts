@@ -4,11 +4,12 @@
 // 図面を変更する「変更の内容」は、Undo(Phase 3)と作図(Phase 4)で、この仕組みに追加する。
 import type { Point2D } from "../../types/cad";
 
+export type PointInput = { kind: "point"; point: Point2D };
+export type TextInput = { kind: "text"; text: string };
+export type DistanceInput = { kind: "distance"; value: number };
+
 /** コマンドの段階が受け取る入力 */
-export type CommandInput =
-  | { kind: "point"; point: Point2D }
-  | { kind: "text"; text: string }
-  | { kind: "distance"; value: number };
+export type CommandInput = PointInput | TextInput | DistanceInput;
 
 /** 段階の結果。メッセージ(コマンドラインに表示)と、アプリへの依頼(R)を返せる */
 export type CommandOutput<R> = {
@@ -19,14 +20,20 @@ export type CommandOutput<R> = {
 /** コマンドが待っている入力の種類 */
 export type ExpectedInput = "point" | "text" | "distance";
 
-export type PromptStep<R> = { type: "prompt" } & CommandOutput<R> & {
+/** 入力を待つ段階。待っている種類(expect)と、onInput が受け取る入力の型は、必ず対応する(型で保証する) */
+type PromptStepOf<R, E extends ExpectedInput, I extends CommandInput> = { type: "prompt" } & CommandOutput<R> & {
     /** 利用者への案内(例: 「点を指示してください」) */
     prompt: string;
     /** 待っている入力。point は図面のクリックでも入力できる */
-    expect: ExpectedInput;
+    expect: E;
     /** 入力を受け取って、次の段階を返す */
-    onInput: (input: CommandInput) => CommandStep<R>;
+    onInput: (input: I) => CommandStep<R>;
   };
+
+export type PromptStep<R> =
+  | PromptStepOf<R, "point", PointInput>
+  | PromptStepOf<R, "text", TextInput>
+  | PromptStepOf<R, "distance", DistanceInput>;
 
 export type DoneStep<R> = { type: "done" } & CommandOutput<R>;
 

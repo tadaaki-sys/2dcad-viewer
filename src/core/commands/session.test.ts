@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CommandRegistry } from "./registry";
-import type { CommandDefinition } from "./registry";
+import type { CommandDefinition, PromptStep } from "./registry";
 import { CommandSession } from "./session";
 
 type Req = { type: "ping" } | { type: "got"; value: string };
@@ -69,6 +69,26 @@ function makeSession(ctx: Ctx = { open: true }) {
   const state = { ctx };
   return { session: new CommandSession(registry, () => state.ctx), state };
 }
+
+describe("PromptStep types", () => {
+  it("types onInput by the expected kind (checked by the compiler)", () => {
+    const step: PromptStep<Req> = {
+      type: "prompt",
+      prompt: "x",
+      expect: "point",
+      // @ts-expect-error 点を待つ段階では、距離(value)は読めない
+      onInput: (input) => ({ type: "done", messages: [String(input.value)] }),
+    };
+    expect(step.expect).toBe("point");
+    const textStep: PromptStep<Req> = {
+      type: "prompt",
+      prompt: "x",
+      expect: "text",
+      onInput: (input) => ({ type: "done", messages: [input.text] }),
+    };
+    expect(textStep.expect).toBe("text");
+  });
+});
 
 describe("CommandRegistry", () => {
   it("finds by name and alias, ignoring case and width", () => {

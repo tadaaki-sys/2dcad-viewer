@@ -20,7 +20,9 @@ export function Toolbar({
   onToggleFullscreen,
 }: ToolbarProps) {
   return (
-    <div className="toolbar">
+    // マウスでボタンを押したとき、ボタンにフォーカスを残さない(残ると、次のEnterキーが同じボタンの再実行になり、
+    // コマンドラインへ移れない)。キーボード(Tab)での操作は、今までどおり。
+    <div className="toolbar" onMouseDown={(event) => event.preventDefault()}>
       <button type="button" className="toolbar__button" onClick={onOpenFile}>
         図面を開く
       </button>

@@ -6,9 +6,12 @@ export type {
   CommandInput,
   CommandOutput,
   CommandStep,
+  DistanceInput,
   DoneStep,
   ExpectedInput,
+  PointInput,
   PromptStep,
+  TextInput,
 } from "./registry";
 export { CommandSession } from "./session";
 export type { ActiveCommand, SessionResult } from "./session";

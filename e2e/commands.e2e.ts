@@ -25,6 +25,16 @@ test.describe("command line", () => {
     await expect(input(page)).toBeFocused();
   });
 
+  test("Enter still moves into the command line after a toolbar button was clicked with the mouse (Codex review)", async ({ page }) => {
+    await openDrawing(page, "factory.dxf", factoryLayoutDxf());
+    await page.getByRole("button", { name: "測定" }).click();
+    await expect(measureButton(page)).toHaveClass(/toolbar__button--active/);
+    await page.keyboard.press("Enter");
+    await expect(input(page)).toBeFocused();
+    // ボタンの再実行にはならない(測定モードは、そのまま)
+    await expect(measureButton(page)).toHaveClass(/toolbar__button--active/);
+  });
+
   test("FIT in the command line does the same as the toolbar button", async ({ page }) => {
     await openDrawing(page, "factory.dxf", factoryLayoutDxf());
     const initial = await calibrate(page);
@@ -155,6 +165,21 @@ test.describe("point input (ID command)", () => {
     await expect(log(page)).toContainText("X = 1500.000, Y = 600.000");
   });
 
+  test("half-typed text is dropped when the command ends by a click (it is not run as a command name later)", async ({ page }) => {
+    await openDrawing(page, "factory.dxf", factoryLayoutDxf());
+    const mapping = await calibrate(page);
+    await runInCommandLine(page, "id");
+    await input(page).fill("100,200"); // 打ちかけ(Enterは押さない)
+    const nearCorner = mapping.toPage({ x: 996, y: 596 });
+    await page.mouse.click(nearCorner.x, nearCorner.y);
+    await expect(log(page)).toContainText("X = 1000.000, Y = 600.000");
+    await page.keyboard.press("Enter"); // 入力欄へ
+    await expect(input(page)).toBeFocused();
+    await expect(input(page)).toHaveValue("");
+    await page.keyboard.press("Enter");
+    await expect(log(page)).not.toContainText("不明なコマンドです");
+  });
+
   test("explains an invalid coordinate and keeps waiting", async ({ page }) => {
     await openDrawing(page, "factory.dxf", factoryLayoutDxf());
     await runInCommandLine(page, "id");
@@ -201,6 +226,20 @@ test.describe("Escape", () => {
     await expect(label(page)).toHaveText("コマンド:");
     await expect(measureButton(page)).toHaveClass(/toolbar__button--active/);
     await expect(input(page)).not.toBeFocused();
+    // 次のEsc(入力欄の外)で、今までどおり測定を抜ける
+    await page.keyboard.press("Escape");
+    await expect(measureButton(page)).not.toHaveClass(/toolbar__button--active/);
+  });
+
+  test("in the command line with no command running, only clears the text and leaves the field (the measurement mode stays)", async ({ page }) => {
+    await openDrawing(page, "factory.dxf", factoryLayoutDxf());
+    await page.keyboard.press("m");
+    await input(page).focus();
+    await input(page).fill("abc");
+    await page.keyboard.press("Escape");
+    await expect(input(page)).toHaveValue("");
+    await expect(input(page)).not.toBeFocused();
+    await expect(measureButton(page)).toHaveClass(/toolbar__button--active/);
     // 次のEsc(入力欄の外)で、今までどおり測定を抜ける
     await page.keyboard.press("Escape");
     await expect(measureButton(page)).not.toHaveClass(/toolbar__button--active/);

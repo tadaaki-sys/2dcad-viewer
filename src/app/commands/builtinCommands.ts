@@ -61,10 +61,10 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
             type: "prompt",
             prompt: "点を指示してください",
             expect: "point",
-            onInput: (input) =>
-              input.kind === "point"
-                ? { type: "done", messages: [`X = ${formatCoordinate(input.point.x)}, Y = ${formatCoordinate(input.point.y)}`] }
-                : { type: "done" },
+            onInput: (input) => ({
+              type: "done",
+              messages: [`X = ${formatCoordinate(input.point.x)}, Y = ${formatCoordinate(input.point.y)}`],
+            }),
           }
         : { type: "done", messages: [NO_DOCUMENT_MESSAGE] },
   },

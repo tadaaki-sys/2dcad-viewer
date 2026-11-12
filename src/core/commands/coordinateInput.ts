@@ -36,6 +36,14 @@ function parseNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+/** 計算した結果の点が有限か確かめる(入力の数値が有限でも、足し算や掛け算で溢れることがある) */
+function finitePoint(x: number, y: number): CoordinateParseResult {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, error: "座標の値が大きすぎて計算できません" };
+  }
+  return { ok: true, kind: "point", point: { x, y } };
+}
+
 /**
  * 座標の文字を読み取る。
  * @param basePoint 直前の点。相対座標(@)で使う。無ければ、相対座標はエラーになる
@@ -63,7 +71,7 @@ export function parseCoordinateInput(text: string, basePoint: Point2D | null): C
     const x = parseNumber(parts[0]);
     const y = parseNumber(parts[1]);
     if (x === null || y === null) return { ok: false, error: "座標は数値で入力してください(例: 1000,500)" };
-    return { ok: true, kind: "point", point: { x: origin.x + x, y: origin.y + y } };
+    return finitePoint(origin.x + x, origin.y + y);
   }
 
   if (body.includes("<")) {
@@ -72,12 +80,9 @@ export function parseCoordinateInput(text: string, basePoint: Point2D | null): C
     const length = parseNumber(parts[0]);
     const angleDeg = parseNumber(parts[1]);
     if (length === null || angleDeg === null) return { ok: false, error: "極座標は数値で入力してください(例: 1000<30)" };
-    const angle = (angleDeg * Math.PI) / 180;
-    return {
-      ok: true,
-      kind: "point",
-      point: { x: origin.x + length * Math.cos(angle), y: origin.y + length * Math.sin(angle) },
-    };
+    // 角度は先に360度の範囲へ収める(非常に大きな角度で、ラジアンへの変換が溢れないように)
+    const angle = ((angleDeg % 360) * Math.PI) / 180;
+    return finitePoint(origin.x + length * Math.cos(angle), origin.y + length * Math.sin(angle));
   }
 
   // 「@500」のように、@の後が長さだけの形は意味が決まらないので受け付けない

@@ -19,8 +19,18 @@ type CommandLineProps = {
 
 export function CommandLine({ log, active, inputRef, onSubmit, onCancel }: CommandLineProps) {
   const [text, setText] = useState("");
-  const historyRef = useRef(new CommandHistory());
+  const [history] = useState(() => new CommandHistory());
   const logRef = useRef<HTMLDivElement>(null);
+
+  // 実行中のコマンドや、その段階(案内)が変わったら、入力途中の文字は捨てる。
+  // (点を図面のクリックで指示して終わったあとに、打ちかけの座標が残り、次のEnterでコマンド名として実行されないように)
+  const activeKey = active ? `${active.name}|${active.expect}|${active.prompt}` : "";
+  const [shownActiveKey, setShownActiveKey] = useState(activeKey);
+  if (shownActiveKey !== activeKey) {
+    setShownActiveKey(activeKey);
+    setText("");
+    history.resetCursor();
+  }
 
   // 新しいメッセージが来たら、いちばん下までスクロールする
   useEffect(() => {
@@ -34,21 +44,21 @@ export function CommandLine({ log, active, inputRef, onSubmit, onCancel }: Comma
     if (event.key === "Enter") {
       event.preventDefault();
       const submitted = text;
-      historyRef.current.push(submitted);
+      history.push(submitted);
       setText("");
       onSubmit(submitted);
     } else if (event.key === "Escape") {
       event.preventDefault();
       setText("");
-      historyRef.current.resetCursor();
+      history.resetCursor();
       onCancel();
       event.currentTarget.blur();
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setText(historyRef.current.previous(text));
+      setText(history.previous(text));
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      setText(historyRef.current.next(text));
+      setText(history.next(text));
     }
   }
 
@@ -76,7 +86,7 @@ export function CommandLine({ log, active, inputRef, onSubmit, onCancel }: Comma
           autoComplete="off"
           onChange={(event) => {
             setText(event.target.value);
-            historyRef.current.resetCursor();
+            history.resetCursor();
           }}
           onKeyDown={handleKeyDown}
         />

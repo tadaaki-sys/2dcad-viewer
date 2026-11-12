@@ -111,6 +111,32 @@ describe("parseCoordinateInput: errors", () => {
     });
   }
 
+  it("rejects results that overflow even when every typed number is finite (Codex review)", () => {
+    const big = "1" + "0".repeat(308); // 1e308: 数としては有限
+    expect(parseCoordinateInput(`${big},0`, null).ok).toBe(true);
+    // 相対座標の足し算で溢れる
+    const relative = parseCoordinateInput(`@${big},0`, { x: Number(big), y: 0 });
+    expect(relative.ok).toBe(false);
+    if (!relative.ok) expect(relative.error).toContain("大きすぎ");
+    // 極座標で、非常に大きな角度を度からラジアンへ変換して溢れる(以前はNaNになった)
+    const polarAngle = parseCoordinateInput(`1<${big}`, null);
+    expect(polarAngle.ok === true && polarAngle.kind === "point" && Number.isFinite(polarAngle.point.x) && Number.isFinite(polarAngle.point.y)).toBe(true);
+    // 極座標の長さが大きく、基準点との足し算で溢れる
+    expect(parseCoordinateInput(`@${big}<0`, { x: Number(big), y: 0 }).ok).toBe(false);
+  });
+
+  it("keeps big angles equivalent to their value modulo 360", () => {
+    const a = parseCoordinateInput("10<450", null);
+    const b = parseCoordinateInput("10<90", null);
+    if (!a.ok || a.kind !== "point" || !b.ok || b.kind !== "point") throw new Error("not points");
+    expect(a.point.x).toBeCloseTo(b.point.x, 9);
+    expect(a.point.y).toBeCloseTo(b.point.y, 9);
+    const c = parseCoordinateInput("10<-270", null);
+    if (!c.ok || c.kind !== "point") throw new Error("not a point");
+    expect(c.point.x).toBeCloseTo(0, 9);
+    expect(c.point.y).toBeCloseTo(10, 9);
+  });
+
   it("rejects numbers that overflow to Infinity", () => {
     const huge = "9".repeat(400);
     expect(parseCoordinateInput(`${huge},1`, base).ok).toBe(false);
