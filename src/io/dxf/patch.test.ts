@@ -102,7 +102,7 @@ describe("applyDxfEdits", () => {
     reject(["0", "LINE", "10", "0", "20", ""], "対になっていません");
     reject(["LINE", "10", "0", ""], "対になっていません");
     reject(["05", "LINE", ""], "グループコード0の行から始まっていません");
-    reject(["abc", "LINE", ""], "数値ではありません");
+    reject(["abc", "LINE", ""], "整数ではありません");
     reject(["0", "line", "10", "0", ""], "種類として正しくありません");
     reject(["0", "VERTEX", "10", "0", ""], "子の記録");
     // 正しい記録の後ろに、ENDSEC や別の記録を付け足したもの
@@ -111,6 +111,31 @@ describe("applyDxfEdits", () => {
     // 子の記録の並びが正しくないもの
     reject([...line, "0", "ATTRIB", "1", "x", ""], "続けられない ATTRIB");
     reject(["0", "POLYLINE", "8", "0", "0", "VERTEX", "10", "0", "20", "0", ""], "SEQEND で閉じていません");
+    // グループコード0の別表記(「00」「-0」)で、構造の記録や2つ目の記録を紛れ込ませたもの(最終レビュー High 2)
+    reject(["0", "LINE", "00", "ENDSEC", ""], "続けられない ENDSEC");
+    reject(["0", "LINE", "00", "CIRCLE", "10", "0", ""], "続けられない CIRCLE");
+    reject(["0", "LINE", "-0", "EOF", ""], "続けられない EOF");
+    reject(["00", "ENDSEC", ""], "構造の記録");
+    // INSERTが「属性が続く」(66=1)と宣言したのに、SEQENDで閉じていないもの(最終レビュー Medium 4)
+    reject(["0", "INSERT", "2", "B", "66", "1", ""], "SEQEND で閉じていません");
+  });
+
+  it("accepts an INSERT with attributes declared by code 66 and closed by SEQEND", () => {
+    const bytes = encode(base());
+    const target = { bytes, index: indexDxf(bytes) };
+    const insert = ["0", "INSERT", "2", "B", "66", "1", "0", "ATTRIB", "1", "v", "0", "SEQEND", "8", "0", ""];
+    const out = applyDxfEdits(target, { replace: new Map([[0, encode(insert.join("\n"))]]) });
+    expect(listRecords(indexDxf(out)).map((r) => r.type)).toEqual(["INSERT", "CIRCLE", "LINE", "CIRCLE"]);
+  });
+
+  it("rejects an index from a different file whose first record has the same type but a different length (Codex final review, High 1)", () => {
+    const wrap = (body: string) => encode(`0\nSECTION\n2\nENTITIES\n${body}0\nENDSEC\n0\nEOF\n`);
+    const a = wrap("0\nLINE\n1\nAAAA\n0\nLINE\n1\nB\n");
+    const b = wrap("0\nLINE\n1\nA\n0\nLINE\n1\nBBBB\n");
+    expect(a.length).toBe(b.length);
+    expect(() => applyDxfEdits({ bytes: b, index: indexDxf(a) }, { remove: new Set([0]) })).toThrow("内容が違います");
+    // 正しい組なら、記録0だけが消える
+    expect(decode(applyDxfEdits({ bytes: b, index: indexDxf(b) }, { remove: new Set([0]) }))).toBe("0\nSECTION\n2\nENTITIES\n0\nLINE\n1\nBBBB\n0\nENDSEC\n0\nEOF\n");
   });
 
   it("accepts complete records, including an old-style POLYLINE with its VERTEX and SEQEND", () => {
@@ -134,7 +159,7 @@ describe("applyDxfEdits", () => {
         decode(bytes.subarray(records[1].end)),
     );
     expect(swapped.length).toBe(bytes.length);
-    expect(() => applyDxfEdits({ bytes: swapped, index }, { remove: new Set([1]) })).toThrow("先頭が一致しません");
+    expect(() => applyDxfEdits({ bytes: swapped, index }, { remove: new Set([1]) })).toThrow("内容が違います");
   });
 
   it("refuses to edit a drawing whose structure is broken (Codex finding 3)", () => {

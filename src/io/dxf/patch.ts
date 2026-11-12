@@ -1,7 +1,7 @@
 // DXFの元のバイト列に、図形の記録の差し替え・削除だけを適用して、新しいバイト列を作る。
 // 触っていない記録・未対応の図形・ほかのセクションは、1バイトも変えずに出力される(要件17・79・80)。
 // データ破損を防ぐため、少しでも怪しい入力(構造に問題がある図面、合わない索引、不完全な差し替え)はエラーにして止める。
-import { acceptSubRecord, isSubRecordType, recordType, sequenceFor } from "./rawIndex";
+import { acceptSubRecord, applyOwnGroup, computeContentHash, isSubRecordType, parseGroupCode, recordType, sequenceFor } from "./rawIndex";
 import type { DxfRawIndex } from "./rawIndex";
 
 export type DxfEdits = {
@@ -25,7 +25,6 @@ const TAB = 0x09;
 /** 図形の記録として差し替えてはいけない、構造の記録の種類 */
 const STRUCTURAL_TYPES = new Set(["SECTION", "ENDSEC", "EOF", "TABLE", "ENDTAB", "BLOCK", "ENDBLK", "CLASS"]);
 const RECORD_TYPE_PATTERN = /^[A-Z0-9_$]+$/;
-const GROUP_CODE_PATTERN = /^-?\d{1,4}$/;
 
 /** バイト列を行に分ける(各行の前後の空白・CRは除く)。ASCIIとして読むのは、グループコードと種類の行だけ */
 function splitLines(bytes: Uint8Array): Array<[number, number]> {
@@ -62,9 +61,15 @@ export function validateRecordBytes(record: Uint8Array): string | null {
 
   let sequence = sequenceFor("");
   for (let i = 0; i < lines.length; i += 2) {
-    const code = ascii(record, lines[i]);
-    if (!GROUP_CODE_PATTERN.test(code)) return `グループコードが数値ではありません: ${code}`;
-    if (code !== "0") continue;
+    const codeText = ascii(record, lines[i]);
+    // 索引と同じ解釈で、整数として読む(「00」「-0」も0。文字列の"0"だけを見ると、別表記で検証をすり抜けられる)
+    const code = parseGroupCode(codeText);
+    if (Number.isNaN(code)) return `グループコードが整数ではありません: ${codeText}`;
+    if (code !== 0) {
+      if (i === 0) return "記録が、グループコード0の行から始まっていません";
+      sequence = applyOwnGroup(sequence, code, ascii(record, lines[i + 1]));
+      continue;
+    }
     const type = ascii(record, lines[i + 1]);
     if (i === 0) {
       if (!RECORD_TYPE_PATTERN.test(type)) return `図形の種類として正しくありません: ${type}`;
@@ -78,7 +83,6 @@ export function validateRecordBytes(record: Uint8Array): string | null {
     sequence = next;
   }
   if (sequence.open) return "子の記録が SEQEND で閉じていません";
-  if (ascii(record, lines[0]) !== "0") return "記録が、グループコード0の行から始まっていません";
   return null;
 }
 
@@ -103,6 +107,11 @@ export function applyDxfEdits(target: DxfPatchTarget, edits: DxfEdits): Uint8Arr
   if (replace.size === 0 && remove.size === 0) return bytes;
   if (index.malformed !== null) throw new Error(`構造に問題がある図面は編集できません: ${index.malformed}`);
   if (bytes.length !== index.byteLength) throw new Error("索引が、このバイト列のものではありません(長さが違います)");
+  // 長さと先頭が同じでも、中身(記録の境界)が違う別のバイト列を取り違えないよう、内容全体の指紋を照合する
+  const hash = computeContentHash(bytes);
+  if (hash[0] !== index.contentHash[0] || hash[1] !== index.contentHash[1]) {
+    throw new Error("索引が、このバイト列のものではありません(内容が違います)");
+  }
 
   const touched = new Set<number>();
   for (const position of [...replace.keys(), ...remove]) {

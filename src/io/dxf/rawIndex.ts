@@ -4,19 +4,25 @@
 //
 // 索引は数値の配列(型付き配列)だけで持つ。記録ごとにオブジェクトを作ると、数万〜数十万個になり、
 // ワーカーからメインスレッドへの受け渡し(構造化複製)で読み込みが目に見えて遅くなるため。
+//
+// 構造に少しでも問題があれば malformed に記録する。問題がある図面は、記録の境界を信用できないので編集不可にする。
 
 const NEWLINE = 0x0a;
 const CARRIAGE_RETURN = 0x0d;
 const SPACE = 0x20;
 const TAB = 0x09;
-const DIGIT_ZERO = 0x30;
-const DIGIT_TWO = 0x32;
-const DIGIT_FIVE = 0x35;
+const MINUS = 0x2d;
 
 const encode = (text: string) => Uint8Array.from(text, (char) => char.charCodeAt(0));
 const SECTION = encode("SECTION");
 const ENDSEC = encode("ENDSEC");
 const ENTITIES = encode("ENTITIES");
+const EOF = encode("EOF");
+
+/** DXFのコメント行のグループコード。セクションの外にあってもよい */
+const COMMENT_GROUP_CODE = 999;
+/** グループコードの桁数の上限(DXFのグループコードは0〜1071) */
+const MAX_GROUP_CODE_DIGITS = 6;
 
 /** 親の記録の一部として扱う種類(旧形式のPOLYLINEの頂点・終端、INSERTの属性) */
 const SUB_RECORD_TYPES = new Set(["VERTEX", "SEQEND", "ATTRIB"]);
@@ -26,7 +32,7 @@ export const isSubRecordType = (type: string): boolean => SUB_RECORD_TYPES.has(t
 /**
  * 子の記録の並びの状態。DXFの規則は次の2つだけ:
  *   POLYLINE → VERTEX* → SEQEND(SEQENDは必須)
- *   INSERT → ATTRIB+ → SEQEND(属性があるときだけ。属性が無いINSERTには子が無い)
+ *   INSERT → ATTRIB+ → SEQEND(属性があるときだけ。グループコード66が0以外なら、属性が続くという宣言)
  */
 export type SubRecordSequence = {
   readonly parent: "POLYLINE" | "INSERT" | null;
@@ -58,6 +64,18 @@ export function acceptSubRecord(sequence: SubRecordSequence, type: string): SubR
   return null;
 }
 
+/**
+ * 記録自身のグループ(子の記録より前)を、並びの状態に反映する。
+ * INSERTのグループコード66が0以外なら「属性(ATTRIB)が続き、SEQENDで閉じる」という宣言なので、閉じる必要がある状態にする。
+ */
+export function applyOwnGroup(sequence: SubRecordSequence, code: number, value: string): SubRecordSequence {
+  if (sequence.parent === "INSERT" && !sequence.hasChildren && code === 66) {
+    const flag = Number(value.trim());
+    if (Number.isFinite(flag) && flag !== 0) return { ...sequence, open: true };
+  }
+  return sequence;
+}
+
 /** ハンドルの16進数が、doubleで正確に表せる最大の桁数(13桁 = 52bit) */
 const MAX_HANDLE_HEX_DIGITS = 13;
 /** ハンドルが無い(または読み取れない)ことを表す値 */
@@ -73,6 +91,8 @@ export type DxfSectionRange = {
 
 export type DxfRawIndex = {
   byteLength: number;
+  /** 元のバイト列全体の指紋(2つの32bitハッシュ)。別のバイト列と取り違えていないかの照合に使う */
+  contentHash: readonly [number, number];
   /** 行の終わり。保存時に新しい行を足すとき、元と同じにする */
   eol: "\r\n" | "\n";
   sections: DxfSectionRange[];
@@ -113,6 +133,21 @@ export function recordHandle(index: DxfRawIndex, position: number): string | nul
   return Number.isNaN(value) ? null : value.toString(16).toUpperCase();
 }
 
+/**
+ * バイト列全体の指紋。FNV-1aを2つの異なる初期値で計算する(偶然の一致は約2^-64)。
+ * 索引と、編集するバイト列の取り違えを見つけるためのもの(改ざん対策ではない)。
+ */
+export function computeContentHash(bytes: Uint8Array): [number, number] {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193 ^ 0x5bd1e995;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    h1 = Math.imul(h1 ^ b, 0x01000193);
+    h2 = Math.imul(h2 ^ b, 0x01000193) ^ (h2 >>> 15);
+  }
+  return [h1 >>> 0, h2 >>> 0];
+}
+
 /** bytes[start,end)の先頭の空白・タブを除いた、開始位置 */
 function trimStart(bytes: Uint8Array, start: number, end: number): number {
   let s = start;
@@ -138,6 +173,33 @@ function asciiString(bytes: Uint8Array, s: number, e: number): string {
   return text;
 }
 
+/**
+ * グループコードの行(前後の空白を除いた bytes[s,e))を整数として読む。整数でなければNaN。
+ * 「00」「000」「-0」なども0として読む(dxf-parserなど、数値として読む側と同じ解釈にするため)。
+ */
+function groupCodeValue(bytes: Uint8Array, s: number, e: number): number {
+  let i = s;
+  let negative = false;
+  if (i < e && bytes[i] === MINUS) {
+    negative = true;
+    i++;
+  }
+  if (i >= e || e - i > MAX_GROUP_CODE_DIGITS) return Number.NaN;
+  let value = 0;
+  for (; i < e; i++) {
+    const c = bytes[i];
+    if (c < 0x30 || c > 0x39) return Number.NaN;
+    value = value * 10 + (c - 0x30);
+  }
+  return negative ? -value : value;
+}
+
+/** グループコードの文字列を整数として読む(差し替える記録の検証用。索引と同じ解釈)。整数でなければNaN */
+export function parseGroupCode(text: string): number {
+  const bytes = encode(text);
+  return groupCodeValue(bytes, trimStart(bytes, 0, bytes.length), trimEnd(bytes, 0, bytes.length));
+}
+
 /** 16進数の文字をbytes[s,e)から読む。16進数でない文字がある、または桁が多すぎるときはNO_HANDLE */
 function hexValue(bytes: Uint8Array, s: number, e: number): number {
   const length = e - s;
@@ -155,9 +217,11 @@ function hexValue(bytes: Uint8Array, s: number, e: number): number {
   return value;
 }
 
+type SectionState = "outside" | "awaitingName" | "inSection";
+
 /**
  * DXFのバイト列を走査して索引を作る。壊れたファイルでも例外は投げず、読み取れた範囲だけを返す
- * (索引が空でも、ビューアの表示には影響しない)。
+ * (索引が空でも、ビューアの表示には影響しない)。構造の問題は malformed に記録する。
  */
 export function indexDxf(bytes: Uint8Array): DxfRawIndex {
   if (bytes.length > 0xffffffff) throw new Error("ファイルが大きすぎて索引を作れません(4GBを超えています)");
@@ -178,11 +242,12 @@ export function indexDxf(bytes: Uint8Array): DxfRawIndex {
   };
 
   let position = 0;
-  let sectionName: string | null = null;
+  let state: SectionState = "outside";
+  let sectionName = "";
   let sectionStart = -1;
-  let expectingSectionName = false;
   let inEntities = false;
   let entitiesSeen = false;
+  let eofSeen = false;
   let current = -1; // 現在の記録の位置(starts/ends/... の添え字)。無ければ-1
   let currentType: string | null = null;
   let sequence: SubRecordSequence = NO_SEQUENCE;
@@ -235,32 +300,68 @@ export function indexDxf(bytes: Uint8Array): DxfRawIndex {
     if (valueEnd === -1) valueEnd = bytes.length;
     position = Math.min(valueEnd + 1, bytes.length);
 
-    // グループコードの行を、1度だけ前後の空白を除いて見る(ほとんどの行は、数字1〜3桁)
+    // グループコードを整数として読む(ほとんどの行は1〜3桁)
     const cs = trimStart(bytes, codeStart, codeEnd);
     const ce = trimEnd(bytes, cs, codeEnd);
-    const codeLength = ce - cs;
-    const codeByte = codeLength === 1 ? bytes[cs] : 0;
+    const code = groupCodeValue(bytes, cs, ce);
+    if (Number.isNaN(code)) {
+      markMalformed(`グループコードが整数ではありません(${codeStart}バイト目)`);
+      continue;
+    }
 
-    if (codeByte === DIGIT_ZERO) {
+    if (state === "awaitingName") {
+      if (code === 2) {
+        const vs = trimStart(bytes, valueStart, valueEnd);
+        const ve = trimEnd(bytes, vs, valueEnd);
+        sectionName = asciiString(bytes, vs, ve);
+        state = "inSection";
+        inEntities = equalsAscii(bytes, vs, ve, ENTITIES);
+        if (inEntities) {
+          if (entitiesSeen) markMalformed("ENTITIES セクションが2つあります");
+          entitiesSeen = true;
+        }
+        continue;
+      }
+      // 名前の無いセクション。中身は、名前の無いセクションとして読み進める
+      markMalformed("SECTION の直後に、セクション名(グループコード2)がありません");
+      state = "inSection";
+      sectionName = "";
+      inEntities = false;
+    }
+
+    if (code === 0) {
       const vs = trimStart(bytes, valueStart, valueEnd);
       const ve = trimEnd(bytes, vs, valueEnd);
 
       if (equalsAscii(bytes, vs, ve, SECTION)) {
-        if (inEntities) markMalformed("ENTITIES セクションが ENDSEC で閉じられる前に、次の SECTION が始まっています");
+        if (state !== "outside") markMalformed("前のセクションが ENDSEC で閉じられる前に、次の SECTION が始まっています");
         closeCurrent(codeStart);
         inEntities = false;
+        state = "awaitingName";
         sectionStart = codeStart;
-        expectingSectionName = true;
-        sectionName = null;
+        sectionName = "";
         continue;
       }
       if (equalsAscii(bytes, vs, ve, ENDSEC)) {
+        if (state !== "inSection") {
+          markMalformed("対応する SECTION が無い ENDSEC があります");
+          continue;
+        }
         closeCurrent(codeStart);
         if (inEntities) entitiesAppendOffset = codeStart;
-        if (sectionName !== null && sectionStart >= 0) sections.push({ name: sectionName, start: sectionStart, end: position });
+        sections.push({ name: sectionName, start: sectionStart, end: position });
         inEntities = false;
-        sectionName = null;
-        sectionStart = -1;
+        state = "outside";
+        continue;
+      }
+      if (equalsAscii(bytes, vs, ve, EOF)) {
+        if (state !== "outside") markMalformed("セクションの途中で EOF になっています");
+        closeCurrent(codeStart);
+        eofSeen = true;
+        break; // EOFより後ろは、DXFとして読まれない
+      }
+      if (state === "outside") {
+        markMalformed("セクションの外に、記録があります");
         continue;
       }
       if (inEntities) {
@@ -279,24 +380,20 @@ export function indexDxf(bytes: Uint8Array): DxfRawIndex {
       continue;
     }
 
-    if (expectingSectionName && codeByte === DIGIT_TWO) {
-      const vs = trimStart(bytes, valueStart, valueEnd);
-      const ve = trimEnd(bytes, vs, valueEnd);
-      sectionName = asciiString(bytes, vs, ve);
-      expectingSectionName = false;
-      inEntities = equalsAscii(bytes, vs, ve, ENTITIES);
-      if (inEntities) {
-        if (entitiesSeen) markMalformed("ENTITIES セクションが2つあります");
-        entitiesSeen = true;
-      }
+    if (state === "outside") {
+      if (code !== COMMENT_GROUP_CODE) markMalformed("セクションの外に、データがあります");
       continue;
     }
 
-    // 記録自身のハンドル(子の記録に入る前の、最初のグループコード5)
-    if (codeByte === DIGIT_FIVE && inEntities && current >= 0 && !sequence.hasChildren && Number.isNaN(handles[current])) {
-      const vs = trimStart(bytes, valueStart, valueEnd);
-      const ve = trimEnd(bytes, vs, valueEnd);
-      handles[current] = hexValue(bytes, vs, ve);
+    // 記録自身のグループ(子の記録に入る前): ハンドル(5)と、INSERTの「属性が続く」宣言(66)
+    if (inEntities && current >= 0 && !sequence.hasChildren) {
+      if (code === 5 && Number.isNaN(handles[current])) {
+        const vs = trimStart(bytes, valueStart, valueEnd);
+        handles[current] = hexValue(bytes, vs, trimEnd(bytes, vs, valueEnd));
+      } else if (code === 66 && sequence.parent === "INSERT") {
+        const vs = trimStart(bytes, valueStart, valueEnd);
+        sequence = applyOwnGroup(sequence, code, asciiString(bytes, vs, trimEnd(bytes, vs, valueEnd)));
+      }
     }
   }
 
@@ -305,11 +402,13 @@ export function indexDxf(bytes: Uint8Array): DxfRawIndex {
     ends[current] = bytes.length;
     if (sequence.open) markMalformed(`${currentType} の子の記録が SEQEND で終わっていません(記録 ${current})`);
   }
-  if (inEntities) markMalformed("ENTITIES セクションが ENDSEC で閉じられていません");
+  if (state !== "outside") markMalformed("セクションが ENDSEC で閉じられていません");
   if (!entitiesSeen) markMalformed("ENTITIES セクションがありません");
+  if (!eofSeen) markMalformed("EOF がありません");
 
   return {
     byteLength: bytes.length,
+    contentHash: computeContentHash(bytes),
     eol,
     sections,
     recordCount: starts.length,

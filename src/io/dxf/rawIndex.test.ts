@@ -162,8 +162,42 @@ describe("indexDxf: structure checks (a broken structure makes the drawing read 
     expect(indexDxf(encode("0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nEOF\n")).malformed).toContain("ありません");
     expect(indexDxf(new Uint8Array(0)).malformed).not.toBeNull();
 
-    const danglingCode = encode(entitiesDxf([line("0", 0, 0, 1, 1)]) + "\n0\n");
+    // ENTITIESの途中で、グループコードの行だけで終わっている(値の行が無い)
+    const danglingCode = encode(["0", "SECTION", "2", "ENTITIES", "0", "LINE", "8"].join("\n"));
     expect(indexDxf(danglingCode).malformed).not.toBeNull();
+    // EOFより後ろはDXFとして読まれないので、そこにある余計な行は問題にしない
+    expect(indexDxf(encode(entitiesDxf([line("0", 0, 0, 1, 1)]) + "\n0\n")).malformed).toBeNull();
+  });
+
+  it("reads group codes as integers, so '00' or '-0' also start a record (Codex final review, High 2)", () => {
+    const bytes = encode(entitiesDxf([["0", "LINE", "8", "0", "10", "0", "20", "0"], ["00", "CIRCLE", "10", "0", "20", "0", "40", "1"], ["-0", "POINT", "10", "0", "20", "0"]]));
+    const index = indexDxf(bytes);
+    expect(listRecords(index).map((r) => r.type)).toEqual(["LINE", "CIRCLE", "POINT"]);
+    expect(index.malformed).toBeNull();
+  });
+
+  it("checks the section structure (Codex final review, Medium 3)", () => {
+    // 名前の無いSECTION。閉じた後のコード2をセクション名として読まない
+    expect(indexDxf(encode("0\nSECTION\n0\nENDSEC\n2\nENTITIES\n0\nLINE\n0\nENDSEC\n0\nEOF\n")).malformed).not.toBeNull();
+    // 整数でないグループコードの行
+    expect(indexDxf(encode(entitiesDxf([["0", "LINE", "abc", "value", "8", "0"]]))).malformed).toContain("整数ではありません");
+    // セクションの外にデータがある(コメント999は許す)
+    expect(indexDxf(encode("8\nX\n" + entitiesDxf([line("0", 0, 0, 1, 1)]))).malformed).toContain("セクションの外");
+    expect(indexDxf(encode("999\ncomment\n" + entitiesDxf([line("0", 0, 0, 1, 1)]))).malformed).toBeNull();
+    // ENDSECとSECTIONの対応がおかしい
+    expect(indexDxf(encode("0\nENDSEC\n" + entitiesDxf([])))).toMatchObject({ malformed: expect.stringContaining("SECTION が無い ENDSEC") });
+    expect(indexDxf(encode("0\nSECTION\n2\nHEADER\n" + entitiesDxf([])))).toMatchObject({ malformed: expect.stringContaining("閉じられる前に") });
+    // EOFが無い・セクションの途中でEOF
+    expect(indexDxf(encode(entitiesDxf([]).replace(/\n0\nEOF\n?$/, "\n"))).malformed).toContain("EOF がありません");
+    expect(indexDxf(encode("0\nSECTION\n2\nENTITIES\n0\nEOF\n")).malformed).toContain("セクションの途中で EOF");
+  });
+
+  it("requires SEQEND when an INSERT declares that attributes follow (code 66) (Codex final review, Medium 4)", () => {
+    const declaredNoSeqend = ["0", "INSERT", "2", "B", "66", "1"];
+    expect(indexDxf(encode(entitiesDxf([declaredNoSeqend]))).malformed).toContain("SEQEND で終わっていません");
+    expect(indexDxf(encode(entitiesDxf([["0", "INSERT", "2", "B", "66", "0"], line("0", 0, 0, 1, 1)]))).malformed).toBeNull();
+    const declaredWithAttrib = ["0", "INSERT", "2", "B", "66", "1", "0", "ATTRIB", "1", "v", "0", "SEQEND", "8", "0"];
+    expect(indexDxf(encode(entitiesDxf([declaredWithAttrib]))).malformed).toBeNull();
   });
 
   it("does not wrap around when there are more than 65,536 kinds of record types (Codex finding 5)", () => {
