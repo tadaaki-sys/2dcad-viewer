@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { DocumentSession } from "../app/document/documentSession";
+import type { PreviewShape } from "../core/commands";
 import { renderModelFromDocument } from "../app/document/renderModel";
 import { addEntitiesChangeSet, removeEntitiesChangeSet } from "../core/history";
 import { documentFromCadModel } from "../core/model";
@@ -55,7 +56,12 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("undo / redo timings on 
       const height = bounds.max.y - bounds.min.y;
       const scale = Math.min(1000 / Math.max(width, 1), 700 / Math.max(height, 1));
       const camera = cameraAt(scale, 0, 700);
-      const previewShapes = [
+      const centerX = bounds.min.x + width / 2;
+      const centerY = bounds.min.y + height / 2;
+      const previewShapes: PreviewShape[] = [
+        // 円と円弧のゴム紐(Phase 5)も、同じ描画に含めて測る
+        { kind: "circle" as const, center: { x: centerX, y: centerY }, radius: Math.max(width, height) / 3 },
+        { kind: "arc" as const, center: { x: centerX, y: centerY }, radius: Math.max(width, height) / 4, startAngle: 0.3, endAngle: 4 },
         {
           kind: "polyline" as const,
           points: [

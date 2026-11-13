@@ -1,6 +1,7 @@
 // アプリに最初から入っているコマンド。React にも画面にも依存しない(依頼を返すだけ)。
 // 依頼(AppRequest)を実際に実行するのは画面の側(App.tsx)。
 import { CommandRegistry, CommandSession } from "../../core/commands";
+import { CIRCLE_ARC_COMMANDS } from "./circleArcCommands";
 import { DRAW_COMMANDS } from "./drawCommands";
 import { formatCoordinate } from "./format";
 import { NO_DOCUMENT_MESSAGE } from "./types";
@@ -43,6 +44,7 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
   documentCommand("UNDO", ["U"], "元に戻す", { type: "undo" }),
   documentCommand("REDO", [], "やり直し", { type: "redo" }),
   ...DRAW_COMMANDS,
+  ...CIRCLE_ARC_COMMANDS,
   documentCommand("TOFRONT", [], "選択中の新しい図形を最前面へ", { type: "reorder", direction: "front" }),
   documentCommand("TOBACK", [], "選択中の新しい図形を最背面へ", { type: "reorder", direction: "back" }),
   {

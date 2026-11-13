@@ -13,7 +13,7 @@ type Step = PromptStep<AppRequest>;
 type Output = CommandOutput<AppRequest>;
 
 /** 描けるか確かめて、描く見た目を返す。描けないときは、理由のメッセージを返す */
-function drawingStyleOf(context: AppCommandContext): { ok: true; style: DrawingStyle } | { ok: false; message: string } {
+export function drawingStyleOf(context: AppCommandContext): { ok: true; style: DrawingStyle } | { ok: false; message: string } {
   if (!context.isDocumentOpen) return { ok: false, message: NO_DOCUMENT_MESSAGE };
   if (!context.drawTarget.ok) return { ok: false, message: context.drawTarget.reason };
   return { ok: true, style: { layer: context.drawTarget.layer, color: context.drawTarget.color } };

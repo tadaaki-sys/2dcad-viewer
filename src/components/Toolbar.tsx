@@ -1,7 +1,7 @@
 import "./Toolbar.css";
 
 /** ツールバーから動かす作図コマンド */
-export type DrawCommandName = "LINE" | "PLINE" | "RECT";
+export type DrawCommandName = "LINE" | "PLINE" | "RECT" | "CIRCLE" | "ARC";
 
 type ToolbarProps = {
   isDocumentOpen: boolean;
@@ -26,6 +26,8 @@ const DRAW_BUTTONS: ReadonlyArray<{ name: DrawCommandName; label: string; title:
   { name: "LINE", label: "線", title: "線を描く(LINE)" },
   { name: "PLINE", label: "ポリライン", title: "ポリラインを描く(PLINE)" },
   { name: "RECT", label: "長方形", title: "長方形を描く(RECT)" },
+  { name: "CIRCLE", label: "円", title: "円を描く(CIRCLE)" },
+  { name: "ARC", label: "円弧", title: "円弧を描く(ARC)" },
 ];
 
 export function Toolbar({

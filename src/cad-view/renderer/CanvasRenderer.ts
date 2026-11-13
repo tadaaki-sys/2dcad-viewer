@@ -284,12 +284,36 @@ function drawMeasurementMarker(ctx: CanvasRenderingContext2D, screenPoint: Point
 }
 
 /** 作図中のゴム紐。白い破線で、図面の線と区別できるようにする */
+/** ゴム紐の円・円弧。円弧は、図面の円弧(ARC)と同じ向き(Y軸が反転しているため、角度の符号が逆)で描く */
+function drawPreviewRound(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  shape: Extract<PreviewShape, { kind: "circle" | "arc" }>,
+): void {
+  const center = camera.worldToScreen(shape.center);
+  const radius = shape.radius * camera.scale;
+  if (!Number.isFinite(center.x + center.y + radius) || radius <= 0) return;
+  ctx.beginPath();
+  if (shape.kind === "circle") {
+    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+  } else {
+    const span = normalizeArcSpan(shape.startAngle, shape.endAngle);
+    ctx.moveTo(center.x + radius * Math.cos(shape.startAngle), center.y - radius * Math.sin(shape.startAngle));
+    ctx.arc(center.x, center.y, radius, -shape.startAngle, -(shape.startAngle + span), true);
+  }
+  ctx.stroke();
+}
+
 function drawPreviewShapes(ctx: CanvasRenderingContext2D, camera: Camera, shapes: readonly PreviewShape[]): void {
   ctx.save();
   ctx.strokeStyle = PREVIEW_COLOR;
   ctx.lineWidth = 1;
   ctx.setLineDash([6, 4]);
   for (const shape of shapes) {
+    if (shape.kind === "circle" || shape.kind === "arc") {
+      drawPreviewRound(ctx, camera, shape);
+      continue;
+    }
     if (shape.points.length < 2) continue;
     ctx.beginPath();
     shape.points.forEach((point, index) => {

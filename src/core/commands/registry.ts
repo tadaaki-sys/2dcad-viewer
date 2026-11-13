@@ -16,7 +16,11 @@ export type EnterInput = { kind: "enter" };
 export type CommandInput = PointInput | TextInput | DistanceInput | KeywordInput | EnterInput;
 
 /** ゴム紐(描いている途中の仮の図形)。形式に依存しない折れ線で表す。図面のデータではなく、重ねて描くだけ */
-export type PreviewShape = { kind: "polyline"; points: readonly Point2D[]; closed: boolean };
+export type PreviewShape =
+  | { kind: "polyline"; points: readonly Point2D[]; closed: boolean }
+  | { kind: "circle"; center: Point2D; radius: number }
+  /** 円弧。角度はラジアンで、始点から終点へ反時計回り(図面の円弧と同じ向き) */
+  | { kind: "arc"; center: Point2D; radius: number; startAngle: number; endAngle: number };
 
 /** 段階の結果。メッセージ(コマンドラインに表示)と、アプリへの依頼(R)を返せる */
 export type CommandOutput<R> = {
@@ -59,7 +63,12 @@ export type PromptStep<R> =
       KeywordOptions & {
         /** 待っている入力。point は図面のクリックでも入力できる */
         expect: "point";
-        onInput: (input: PointInput | KeywordInput | EnterInput) => CommandStep<R>;
+        /**
+         * true なら、数値だけの入力(例: 500)も受け取る(DistanceInput)。半径のように、点の指示でも数値でも答えられる段階用。
+         * 指定しない段階は、数値だけの入力をエラーにする
+         */
+        acceptsDistance?: boolean;
+        onInput: (input: PointInput | KeywordInput | EnterInput | DistanceInput) => CommandStep<R>;
         /** カーソル位置に応じたゴム紐を返す(図面を変更せず、重ねて描く) */
         preview?: (cursor: Point2D) => readonly PreviewShape[];
       })

@@ -145,6 +145,9 @@ export class CommandSession<R, C> {
     const parsed = parseCoordinateInput(text, this.lastPoint);
     if (!parsed.ok) return this.reprompt(running, parsed.error);
     if (step.expect === "point") {
+      if (parsed.kind === "distance" && step.acceptsDistance === true) {
+        return this.advance(running.name, step.onInput({ kind: "distance", value: parsed.value }));
+      }
       if (parsed.kind !== "point") {
         return this.reprompt(running, "点の座標を入力するか、図面をクリックしてください(例: 1000,500)");
       }

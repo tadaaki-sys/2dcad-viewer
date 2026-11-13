@@ -1,6 +1,7 @@
-// 作図コマンドが作る、新しい図形(線・ポリライン・長方形)。React にも画面にも依存しない。
+// 作図コマンドが作る、新しい図形(線・ポリライン・長方形・円・円弧)。React にも画面にも依存しない。
 // 色は、取り込んだ図形と同じく、レイヤーの色を数値にして持つ(保存の Phase で、レイヤー色の指定(BYLAYER)へ戻す)。
-import type { CadLine, CadPolyline, Point2D } from "../../types/cad";
+import type { ArcShape } from "../../core/geometry/construct";
+import type { CadArc, CadCircle, CadLine, CadPolyline, Point2D } from "../../types/cad";
 
 /** 新しい図形の見た目(現在のレイヤーと、その色) */
 export type DrawingStyle = { layer: string; color: string };
@@ -25,6 +26,24 @@ export function makePolyline(id: string, points: readonly Point2D[], closed: boo
     color: style.color,
     vertices: points.map((p) => ({ x: p.x, y: p.y })),
     closed,
+  };
+}
+
+export function makeCircle(id: string, center: Point2D, radius: number, style: DrawingStyle): CadCircle {
+  return { id, type: "CIRCLE", layer: style.layer, color: style.color, center: { ...center }, radius };
+}
+
+/** 円弧。角度はラジアンで、始点から終点へ反時計回り(DXFのARCと同じ) */
+export function makeArc(id: string, arc: ArcShape, style: DrawingStyle): CadArc {
+  return {
+    id,
+    type: "ARC",
+    layer: style.layer,
+    color: style.color,
+    center: { ...arc.center },
+    radius: arc.radius,
+    startAngle: arc.startAngle,
+    endAngle: arc.endAngle,
   };
 }
 

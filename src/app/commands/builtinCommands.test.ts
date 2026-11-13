@@ -16,7 +16,7 @@ function session(isDocumentOpen = true) {
 describe("built-in commands", () => {
   it("registers every command without name conflicts", () => {
     const registry = createAppCommandRegistry();
-    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "TOFRONT", "TOBACK", "ID"]);
+    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TOFRONT", "TOBACK", "ID"]);
     expect(BUILTIN_COMMANDS.every((d) => d.description.length > 0)).toBe(true);
   });
 
