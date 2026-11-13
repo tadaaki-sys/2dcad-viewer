@@ -15,9 +15,14 @@ type CommandLineProps = {
   onSubmit: (text: string) => void;
   /** Escで、実行中のコマンドを取り消す */
   onCancel: () => void;
+  /**
+   * Ctrl+Zが押されたとき。作図中に「1点戻す」として使うなど、コマンドが受け取れば true を返す。
+   * true なら、入力欄の文字の取り消し(ブラウザ標準)は行わない。false なら、標準のまま
+   */
+  onUndoShortcut?: () => boolean;
 };
 
-export function CommandLine({ log, active, inputRef, onSubmit, onCancel }: CommandLineProps) {
+export function CommandLine({ log, active, inputRef, onSubmit, onCancel, onUndoShortcut }: CommandLineProps) {
   const [text, setText] = useState("");
   const [history] = useState(() => new CommandHistory());
   const logRef = useRef<HTMLDivElement>(null);
@@ -41,6 +46,10 @@ export function CommandLine({ log, active, inputRef, onSubmit, onCancel }: Comma
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     // 日本語入力の変換を確定するEnter・Esc・矢印は、ここでは扱わない
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z") {
+      if (onUndoShortcut?.()) event.preventDefault();
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault();
       const submitted = text;

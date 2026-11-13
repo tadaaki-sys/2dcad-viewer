@@ -18,7 +18,7 @@ import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./io/
 import type { CadEntity, CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
 import { documentFromCadModel, hasEntity } from "./core/model";
 import { describeHistoryOutcome, DOCUMENT_NOT_READY_MESSAGE, DocumentSession } from "./app/document/documentSession";
-import type { DocumentChange } from "./app/document/documentSession";
+import type { DocumentChange, DocumentSessionState } from "./app/document/documentSession";
 import { renderModelFromDocument } from "./app/document/renderModel";
 import type { ActiveCommand, SessionResult } from "./core/commands";
 import { createAppCommands } from "./app/commands/builtinCommands";
@@ -49,6 +49,8 @@ function historyShortcutOf(event: KeyboardEvent): "undo" | "redo" | null {
   if (key === "y" && !event.shiftKey) return "redo";
   return null;
 }
+
+const NO_HISTORY_STATE: DocumentSessionState = { canUndo: false, canRedo: false, isDirty: false };
 
 /** コマンドラインに残すメッセージの最大行数 */
 const COMMAND_LOG_LIMIT = 100;
@@ -113,6 +115,10 @@ export default function App() {
   const [currentLayerName, setCurrentLayerName] = useState<string | null>(null);
   // ドキュメントと履歴の準備(元データの読み込み)が終わっていて、編集できるか
   const [isDocumentEditable, setIsDocumentEditable] = useState(false);
+  // 元に戻す・やり直しができるか、未保存の変更があるか(ボタンの有効・無効と、未保存の表示・確認に使う)
+  const [sessionState, setSessionState] = useState<DocumentSessionState>(NO_HISTORY_STATE);
+  // コマンドの状態が変わるたびに増える番号(ゴム紐を作り直すきっかけ)
+  const [commandRevision, setCommandRevision] = useState(0);
   useEffect(() => {
     commands.setContext({
       isDocumentOpen,
@@ -138,6 +144,7 @@ export default function App() {
   /** 図面(ドキュメント)が変わった(変更・Undo・Redo)ので、表示用のモデルを作り直して画面へ反映する */
   const handleDocumentChange = useCallback((change: DocumentChange) => {
     setCadModel(renderModelFromDocument(change.document));
+    setSessionState(change.state);
     // 消えた図形が選択に残らないようにする(選択が変わらないときは、同じ集合のままにして余計な再描画を避ける)
     setSelectedEntityIds((previous) => {
       const kept = [...previous].filter((id) => hasEntity(change.document, id));
@@ -179,6 +186,7 @@ export default function App() {
         sourceRef.current = null;
         documentSessionRef.current = null;
         setIsDocumentEditable(false);
+        setSessionState(NO_HISTORY_STATE);
         setCurrentLayerName(defaultLayerName(message.cadModel.layers));
         setDrawingKey((key) => key + 1);
         setSourceSummary(null);
@@ -199,6 +207,7 @@ export default function App() {
           session.subscribe(handleDocumentChange);
           documentSessionRef.current = session;
           setIsDocumentEditable(true);
+          setSessionState(session.state);
         }
         pendingModel = null;
         setSourceSummary(summarizeSource(message.source));
@@ -250,6 +259,7 @@ export default function App() {
     sourceRef.current = null;
     documentSessionRef.current = null;
     setIsDocumentEditable(false);
+    setSessionState(NO_HISTORY_STATE);
     setSourceSummary(null);
     setCursorWorld(null);
     setSelectedEntityIds(new Set());
@@ -350,6 +360,22 @@ export default function App() {
     [appendCommandLog],
   );
 
+  /**
+   * 未保存の変更があるとき、図面を閉じる・別の図面を開く前に確認する。続けてよければ true。
+   * (保存の機能は、まだ無い。確認なしに閉じると、描いたものを失う)
+   */
+  const confirmDiscardChanges = useCallback(
+    (action: "close" | "open"): boolean => {
+      if (!sessionState.isDirty) return true;
+      const message =
+        action === "close"
+          ? "未保存の変更があります。図面を閉じると、変更は失われます(保存の機能は、まだありません)。閉じますか?"
+          : "未保存の変更があります。別の図面を開くと、変更は失われます(保存の機能は、まだありません)。開きますか?";
+      return window.confirm(message);
+    },
+    [sessionState.isDirty],
+  );
+
   /** 作図コマンドが作った図形を、描画順の末尾(最前面)へ追加する(Undoの1段階) */
   const applyNewEntities = useCallback(
     (entities: readonly CadEntity[], label: string) => {
@@ -398,10 +424,10 @@ export default function App() {
     (request: AppRequest) => {
       switch (request.type) {
         case "openFile":
-          handleOpenFileRequest();
+          if (confirmDiscardChanges("open")) handleOpenFileRequest();
           break;
         case "closeDocument":
-          handleCloseDocument();
+          if (confirmDiscardChanges("close")) handleCloseDocument();
           break;
         case "fitDrawing":
           handleFitDrawing();
@@ -435,6 +461,7 @@ export default function App() {
       performHistoryStep,
       applyNewEntities,
       performReorder,
+      confirmDiscardChanges,
     ],
   );
 
@@ -444,6 +471,7 @@ export default function App() {
       const lines = echo === undefined ? result.messages : [`> ${echo}`, ...result.messages];
       appendCommandLog(lines);
       setActiveCommand(result.active);
+      setCommandRevision((revision) => revision + 1);
       for (const request of result.requests) executeRequest(request);
     },
     [appendCommandLog, executeRequest],
@@ -549,6 +577,28 @@ export default function App() {
     handleDeleteMeasurement,
   ]);
 
+  /** コマンドラインの入力欄でのCtrl+Z。作図中なら「1点戻す(U)」として受け取る。受け取れないときは false(入力欄の文字の取り消し) */
+  const handleCommandLineUndoShortcut = useCallback((): boolean => {
+    const active = commandSession.active;
+    if (active === null || !active.keywords.includes("U")) return false;
+    applyCommandResult(commandSession.submitKeyword("U"));
+    return true;
+  }, [applyCommandResult, commandSession]);
+
+  /** 作図中のゴム紐(カーソル位置に応じた仮の図形)。図面のデータは変えない */
+  const getPreview = useCallback((worldPoint: Point2D) => commandSession.previewAt(worldPoint), [commandSession]);
+
+  // 未保存の変更があるまま、ページを閉じる・再読み込みしようとしたときに、ブラウザの確認を出す
+  useEffect(() => {
+    if (!sessionState.isDirty) return;
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [sessionState.isDirty]);
+
   // 開発サーバーのときだけ、E2Eテスト用の入口(window.__cadDev)を用意する。本番ビルドには含まれない
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -595,6 +645,13 @@ export default function App() {
       <Toolbar
         isDocumentOpen={isDocumentOpen}
         isMeasurementMode={isMeasurementMode}
+        isEditable={isDocumentEditable}
+        canUndo={sessionState.canUndo}
+        canRedo={sessionState.canRedo}
+        activeCommandName={activeCommand?.name ?? null}
+        onDraw={runCommand}
+        onUndo={() => runCommand("UNDO")}
+        onRedo={() => runCommand("REDO")}
         onOpenFile={() => runCommand("OPEN")}
         onCloseDocument={() => runCommand("CLOSE")}
         onToggleMeasurementMode={() => runCommand("MEASURE")}
@@ -609,7 +666,12 @@ export default function App() {
           onWidthChange={setLeftWidth}
           onCollapsedChange={setLeftCollapsed}
         >
-          <LayerPanel layers={layers} onToggleVisibility={handleToggleLayerVisibility} />
+          <LayerPanel
+            layers={layers}
+            currentLayerName={currentLayerName}
+            onToggleVisibility={handleToggleLayerVisibility}
+            onSelectCurrent={setCurrentLayerName}
+          />
         </ResizablePanel>
 
         <div className="app-cad-layout__canvas-area">
@@ -628,6 +690,8 @@ export default function App() {
             onMeasurementComplete={handleMeasurementComplete}
             onMeasurementSelect={handleMeasurementSelect}
             onPointPick={handlePointPick}
+            getPreview={getPreview}
+            previewRevision={commandRevision}
             onCursorMove={handleCursorMove}
           />
           {import.meta.env.DEV && (
@@ -669,8 +733,15 @@ export default function App() {
         inputRef={commandInputRef}
         onSubmit={handleCommandSubmit}
         onCancel={handleCommandCancel}
+        onUndoShortcut={handleCommandLineUndoShortcut}
       />
-      <StatusBar fileInfo={fileInfo} cursorWorld={cursorWorld} stats={cadModel?.stats ?? null} />
+      <StatusBar
+        fileInfo={fileInfo}
+        cursorWorld={cursorWorld}
+        stats={cadModel?.stats ?? null}
+        isDirty={sessionState.isDirty}
+        currentLayerName={currentLayerName}
+      />
       {loadingProgress && loadStartedAt !== null && (
         <LoadingOverlay stage={loadingProgress.stage} entityCount={loadingProgress.entityCount} startedAt={loadStartedAt} />
       )}

@@ -10,6 +10,7 @@ import { findMeasurementAtPoint } from "../core/measurement/Measurement";
 import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
 import { unionOfVisibleEntityBounds } from "../core/spatial/entityBounds";
 import { isTypingTarget } from "../utils/dom";
+import type { PreviewShape } from "../core/commands";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -64,6 +65,10 @@ type CadCanvasProps = {
   onMeasurementComplete: (measurement: Measurement) => void;
   onMeasurementSelect: (measurementId: string | null) => void;
   onPointPick: (worldPoint: Point2D) => void;
+  /** 点の指示を待っているコマンドの、ゴム紐(カーソル位置に応じた仮の図形)を返す。無ければ出さない */
+  getPreview?: (worldPoint: Point2D) => readonly PreviewShape[];
+  /** コマンドの状態が変わるたびに増える番号。変わったら、いまのカーソル位置でゴム紐を作り直す */
+  previewRevision?: number;
   onCursorMove?: (worldPoint: Point2D | null) => void;
 };
 
@@ -102,6 +107,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     onMeasurementComplete,
     onMeasurementSelect,
     onPointPick,
+    getPreview,
+    previewRevision,
     onCursorMove,
   },
   ref,
@@ -114,6 +121,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const overlapCycleRef = useRef<OverlapCycleState | null>(null);
   const pendingMeasurementPointRef = useRef<Point2D | null>(null);
   const snapMarkerRef = useRef<Point2D | null>(null);
+  // 作図中のゴム紐と、そのもとになったカーソル位置(図面上。吸着後)
+  const previewRef = useRef<readonly PreviewShape[]>([]);
+  const lastPointerWorldRef = useRef<Point2D | null>(null);
   const perfRef = useRef<CadCanvasPerformanceStats & { lastDrawAt: number }>({
     renderMs: 0,
     fps: null,
@@ -143,6 +153,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     onMeasurementComplete,
     onMeasurementSelect,
     onPointPick,
+    getPreview,
     onCursorMove,
   });
   stateRef.current = {
@@ -159,6 +170,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     onMeasurementComplete,
     onMeasurementSelect,
     onPointPick,
+    getPreview,
     onCursorMove,
   };
 
@@ -196,6 +208,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       selectedMeasurementId: currentSelectedMeasurementId,
       pendingMeasurementPoint: pendingMeasurementPointRef.current,
       snapMarkerPoint: snapMarkerRef.current,
+      previewShapes: previewRef.current,
       spatialIndex: currentSpatialIndex,
     });
 
@@ -270,6 +283,17 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measurementModeEnabled]);
+
+  useEffect(() => {
+    // コマンドの状態が変わったとき(点を指示した、キーワードを入力した、コマンドが終わった)は、
+    // いまのカーソル位置でゴム紐を作り直す。点を待っていなければ消す
+    // (点を待っていないときは、古いカーソル位置を捨てる。次のコマンドで、古い位置へのゴム紐が出ないように)
+    if (!pointPickEnabled) lastPointerWorldRef.current = null;
+    const last = lastPointerWorldRef.current;
+    previewRef.current = pointPickEnabled && last !== null ? (stateRef.current.getPreview?.(last) ?? []) : [];
+    requestDraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewRevision, pointPickEnabled]);
 
   useEffect(() => {
     // 点の指示が終わったとき、測定モードでなければ吸着の目印を消す
@@ -609,11 +633,23 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       }
       const { worldPoint, snap } = findSnapAt(event.clientX, event.clientY);
       updateSnapMarker(isPanning ? null : snap ? snap.point : null);
+      if (stateRef.current.pointPickEnabled) {
+        // 作図中: カーソルの位置(吸着後)に応じて、ゴム紐を作る(図面のデータは変えず、重ねて描くだけ)
+        const cursor = snap ? snap.point : worldPoint;
+        lastPointerWorldRef.current = cursor;
+        previewRef.current = stateRef.current.getPreview?.(cursor) ?? [];
+        requestDraw();
+      }
       if (stateRef.current.onCursorMove) scheduleCursorUpdate(snap ? snap.point : worldPoint);
     }
 
     function handleMouseLeave() {
       updateSnapMarker(null);
+      if (previewRef.current.length > 0) {
+        previewRef.current = [];
+        requestDraw();
+      }
+      lastPointerWorldRef.current = null;
       scheduleCursorUpdate(null);
     }
 

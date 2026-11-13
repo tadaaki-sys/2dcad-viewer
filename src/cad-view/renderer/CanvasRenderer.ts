@@ -4,6 +4,7 @@ import { formatMm } from "../../utils/format";
 import { normalizeArcSpan, pointOnEllipse } from "../../core/geometry/geometry";
 import { lineWeightToScreenWidthPx } from "../../core/style/lineWeight";
 import type { Camera } from "../../core/view/Camera";
+import type { PreviewShape } from "../../core/commands";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 import { TEXT_LINE_HEIGHT_FACTOR } from "../../core/geometry/entityGeometry";
 import { BOUNDS_STRIDE } from "../../core/spatial/entityBounds";
@@ -16,6 +17,7 @@ const CROSSING_BOX_COLOR = "#50c878";
 const MEASUREMENT_COLOR = "#ff8c00";
 const MEASUREMENT_MARKER_RADIUS_PX = 4;
 const SNAP_MARKER_COLOR = "#00e5ff";
+const PREVIEW_COLOR = "#ffffff";
 const SNAP_MARKER_HALF_SIZE_PX = 5;
 const MEASUREMENT_FONT = "11px sans-serif";
 
@@ -281,6 +283,26 @@ function drawMeasurementMarker(ctx: CanvasRenderingContext2D, screenPoint: Point
   ctx.stroke();
 }
 
+/** 作図中のゴム紐。白い破線で、図面の線と区別できるようにする */
+function drawPreviewShapes(ctx: CanvasRenderingContext2D, camera: Camera, shapes: readonly PreviewShape[]): void {
+  ctx.save();
+  ctx.strokeStyle = PREVIEW_COLOR;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
+  for (const shape of shapes) {
+    if (shape.points.length < 2) continue;
+    ctx.beginPath();
+    shape.points.forEach((point, index) => {
+      const screen = camera.worldToScreen(point);
+      if (index === 0) ctx.moveTo(screen.x, screen.y);
+      else ctx.lineTo(screen.x, screen.y);
+    });
+    if (shape.closed) ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawMeasurementLabel(ctx: CanvasRenderingContext2D, screenPoint: Point2D, text: string): void {
   ctx.fillText(text, screenPoint.x + 4, screenPoint.y - 4);
 }
@@ -347,6 +369,7 @@ export class CanvasRenderer implements Renderer {
     selectedMeasurementId,
     pendingMeasurementPoint,
     snapMarkerPoint,
+    previewShapes,
     spatialIndex,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
@@ -496,6 +519,10 @@ export class CanvasRenderer implements Renderer {
       ctx.strokeStyle = MEASUREMENT_COLOR;
       drawMeasurementMarker(ctx, camera.worldToScreen(pendingMeasurementPoint));
       ctx.restore();
+    }
+
+    if (previewShapes && previewShapes.length > 0) {
+      drawPreviewShapes(ctx, camera, previewShapes);
     }
 
     if (snapMarkerPoint) {

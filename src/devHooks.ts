@@ -10,6 +10,8 @@ export type CadDevHooks = {
   /** 図面の準備(元データの読み込み)が終わっていて、編集できるか */
   ready: () => boolean;
   entityCount: () => number;
+  /** 描画順での図形IDの一覧(先頭が最背面) */
+  entityOrder: () => string[];
   /** 線を1本、描画順の末尾に追加する(Undoできる変更)。追加した図形のIDを返す */
   addLine: (x1: number, y1: number, x2: number, y2: number, color?: string) => string;
   /** 図形を削除する(Undoできる変更) */
@@ -38,6 +40,7 @@ export function installDevHooks(options: { getSession: () => DocumentSession | n
   const hooks: CadDevHooks = {
     ready: () => options.getSession() !== null,
     entityCount: () => session().document.entities.length,
+    entityOrder: () => session().document.entities.map((e) => e.id),
     addLine: (x1, y1, x2, y2, color = "#ff00ff") => {
       const s = session();
       const id = s.allocateEntityId();

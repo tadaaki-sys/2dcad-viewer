@@ -51,3 +51,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.layer-panel__current {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--color-accent);
+}

@@ -69,3 +69,12 @@
   gap: 12px;
   padding: 1px 0;
 }
+
+.status-bar__dirty {
+  color: #e2a33d;
+  white-space: nowrap;
+}
+
+.status-bar__layer {
+  white-space: nowrap;
+}

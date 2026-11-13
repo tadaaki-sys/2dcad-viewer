@@ -7,9 +7,13 @@ type StatusBarProps = {
   fileInfo: DocumentInfo | null;
   cursorWorld: Point2D | null;
   stats: CadModelStats | null;
+  /** 保存した(または、開いた)時点から、図面が変わっているか */
+  isDirty: boolean;
+  /** 新しい図形を描く先(現在のレイヤー)。無ければ null */
+  currentLayerName: string | null;
 };
 
-export function StatusBar({ fileInfo, cursorWorld, stats }: StatusBarProps) {
+export function StatusBar({ fileInfo, cursorWorld, stats, isDirty, currentLayerName }: StatusBarProps) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const hasUnsupported = (stats?.unsupportedEntityCount ?? 0) > 0;
 
@@ -17,6 +21,16 @@ export function StatusBar({ fileInfo, cursorWorld, stats }: StatusBarProps) {
     <div className="status-bar">
       <div className="status-bar__left">
         <span>{fileInfo ? `${fileInfo.fileName} (${formatFileSize(fileInfo.fileSizeBytes)})` : ""}</span>
+        {isDirty && (
+          <span className="status-bar__dirty" data-testid="unsaved-indicator" title="保存の機能は、まだありません。図面を閉じると、変更は失われます">
+            ● 未保存の変更あり
+          </span>
+        )}
+        {currentLayerName !== null && (
+          <span className="status-bar__layer" data-testid="current-layer-indicator">
+            現在のレイヤー: {currentLayerName}
+          </span>
+        )}
         {stats && hasUnsupported && (
           <button
             type="button"

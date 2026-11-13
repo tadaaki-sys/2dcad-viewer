@@ -4,7 +4,7 @@
 // 失敗にするのは、正しさ(Undoで元と同じ図形の並びに戻ること)だけ。
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { DocumentSession } from "../app/document/documentSession";
 import { renderModelFromDocument } from "../app/document/renderModel";
 import { addEntitiesChangeSet, removeEntitiesChangeSet } from "../core/history";
@@ -12,6 +12,7 @@ import { documentFromCadModel } from "../core/model";
 import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
 import type { CadLine } from "../types/cad";
 import { REAL_ENABLED, REGRESSION_DIR, loadDrawing, readManifest } from "./loadDrawing";
+import { cameraAt, installRecordingPath2D, renderModel } from "./recordingContext";
 
 const manifest = REAL_ENABLED ? readManifest() : [];
 
@@ -24,6 +25,8 @@ const time = <T>(fn: () => T): { value: T; ms: number } => {
 const round = (n: number) => Math.round(n * 100) / 100;
 
 describe.skipIf(!REAL_ENABLED || manifest.length === 0)("undo / redo timings on real drawings (record only)", () => {
+  beforeAll(installRecordingPath2D);
+
   for (const entry of manifest) {
     it(`${entry.name}: add 1, remove many, undo, redo`, async () => {
       const { model } = await loadDrawing(entry.path);
@@ -45,6 +48,26 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("undo / redo timings on 
       // 追加の表示用モデル(範囲と索引)の作り直し
       const rebuild = time(() => renderModelFromDocument(session.document));
       const index = time(() => buildSpatialIndex(rebuild.value));
+
+      // 作図中のゴム紐の重ね描きの費用: 索引を作り済みのモデルを、ゴム紐あり・なしで描く(全体表示のカメラ)
+      const bounds = rebuild.value.bounds ?? { min: { x: 0, y: 0 }, max: { x: 1, y: 1 } };
+      const width = bounds.max.x - bounds.min.x;
+      const height = bounds.max.y - bounds.min.y;
+      const scale = Math.min(1000 / Math.max(width, 1), 700 / Math.max(height, 1));
+      const camera = cameraAt(scale, 0, 700);
+      const previewShapes = [
+        {
+          kind: "polyline" as const,
+          points: [
+            { x: bounds.min.x, y: bounds.min.y },
+            { x: bounds.min.x + width / 2, y: bounds.min.y + height / 3 },
+            { x: bounds.max.x, y: bounds.max.y },
+          ],
+          closed: false,
+        },
+      ];
+      const renderPlain = time(() => renderModel(rebuild.value, camera, { spatialIndex: index.value }));
+      const renderWithPreview = time(() => renderModel(rebuild.value, camera, { spatialIndex: index.value, previewShapes }));
 
       const undoAdd = time(() => session.undo());
       expect(undoAdd.value.type).toBe("done");
@@ -90,6 +113,8 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("undo / redo timings on 
         addOneMs: round(add.ms),
         rebuildRenderModelMs: round(rebuild.ms),
         buildSpatialIndexMs: round(index.ms),
+        renderFullViewMs: round(renderPlain.ms),
+        renderFullViewWithPreviewMs: round(renderWithPreview.ms),
         undoAddMs: round(undoAdd.ms),
         redoAddMs: round(redoAdd.ms),
         buildRemoveChangeSetMs: round(removeChange.ms),

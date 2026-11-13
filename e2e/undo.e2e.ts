@@ -243,6 +243,8 @@ test.describe("closing and reopening", () => {
     await addLine(page);
     expect(await page.evaluate(() => window.__cadDev!.history().canUndo)).toBe(true);
 
+    // 未保存の変更があるので、閉じる前に確認が出る(Phase 4)。ここでは、受け入れて閉じる
+    page.once("dialog", (dialog) => void dialog.accept());
     await page.getByRole("button", { name: "図面を閉じる" }).click();
     await expect(page.locator(".start-screen")).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({ name: "again.dxf", mimeType: "application/dxf", buffer: Buffer.from(factoryLayoutDxf(), "utf8") });
