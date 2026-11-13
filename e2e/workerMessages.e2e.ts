@@ -168,4 +168,38 @@ test.describe("messages from the DXF worker (controlled order)", () => {
     await expect(overlay(page)).toContainText("Source: -");
     expect((await workerState(page, 0)).terminated).toBe(true);
   });
+
+  // Codexレビュー(Phase 3・4)の指摘3: 新しい図面の読み込み中に、いまの図面を変更すると、読み込み完了時に変更が失われる
+  test("does not change the current drawing while another drawing is loading (commands and Undo are refused)", async ({ page }) => {
+    await chooseFile(page, "a.dxf");
+    await emitSuccess(page, 0, "0");
+    await emitSource(page, 0, 3);
+    await expect(page.locator(".status-bar")).toContainText("a.dxf");
+    await page.waitForFunction(() => window.__cadDev?.ready() === true);
+
+    await chooseFile(page, "b.dxf"); // 読み込みが始まる(偽のワーカーは、返信しない)
+    await expect.poll(() => page.evaluate(() => window.__fakeWorkers.length)).toBe(2);
+    await expect(page.locator(".loading-overlay")).toBeVisible();
+
+    const input = page.getByTestId("command-line-input");
+    const log = page.getByTestId("command-line-log");
+    await input.focus(); // 画面の遮断はマウスだけ。キーボードは届くので、コマンドは打てる
+    await input.fill("line");
+    await page.keyboard.press("Enter");
+    await expect(log).toContainText("図面を読み込み中です");
+    await expect(page.getByTestId("command-line-label")).toHaveText("コマンド:"); // 作図は始まらない
+    await input.fill("undo");
+    await page.keyboard.press("Enter");
+    await expect(log).toContainText("図面を読み込み中です。完了してからお試しください");
+
+    // 読み込みが終わると、新しい図面が表示され、作図できるようになる
+    await emitSuccess(page, 1, "0");
+    await emitSource(page, 1, 3);
+    await expect(page.locator(".status-bar")).toContainText("b.dxf");
+    await page.waitForFunction(() => window.__cadDev?.ready() === true);
+    await input.focus();
+    await input.fill("line");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("command-line-label")).toHaveText("LINE:");
+  });
 });

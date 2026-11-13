@@ -122,16 +122,19 @@ export default function App() {
   useEffect(() => {
     commands.setContext({
       isDocumentOpen,
-      drawTarget: isDocumentEditable
-        ? resolveDrawTarget(layers, currentLayerName)
-        : { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
+      drawTarget:
+        loadingProgress !== null
+          ? { ok: false, reason: "図面を読み込み中です。完了してからお試しください" }
+          : isDocumentEditable
+            ? resolveDrawTarget(layers, currentLayerName)
+            : { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
       allocateEntityId: () => {
         const session = documentSessionRef.current;
         if (session === null) throw new Error("図面の準備ができていません");
         return session.allocateEntityId();
       },
     });
-  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName]);
+  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress]);
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
@@ -143,8 +146,10 @@ export default function App() {
 
   /** 図面(ドキュメント)が変わった(変更・Undo・Redo)ので、表示用のモデルを作り直して画面へ反映する */
   const handleDocumentChange = useCallback((change: DocumentChange) => {
-    setCadModel(renderModelFromDocument(change.document));
     setSessionState(change.state);
+    // 履歴の破棄・保存済みの記録では、図面は変わらない(状態だけが変わる)
+    if (change.kind === "reset" || change.kind === "saved") return;
+    setCadModel(renderModelFromDocument(change.document));
     // 消えた図形が選択に残らないようにする(選択が変わらないときは、同じ集合のままにして余計な再描画を避ける)
     setSelectedEntityIds((previous) => {
       const kept = [...previous].filter((id) => hasEntity(change.document, id));
@@ -366,14 +371,16 @@ export default function App() {
    */
   const confirmDiscardChanges = useCallback(
     (action: "close" | "open"): boolean => {
-      if (!sessionState.isDirty) return true;
+      // いまの状態を、ドキュメントから直接読む。画面の状態(sessionState)は、同じ処理の中で図形を追加した直後は、まだ古い
+      // (作図の途中で「閉じる」を押すと、描きかけの図形を確定してから閉じる依頼が続くため)
+      if (!(documentSessionRef.current?.isDirty ?? false)) return true;
       const message =
         action === "close"
           ? "未保存の変更があります。図面を閉じると、変更は失われます(保存の機能は、まだありません)。閉じますか?"
           : "未保存の変更があります。別の図面を開くと、変更は失われます(保存の機能は、まだありません)。開きますか?";
       return window.confirm(message);
     },
-    [sessionState.isDirty],
+    [],
   );
 
   /** 作図コマンドが作った図形を、描画順の末尾(最前面)へ追加する(Undoの1段階) */
@@ -422,6 +429,13 @@ export default function App() {
 
   const executeRequest = useCallback(
     (request: AppRequest) => {
+      // 新しい図面を読み込んでいる間は、いまの図面を変更しない(読み込みが終わると、いまの図面と変更は置き換えられるため)
+      const changesDocument =
+        request.type === "undo" || request.type === "redo" || request.type === "addEntities" || request.type === "reorder";
+      if (changesDocument && loadingProgress !== null) {
+        appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
+        return;
+      }
       switch (request.type) {
         case "openFile":
           if (confirmDiscardChanges("open")) handleOpenFileRequest();
@@ -462,6 +476,8 @@ export default function App() {
       applyNewEntities,
       performReorder,
       confirmDiscardChanges,
+      loadingProgress,
+      appendCommandLog,
     ],
   );
 
@@ -588,16 +604,17 @@ export default function App() {
   /** 作図中のゴム紐(カーソル位置に応じた仮の図形)。図面のデータは変えない */
   const getPreview = useCallback((worldPoint: Point2D) => commandSession.previewAt(worldPoint), [commandSession]);
 
-  // 未保存の変更があるまま、ページを閉じる・再読み込みしようとしたときに、ブラウザの確認を出す
+  // 未保存の変更があるまま(または、描きかけの図形があるまま)、ページを閉じる・再読み込みしようとしたときに、ブラウザの確認を出す
+  const hasUnsavedWork = sessionState.isDirty || (activeCommand?.hasPendingChanges ?? false);
   useEffect(() => {
-    if (!sessionState.isDirty) return;
+    if (!hasUnsavedWork) return;
     function handleBeforeUnload(event: BeforeUnloadEvent) {
       event.preventDefault();
       event.returnValue = "";
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [sessionState.isDirty]);
+  }, [hasUnsavedWork]);
 
   // 開発サーバーのときだけ、E2Eテスト用の入口(window.__cadDev)を用意する。本番ビルドには含まれない
   useEffect(() => {
@@ -734,6 +751,7 @@ export default function App() {
         onSubmit={handleCommandSubmit}
         onCancel={handleCommandCancel}
         onUndoShortcut={handleCommandLineUndoShortcut}
+        resetKey={commandRevision}
       />
       <StatusBar
         fileInfo={fileInfo}

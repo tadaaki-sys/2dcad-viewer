@@ -60,6 +60,7 @@ describe("built-in commands", () => {
       keywords: [],
       acceptsEnter: false,
       hasPreview: false,
+      hasPendingChanges: false,
     });
     const done = s.submitPoint({ x: 1234.5678, y: -0.0001 });
     expect(done.messages).toEqual(["X = 1234.568, Y = 0.000"]);

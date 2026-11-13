@@ -214,7 +214,7 @@ describe("RECT", () => {
   it("draws a closed four-vertex polyline from two clicked corners", () => {
     const { session } = start();
     const first = session.submitText("rect");
-    expect(first.active).toMatchObject({ name: "RECT", expect: "point", acceptsEnter: false, hasPreview: false });
+    expect(first.active).toMatchObject({ name: "RECT", expect: "point", acceptsEnter: true, hasPreview: false });
     const second = session.submitPoint({ x: 100, y: 100 });
     expect(second.active).toMatchObject({ prompt: "対角の点を指示してください(例: @500,300)", hasPreview: true });
     const done = session.submitPoint({ x: 600, y: 400 });

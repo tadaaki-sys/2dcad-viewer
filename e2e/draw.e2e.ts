@@ -379,3 +379,83 @@ test.describe("unsaved changes", () => {
     await expect(page.locator(".start-screen")).toBeVisible();
   });
 });
+
+// ---- Codexレビュー(Phase 3・4)の指摘への対応 ----
+
+test.describe("Codex review fixes", () => {
+  const hasUnloadGuard = (page: Page) =>
+    page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+
+  test("closing while a line is half drawn commits it first, so the unsaved confirm appears (it is not skipped)", async ({ page }) => {
+    const mapping = await openEditable(page);
+    const before = await entityCount(page);
+    await typeCommand(page, "line");
+    await click(page, at(mapping, 550, 50));
+    await click(page, at(mapping, 650, 50)); // まだ確定していない(2点)
+    expect(await entityCount(page)).toBe(before);
+
+    const messages: string[] = [];
+    page.once("dialog", (dialog) => {
+      messages.push(dialog.message());
+      void dialog.dismiss();
+    });
+    await toolbarButton(page, "図面を閉じる").click();
+    await expect.poll(() => messages.length).toBe(1);
+    expect(messages[0]).toContain("未保存の変更があります");
+    // キャンセルしたので、図面は開いたまま。描いていた線は確定されて残っている(Ctrl+Zで戻せる)
+    await expect(page.locator(".start-screen")).toHaveCount(0);
+    expect(await entityCount(page)).toBe(before + 1);
+    await expect(page.getByTestId("unsaved-indicator")).toBeVisible();
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await toolbarButton(page, "図面を閉じる").click();
+    await expect(page.locator(".start-screen")).toBeVisible();
+  });
+
+  test("the page-unload guard also covers a half drawn line that is not yet in the drawing", async ({ page }) => {
+    const mapping = await openEditable(page);
+    expect(await hasUnloadGuard(page)).toBe(false);
+    await typeCommand(page, "line");
+    await click(page, at(mapping, 550, 50));
+    expect(await hasUnloadGuard(page)).toBe(false); // 1点だけ: 確定する内容は無い
+    await click(page, at(mapping, 650, 50));
+    expect(await hasUnloadGuard(page)).toBe(true); // 2点: 描きかけの線がある
+    await typeCommand(page, "u");
+    expect(await hasUnloadGuard(page)).toBe(false);
+    await click(page, at(mapping, 650, 50));
+    expect(await hasUnloadGuard(page)).toBe(true);
+    await page.keyboard.press("Escape"); // 確定すると、変更として守られる
+    expect(await hasUnloadGuard(page)).toBe(true);
+    await page.keyboard.press("Control+z");
+    expect(await hasUnloadGuard(page)).toBe(false);
+  });
+
+  test("half-typed text is dropped when a click advances the command, even if the prompt text is the same", async ({ page }) => {
+    const mapping = await openEditable(page);
+    const before = await entityCount(page);
+    await typeCommand(page, "line");
+    await click(page, at(mapping, 550, 50));
+    await click(page, at(mapping, 650, 50)); // 案内の文は、2点目と3点目で同じ
+    await input(page).fill("@10,0"); // 打ちかけ(Enterは押さない)
+    await click(page, at(mapping, 750, 50)); // 図面のクリックで、次の点へ
+    await expect(input(page)).toHaveValue("");
+    await page.keyboard.press("Enter"); // 空のEnter = 終了。打ちかけの座標が追加の点にはならない
+    await expect(log(page)).toContainText("2本の線を追加しました");
+    expect(await entityCount(page)).toBe(before + 2);
+  });
+
+  test("RECT ends with an empty Enter, drawing nothing", async ({ page }) => {
+    await openEditable(page);
+    const before = await entityCount(page);
+    await typeCommand(page, "rect");
+    await typeCommand(page, "550,50");
+    await typeCommand(page, "");
+    await expect(log(page)).toContainText("RECT を終了しました");
+    await expect(label(page)).toHaveText("コマンド:");
+    expect(await entityCount(page)).toBe(before);
+  });
+});

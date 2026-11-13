@@ -15,7 +15,12 @@ export type DocumentSessionState = {
 
 /** 図面が変わったことの知らせ */
 export type DocumentChange = {
-  kind: "apply" | "undo" | "redo";
+  /**
+   * apply / undo / redo: 図面が変わった。
+   * reset: 履歴と図面が食い違って履歴を破棄した(図面は変わらない。ボタンと未保存の状態だけが変わる)。
+   * saved: 保存済みとして覚えた(図面は変わらない。未保存の状態が変わる)。
+   */
+  kind: "apply" | "undo" | "redo" | "reset" | "saved";
   /** 変更の名前(例: 「線を追加」) */
   label: string;
   /** 変更後のドキュメント */
@@ -46,9 +51,21 @@ export class DocumentSession {
     return this.history.currentStateId !== this.savedStateId;
   }
 
-  /** いまの図面を「保存済み」として覚える(保存の Phase で、保存に成功したときに呼ぶ) */
-  markSaved(): void {
-    this.savedStateId = this.history.currentStateId;
+  /**
+   * いまの図面の状態の識別番号。保存を始める時点で控えておき、保存に成功したら markSaved に渡す。
+   * (保存している間に編集が進んでも、保存できた状態だけを「保存済み」にするため)
+   */
+  get saveToken(): number {
+    return this.history.currentStateId;
+  }
+
+  /**
+   * 保存済みとして覚える(保存の Phase で、保存に成功したときに呼ぶ)。
+   * token は、保存を始めたときの saveToken。省略すると、いまの状態を保存済みにする。購読者に、未保存の状態の変化を知らせる
+   */
+  markSaved(token: number = this.history.currentStateId): void {
+    this.savedStateId = token;
+    this.notify({ kind: "saved", label: "保存", document: this.current, state: this.state });
   }
 
   get state(): DocumentSessionState {
@@ -115,6 +132,9 @@ export class DocumentSession {
     if (outcome.type === "done") {
       this.current = outcome.document;
       this.notify({ kind, label: outcome.label, document: this.current, state: this.state });
+    } else if (outcome.type === "error") {
+      // 履歴が破棄された。図面は変わらないが、元に戻す・やり直しの可否と、未保存の状態が変わるので知らせる
+      this.notify({ kind: "reset", label: "履歴を破棄", document: this.current, state: this.state });
     }
     return outcome;
   }

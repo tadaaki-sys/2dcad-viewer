@@ -16,6 +16,8 @@ export type ActiveCommand = {
   acceptsEnter: boolean;
   /** ゴム紐(プレビュー)を出すか */
   hasPreview: boolean;
+  /** 終了すると図面の変更として確定される、描きかけの内容を持っているか */
+  hasPendingChanges: boolean;
 };
 
 export type SessionResult<R> = {
@@ -188,6 +190,7 @@ export class CommandSession<R, C> {
       keywords: step.expect === "text" ? [] : (step.keywords ?? []),
       acceptsEnter: step.expect === "text" ? false : step.acceptsEnter === true,
       hasPreview: step.expect === "point" && step.preview !== undefined,
+      hasPendingChanges: step.pending === true,
     };
   }
 

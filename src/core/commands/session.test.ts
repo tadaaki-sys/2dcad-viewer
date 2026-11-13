@@ -153,6 +153,7 @@ describe("CommandSession: point input", () => {
       keywords: [],
       acceptsEnter: false,
       hasPreview: false,
+      hasPendingChanges: false,
     });
     expect(first.messages).toEqual(["TWO first?"]);
     const second = session.submitPoint({ x: 10, y: 20 });

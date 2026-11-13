@@ -20,19 +20,21 @@ type CommandLineProps = {
    * true なら、入力欄の文字の取り消し(ブラウザ標準)は行わない。false なら、標準のまま
    */
   onUndoShortcut?: () => boolean;
+  /** 値が変わったら、入力途中の文字を捨てる(コマンドの状態が進んだとき。案内の文が同じ段階が続いても、古い文字を残さない) */
+  resetKey: number;
 };
 
-export function CommandLine({ log, active, inputRef, onSubmit, onCancel, onUndoShortcut }: CommandLineProps) {
+export function CommandLine({ log, active, inputRef, onSubmit, onCancel, onUndoShortcut, resetKey }: CommandLineProps) {
   const [text, setText] = useState("");
   const [history] = useState(() => new CommandHistory());
   const logRef = useRef<HTMLDivElement>(null);
 
-  // 実行中のコマンドや、その段階(案内)が変わったら、入力途中の文字は捨てる。
+  // コマンドの状態が進んだら(点の指示、キーワード、終了など)、入力途中の文字は捨てる。
+  // 案内の文が同じ段階が続く(LINEの2点目と3点目など)ときも、古い文字を残さない。
   // (点を図面のクリックで指示して終わったあとに、打ちかけの座標が残り、次のEnterでコマンド名として実行されないように)
-  const activeKey = active ? `${active.name}|${active.expect}|${active.prompt}` : "";
-  const [shownActiveKey, setShownActiveKey] = useState(activeKey);
-  if (shownActiveKey !== activeKey) {
-    setShownActiveKey(activeKey);
+  const [shownResetKey, setShownResetKey] = useState(resetKey);
+  if (shownResetKey !== resetKey) {
+    setShownResetKey(resetKey);
     setText("");
     history.resetCursor();
   }

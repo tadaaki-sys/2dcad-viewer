@@ -19,6 +19,8 @@ function drawingStyleOf(context: AppCommandContext): { ok: true; style: DrawingS
   return { ok: true, style: { layer: context.drawTarget.layer, color: context.drawTarget.color } };
 }
 
+const RECT_ENDED_MESSAGE = "RECT を終了しました(図形は描かれませんでした)";
+
 function samePointMessage(): string {
   return "直前の点と同じ点です。別の点を指示してください";
 }
@@ -44,6 +46,8 @@ function chainStep(points: readonly Point2D[], finish: (points: readonly Point2D
     keywords: keywordsFor(count),
     acceptsEnter: true,
     basePoint: count > 0 ? points[count - 1] : undefined,
+    // 2点以上あれば、終了すると図形になる(ページを閉じる前の確認の対象)
+    pending: count >= 2,
     preview: (cursor): readonly PreviewShape[] =>
       count > 0 ? [{ kind: "polyline", points: [...points, cursor], closed: false }] : [],
     onCancel: () => finish(points, false),
@@ -94,10 +98,13 @@ function rectangleSecondStep(context: AppCommandContext, style: DrawingStyle, fi
     type: "prompt",
     prompt: "対角の点を指示してください(例: @500,300)",
     expect: "point",
+    acceptsEnter: true,
     basePoint: first,
     preview: (cursor): readonly PreviewShape[] =>
       isDegenerateRectangle(first, cursor) ? [] : [{ kind: "polyline", points: rectangleCorners(first, cursor), closed: true }],
     onInput: (input) => {
+      // 空のEnterは、図形を作らずに終了する(Escと同じ)
+      if (input.kind === "enter") return { type: "done", messages: [RECT_ENDED_MESSAGE] };
       if (input.kind !== "point") return step;
       if (isDegenerateRectangle(first, input.point)) {
         return { ...step, messages: ["幅または高さが0の長方形は作れません。別の点を指示してください"] };
@@ -147,8 +154,11 @@ export const DRAW_COMMANDS: readonly AppCommandDefinition[] = [
         type: "prompt",
         prompt: "1つ目の角を指示してください",
         expect: "point",
+        acceptsEnter: true,
         onInput: (input) =>
-          input.kind === "point" ? rectangleSecondStep(context, target.style, input.point) : { type: "done" },
+          input.kind === "point"
+            ? rectangleSecondStep(context, target.style, input.point)
+            : { type: "done", messages: [RECT_ENDED_MESSAGE] },
       };
     },
   },
