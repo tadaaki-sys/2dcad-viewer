@@ -18,10 +18,16 @@ export type HistoryOutcome =
    */
   | { type: "error"; error: string };
 
+/** 履歴の1段階。id は、この変更を記録したときに振る一意の番号(「いまの状態」を識別するのに使う) */
+type Entry = { id: number; changeSet: ChangeSet };
+
 export class DocumentHistory {
-  private undoStack: ChangeSet[] = [];
-  private redoStack: ChangeSet[] = [];
+  private undoStack: Entry[] = [];
+  private redoStack: Entry[] = [];
   private readonly limit: number;
+  private nextEntryId = 1;
+  /** 元に戻す列が空のときの、状態の識別番号。最初は0(開いた直後の状態)。古い段階を捨てたり履歴を破棄したときは、新しい番号になる */
+  private baseStateId = 0;
 
   constructor(limit: number = DEFAULT_UNDO_LIMIT) {
     if (!Number.isInteger(limit) || limit < 1) throw new Error(`履歴の上限が正しくありません: ${limit}`);
@@ -46,46 +52,59 @@ export class DocumentHistory {
 
   /** 次に元に戻す変更の名前。無ければ null */
   get nextUndoLabel(): string | null {
-    return this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1].label : null;
+    return this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1].changeSet.label : null;
   }
 
   get nextRedoLabel(): string | null {
-    return this.redoStack.length > 0 ? this.redoStack[this.redoStack.length - 1].label : null;
+    return this.redoStack.length > 0 ? this.redoStack[this.redoStack.length - 1].changeSet.label : null;
+  }
+
+  /**
+   * いまの図面の状態を識別する番号。同じ状態に戻る(Undoで保存した時点へ戻るなど)と、同じ番号になる。
+   * 保存した時点の番号と比べて、未保存の変更があるかを判断するのに使う。
+   */
+  get currentStateId(): number {
+    return this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1].id : this.baseStateId;
   }
 
   /** 適用済みの変更を記録する。やり直しの列は、捨てる */
   record(changeSet: ChangeSet): void {
-    this.undoStack.push(changeSet);
-    if (this.undoStack.length > this.limit) this.undoStack.splice(0, this.undoStack.length - this.limit);
+    this.undoStack.push({ id: this.nextEntryId++, changeSet });
+    if (this.undoStack.length > this.limit) {
+      const dropped = this.undoStack.splice(0, this.undoStack.length - this.limit);
+      // 捨てた段階の先にある状態が、元に戻せる最も古い状態になる(開いた直後の状態ではない)
+      this.baseStateId = dropped[dropped.length - 1].id;
+    }
     this.redoStack = [];
   }
 
   /** 1つ元に戻す。document は、いまのドキュメント */
   undo(document: CadDocument): HistoryOutcome {
-    const changeSet = this.undoStack[this.undoStack.length - 1];
-    if (changeSet === undefined) return { type: "empty" };
-    const result = applyChangeSet(document, invertChangeSet(changeSet));
+    const entry = this.undoStack[this.undoStack.length - 1];
+    if (entry === undefined) return { type: "empty" };
+    const result = applyChangeSet(document, invertChangeSet(entry.changeSet));
     if (!result.ok) return this.discard(result.error);
     this.undoStack.pop();
-    this.redoStack.push(changeSet);
-    return { type: "done", document: result.document, label: changeSet.label };
+    this.redoStack.push(entry);
+    return { type: "done", document: result.document, label: entry.changeSet.label };
   }
 
   /** 1つやり直す */
   redo(document: CadDocument): HistoryOutcome {
-    const changeSet = this.redoStack[this.redoStack.length - 1];
-    if (changeSet === undefined) return { type: "empty" };
-    const result = applyChangeSet(document, changeSet);
+    const entry = this.redoStack[this.redoStack.length - 1];
+    if (entry === undefined) return { type: "empty" };
+    const result = applyChangeSet(document, entry.changeSet);
     if (!result.ok) return this.discard(result.error);
     this.redoStack.pop();
-    this.undoStack.push(changeSet);
-    return { type: "done", document: result.document, label: changeSet.label };
+    this.undoStack.push(entry);
+    return { type: "done", document: result.document, label: entry.changeSet.label };
   }
 
-  /** 履歴をすべて捨てる(図面を開き直したときなど) */
+  /** 履歴をすべて捨てる。この後の状態は、どの保存時点とも同じではない扱いになる(新しい識別番号) */
   clear(): void {
     this.undoStack = [];
     this.redoStack = [];
+    this.baseStateId = this.nextEntryId++;
   }
 
   private discard(error: string): HistoryOutcome {

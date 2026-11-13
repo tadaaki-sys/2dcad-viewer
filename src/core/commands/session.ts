@@ -3,13 +3,19 @@
 import type { Point2D } from "../../types/cad";
 import { parseCoordinateInput } from "./coordinateInput";
 import { normalizeCommandName } from "./registry";
-import type { CommandRegistry, CommandStep, ExpectedInput, PromptStep } from "./registry";
+import type { CommandRegistry, CommandStep, ExpectedInput, PreviewShape, PromptStep } from "./registry";
 
 /** 実行中のコマンドの状態(画面の表示用) */
 export type ActiveCommand = {
   name: string;
   prompt: string;
   expect: ExpectedInput;
+  /** 受け付けるキーワード(大文字)。無ければ空 */
+  keywords: readonly string[];
+  /** 空のEnterを入力として受け取るか(作図の終了など) */
+  acceptsEnter: boolean;
+  /** ゴム紐(プレビュー)を出すか */
+  hasPreview: boolean;
 };
 
 export type SessionResult<R> = {
@@ -60,22 +66,53 @@ export class CommandSession<R, C> {
     return this.advance(running.name, step.onInput({ kind: "point", point }));
   }
 
-  /** 実行中のコマンドを取り消す(Esc)。実行中でなければ何もしない */
+  /** キーワード(ショートカットからの "U" など)を渡す。実行中の段階が、そのキーワードを宣言していなければ、何もしない */
+  submitKeyword(keyword: string): SessionResult<R> {
+    const running = this.running;
+    if (running === null || running.step.expect === "text") return this.empty();
+    const normalized = normalizeCommandName(keyword);
+    if (!running.step.keywords?.includes(normalized)) return this.empty();
+    return this.advance(running.name, running.step.onInput({ kind: "keyword", keyword: normalized }));
+  }
+
+  /**
+   * ゴム紐(描いている途中の仮の図形)。点を待っていて、プレビューを持つ段階のときだけ返す。
+   * 図面のデータは変えない(呼ぶだけで、状態は変わらない)
+   */
+  previewAt(cursor: Point2D): readonly PreviewShape[] {
+    const step = this.running?.step;
+    if (step === undefined || step.expect !== "point" || step.preview === undefined) return [];
+    return step.preview(cursor);
+  }
+
+  /**
+   * 実行中のコマンドを終える(Esc)。実行中でなければ何もしない。
+   * 段階が onCancel を持っていれば、その内容(描きかけの図形の確定など)を返す。無ければ、何も確定せずに取り消す
+   */
   cancel(): SessionResult<R> {
     if (this.running === null) return this.empty();
-    const name = this.running.name;
+    const { name, step } = this.running;
     this.running = null;
+    if (step.onCancel !== undefined) {
+      const output = step.onCancel();
+      return { messages: [...(output.messages ?? [])], requests: [...(output.requests ?? [])], active: null };
+    }
     return { messages: [`${name} を取り消しました`], requests: [], active: null };
   }
 
-  /** 名前を指定して、コマンドを始める(ツールバーやショートカット用)。実行中のコマンドは、取り消して置き換える */
+  /** 名前を指定して、コマンドを始める(ツールバーやショートカット用)。実行中のコマンドは、終えて置き換える */
   run(name: string): SessionResult<R> {
-    const cancelMessages = this.running !== null ? this.cancel().messages : [];
+    const ended = this.running !== null ? this.cancel() : null;
     const result = this.startByName(name);
-    return { ...result, messages: [...cancelMessages, ...result.messages] };
+    if (ended === null) return result;
+    return {
+      messages: [...ended.messages, ...result.messages],
+      requests: [...ended.requests, ...result.requests],
+      active: result.active,
+    };
   }
 
-  /** 図面を閉じた・開き直したときなどに、実行中のコマンドと直前の点を捨てる(メッセージは出さない) */
+  /** 図面を閉じた・開き直したときなどに、実行中のコマンドと直前の点を捨てる(メッセージも、確定する内容も出さない) */
   reset(): void {
     this.running = null;
     this.lastPoint = null;
@@ -94,8 +131,14 @@ export class CommandSession<R, C> {
     const step = running.step;
     if (step.expect === "text") return this.advance(running.name, step.onInput({ kind: "text", text }));
 
-    // 点・距離を待っているときの、空のEnterは何もしない
-    if (text.trim() === "") return this.empty();
+    // 点・距離を待っているとき。空のEnterは、段階が宣言していれば入力として渡し、なければ何もしない
+    if (text.trim() === "") {
+      return step.acceptsEnter === true ? this.advance(running.name, step.onInput({ kind: "enter" })) : this.empty();
+    }
+    const keyword = normalizeCommandName(text);
+    if (step.keywords?.includes(keyword)) {
+      return this.advance(running.name, step.onInput({ kind: "keyword", keyword }));
+    }
 
     const parsed = parseCoordinateInput(text, this.lastPoint);
     if (!parsed.ok) return this.reprompt(running, parsed.error);
@@ -129,14 +172,23 @@ export class CommandSession<R, C> {
       return { messages, requests, active: null };
     }
     this.running = { name, step };
+    // 段階が相対座標(@)の基準点を決めているとき(例: 「1点戻す」で、直前の点が変わった)は、それに合わせる
+    if (step.basePoint !== undefined) this.lastPoint = step.basePoint;
     messages.push(`${name} ${step.prompt}`);
     return { messages, requests, active: this.snapshot() };
   }
 
   private snapshot(): ActiveCommand | null {
-    return this.running === null
-      ? null
-      : { name: this.running.name, prompt: this.running.step.prompt, expect: this.running.step.expect };
+    if (this.running === null) return null;
+    const { name, step } = this.running;
+    return {
+      name,
+      prompt: step.prompt,
+      expect: step.expect,
+      keywords: step.expect === "text" ? [] : (step.keywords ?? []),
+      acceptsEnter: step.expect === "text" ? false : step.acceptsEnter === true,
+      hasPreview: step.expect === "point" && step.preview !== undefined,
+    };
   }
 
   private empty(): SessionResult<R> {

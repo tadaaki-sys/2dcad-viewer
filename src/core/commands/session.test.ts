@@ -146,7 +146,14 @@ describe("CommandSession: point input", () => {
   it("collects points from clicks and from typed coordinates", () => {
     const { session } = makeSession();
     const first = session.submitText("two");
-    expect(first.active).toEqual({ name: "TWO", prompt: "first?", expect: "point" });
+    expect(first.active).toEqual({
+      name: "TWO",
+      prompt: "first?",
+      expect: "point",
+      keywords: [],
+      acceptsEnter: false,
+      hasPreview: false,
+    });
     expect(first.messages).toEqual(["TWO first?"]);
     const second = session.submitPoint({ x: 10, y: 20 });
     expect(second.active?.prompt).toBe("second?");

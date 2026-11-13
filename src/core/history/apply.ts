@@ -32,6 +32,18 @@ export function applyChangeSet(document: CadDocument, changeSet: ChangeSet): App
   for (let step = 0; step < changeSet.changes.length; step++) {
     const change = changeSet.changes[step];
     const where = `${step + 1}番目の変更(${change.kind})`;
+    if (change.kind === "move") {
+      const { from, to } = change;
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0) {
+        return fail(`${where}: 位置が正しくありません: ${from} → ${to}`);
+      }
+      if (from >= entities.length || to >= entities.length) return fail(`${where}: 位置が範囲外です: ${from} → ${to}`);
+      if (entities[from] !== change.entity) return fail(`${where}: その位置の図形が、移動しようとした図形と一致しません: ${change.entity.id}`);
+      entities.splice(from, 1);
+      entities.splice(to, 0, change.entity);
+      continue;
+    }
+
     const index = change.index;
     if (!Number.isInteger(index) || index < 0) return fail(`${where}: 位置が正しくありません: ${index}`);
 

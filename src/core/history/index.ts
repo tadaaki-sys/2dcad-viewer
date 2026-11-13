@@ -1,4 +1,11 @@
-export { addEntitiesChangeSet, invertChangeSet, removeEntitiesChangeSet, replaceEntitiesChangeSet } from "./changeSet";
+export {
+  addEntitiesChangeSet,
+  invertChangeSet,
+  moveToBackChangeSet,
+  moveToFrontChangeSet,
+  removeEntitiesChangeSet,
+  replaceEntitiesChangeSet,
+} from "./changeSet";
 export type { ChangeSet, EntityChange } from "./changeSet";
 export { applyChangeSet } from "./apply";
 export type { ApplyResult } from "./apply";

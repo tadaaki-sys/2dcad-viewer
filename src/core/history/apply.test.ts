@@ -76,7 +76,7 @@ describe("applyChangeSet: remove", () => {
   it("builds removals from the back, so positions stay valid; duplicated ids are removed once", () => {
     const doc = makeDocument(["a", "b", "c", "d"]);
     const changeSet = removeEntitiesChangeSet(doc, ["b", "c", "b"], "削除");
-    expect(changeSet.changes.map((c) => c.index)).toEqual([2, 1]);
+    expect(changeSet.changes.map((c) => (c.kind === "remove" ? c.index : -1))).toEqual([2, 1]);
     expect(idsOf(mustApply(doc, changeSet))).toEqual(["a", "d"]);
   });
 

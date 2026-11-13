@@ -1,15 +1,22 @@
 // コマンドの登録簿と、コマンドの進め方(段階)の型。
 // 画面にも、ファイル形式にも依存しない。コマンドが外へ頼むこと(全体表示など)は、型の引数 R で呼び出し側が決める。
 //
-// 図面を変更する「変更の内容」は、Undo(Phase 3)と作図(Phase 4)で、この仕組みに追加する。
+// 図面を変更する「変更の内容」は、コマンドが依頼(R)として返し、アプリの層が Undo の履歴を通して適用する(Phase 3・4)。
 import type { Point2D } from "../../types/cad";
 
 export type PointInput = { kind: "point"; point: Point2D };
 export type TextInput = { kind: "text"; text: string };
 export type DistanceInput = { kind: "distance"; value: number };
+/** キーワード(例: "U"=1点戻す、"C"=閉じる)。段階が宣言したものだけ受け取る。大文字にそろえて渡す */
+export type KeywordInput = { kind: "keyword"; keyword: string };
+/** 空のEnter。段階が acceptsEnter を宣言したときだけ受け取る */
+export type EnterInput = { kind: "enter" };
 
 /** コマンドの段階が受け取る入力 */
-export type CommandInput = PointInput | TextInput | DistanceInput;
+export type CommandInput = PointInput | TextInput | DistanceInput | KeywordInput | EnterInput;
+
+/** ゴム紐(描いている途中の仮の図形)。形式に依存しない折れ線で表す。図面のデータではなく、重ねて描くだけ */
+export type PreviewShape = { kind: "polyline"; points: readonly Point2D[]; closed: boolean };
 
 /** 段階の結果。メッセージ(コマンドラインに表示)と、アプリへの依頼(R)を返せる */
 export type CommandOutput<R> = {
@@ -20,20 +27,46 @@ export type CommandOutput<R> = {
 /** コマンドが待っている入力の種類 */
 export type ExpectedInput = "point" | "text" | "distance";
 
-/** 入力を待つ段階。待っている種類(expect)と、onInput が受け取る入力の型は、必ず対応する(型で保証する) */
-type PromptStepOf<R, E extends ExpectedInput, I extends CommandInput> = { type: "prompt" } & CommandOutput<R> & {
+/** 入力を待つ段階の、共通の部分 */
+type PromptBase<R> = { type: "prompt" } & CommandOutput<R> & {
     /** 利用者への案内(例: 「点を指示してください」) */
     prompt: string;
-    /** 待っている入力。point は図面のクリックでも入力できる */
-    expect: E;
-    /** 入力を受け取って、次の段階を返す */
-    onInput: (input: I) => CommandStep<R>;
+    /** この段階の間、相対座標(@)の基準にする点。指定しなければ、直前に指示された点のまま */
+    basePoint?: Point2D;
+    /**
+     * Esc(または、別のコマンドに置き換えられたとき)に、確定する内容。
+     * 指定しなければ、何も確定せずに取り消す。描きかけの図形を、Escで確定したいコマンドが使う
+     */
+    onCancel?: () => CommandOutput<R>;
   };
 
+/** 点・距離を待つ段階が、追加で受け取れるもの */
+type KeywordOptions = {
+  /** 受け付けるキーワード(大文字。例: ["U", "C"])。案内(prompt)には、コマンド側で書く */
+  keywords?: readonly string[];
+  /** 空のEnterを、入力として受け取る(例: 作図の終了)。指定しなければ、空のEnterは何もしない */
+  acceptsEnter?: boolean;
+};
+
+/** 入力を待つ段階。待っている種類(expect)と、onInput が受け取る入力の型は、必ず対応する(型で保証する) */
 export type PromptStep<R> =
-  | PromptStepOf<R, "point", PointInput>
-  | PromptStepOf<R, "text", TextInput>
-  | PromptStepOf<R, "distance", DistanceInput>;
+  | (PromptBase<R> &
+      KeywordOptions & {
+        /** 待っている入力。point は図面のクリックでも入力できる */
+        expect: "point";
+        onInput: (input: PointInput | KeywordInput | EnterInput) => CommandStep<R>;
+        /** カーソル位置に応じたゴム紐を返す(図面を変更せず、重ねて描く) */
+        preview?: (cursor: Point2D) => readonly PreviewShape[];
+      })
+  | (PromptBase<R> & {
+      expect: "text";
+      onInput: (input: TextInput) => CommandStep<R>;
+    })
+  | (PromptBase<R> &
+      KeywordOptions & {
+        expect: "distance";
+        onInput: (input: DistanceInput | KeywordInput | EnterInput) => CommandStep<R>;
+      });
 
 export type DoneStep<R> = { type: "done" } & CommandOutput<R>;
 

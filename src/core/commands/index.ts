@@ -8,8 +8,11 @@ export type {
   CommandStep,
   DistanceInput,
   DoneStep,
+  EnterInput,
   ExpectedInput,
+  KeywordInput,
   PointInput,
+  PreviewShape,
   PromptStep,
   TextInput,
 } from "./registry";

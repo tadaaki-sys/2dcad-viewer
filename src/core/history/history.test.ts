@@ -144,7 +144,7 @@ describe("random sequences: undo everything returns to the original, redo everyt
 
       for (let step = 0; step < 150; step++) {
         const ids = idsOf(doc);
-        const kind = ids.length === 0 ? 0 : pick(4);
+        const kind = ids.length === 0 ? 0 : pick(5);
         let changeSet: ChangeSet;
         if (kind === 0) {
           // 追加(複数・途中の位置を含む)
@@ -164,6 +164,10 @@ describe("random sequences: undo everything returns to the original, redo everyt
         } else if (kind === 2) {
           const id = ids[pick(ids.length)];
           changeSet = replaceEntitiesChangeSet(doc, [makeLine(id, 1000 + step)], `replace${step}`);
+        } else if (kind === 4) {
+          // 描画順の入れ替え(任意の位置から任意の位置へ)
+          const from = pick(ids.length);
+          changeSet = { label: `move${step}`, changes: [{ kind: "move", entity: doc.entities[from], from, to: pick(ids.length) }] };
         } else {
           // 混合: 先頭を置き換え、末尾に追加
           const first = doc.entities[0];

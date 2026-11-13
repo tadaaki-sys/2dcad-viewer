@@ -18,7 +18,12 @@ export type EntityChange =
   /** index の位置にある図形(entity)を削除する。entityは、削除前の図形そのもの(Undoで元に戻すために持つ) */
   | { kind: "remove"; entity: CadEntity; index: number }
   /** index の位置にある図形(before)を、after に置き換える。IDと位置は変わらない */
-  | { kind: "replace"; before: CadEntity; after: CadEntity; index: number };
+  | { kind: "replace"; before: CadEntity; after: CadEntity; index: number }
+  /**
+   * 描画順の入れ替え。from の位置にある図形(entity)を取り出し、取り出したあとの配列の to の位置に入れる。
+   * (0以上、個数-1以下。後ろにあるほど上に描かれる)
+   */
+  | { kind: "move"; entity: CadEntity; from: number; to: number };
 
 export type ChangeSet = {
   /** 利用者に見せる名前(例: 「線を追加」)。Undoの案内に使う */
@@ -33,6 +38,7 @@ export function invertChangeSet(changeSet: ChangeSet): ChangeSet {
     const change = changeSet.changes[i];
     if (change.kind === "add") inverted.push({ kind: "remove", entity: change.entity, index: change.index });
     else if (change.kind === "remove") inverted.push({ kind: "add", entity: change.entity, index: change.index });
+    else if (change.kind === "move") inverted.push({ kind: "move", entity: change.entity, from: change.to, to: change.from });
     else inverted.push({ kind: "replace", before: change.after, after: change.before, index: change.index });
   }
   return { label: changeSet.label, changes: inverted };
@@ -75,5 +81,51 @@ export function replaceEntitiesChangeSet(
     if (before === undefined) throw new Error(`置き換える図形が見つかりません: ${after.id}`);
     return { kind: "replace" as const, before, after, index: indexOfEntity(document, after.id) };
   });
+  return { label, changes };
+}
+
+/** 指定した図形の、いまの描画順の位置を、小さい順に並べて返す。存在しないIDはエラー */
+function sortedTargets(document: CadDocument, ids: readonly EntityId[]): Array<{ entity: CadEntity; index: number }> {
+  const targets = [...new Set(ids)].map((id) => {
+    const entity = getEntity(document, id);
+    if (entity === undefined) throw new Error(`順序を変える図形が見つかりません: ${id}`);
+    return { entity, index: indexOfEntity(document, id) };
+  });
+  targets.sort((a, b) => a.index - b.index);
+  return targets;
+}
+
+/**
+ * 図形を、最前面(描画順の末尾)へ移す変更を作る。指定した図形どうしの前後関係は、そのまま保つ。
+ * すでに最前面にまとまっているときは、何も変わらないので null を返す。
+ */
+export function moveToFrontChangeSet(document: CadDocument, ids: readonly EntityId[], label: string): ChangeSet | null {
+  const targets = sortedTargets(document, ids);
+  const total = document.entities.length;
+  const count = targets.length;
+  if (count === 0) return null;
+  if (targets[0].index === total - count && targets[count - 1].index === total - 1) return null;
+  // 小さい順に末尾へ移す。前に移した図形の分だけ、あとの図形の位置は1つずつ前へずれる
+  const changes: EntityChange[] = targets.map((target, i) => ({
+    kind: "move" as const,
+    entity: target.entity,
+    from: target.index - i,
+    to: total - 1,
+  }));
+  return { label, changes };
+}
+
+/** 図形を、最背面(描画順の先頭)へ移す変更を作る。前後関係は保つ。すでに最背面にまとまっているときは null */
+export function moveToBackChangeSet(document: CadDocument, ids: readonly EntityId[], label: string): ChangeSet | null {
+  const targets = sortedTargets(document, ids);
+  const count = targets.length;
+  if (count === 0) return null;
+  if (targets[0].index === 0 && targets[count - 1].index === count - 1) return null;
+  // 大きい順に先頭へ移す。前に移した図形の分だけ、あとの図形の位置は1つずつ後ろへずれる
+  const changes: EntityChange[] = [];
+  for (let i = 0; i < count; i++) {
+    const target = targets[count - 1 - i];
+    changes.push({ kind: "move", entity: target.entity, from: target.index + i, to: 0 });
+  }
   return { label, changes };
 }
