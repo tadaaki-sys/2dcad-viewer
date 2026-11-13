@@ -15,13 +15,16 @@ import { useRecentFiles } from "./hooks/useRecentFiles";
 import { validateDxfFile } from "./io/dxf/validateDxfFile";
 import { isDwgFileName } from "./io/dxf/dwgFormat";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./io/dxf/dxfWorkerProtocol";
-import type { CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
+import type { CadEntity, CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
 import { documentFromCadModel, hasEntity } from "./core/model";
 import { describeHistoryOutcome, DOCUMENT_NOT_READY_MESSAGE, DocumentSession } from "./app/document/documentSession";
 import type { DocumentChange } from "./app/document/documentSession";
 import { renderModelFromDocument } from "./app/document/renderModel";
 import type { ActiveCommand, SessionResult } from "./core/commands";
 import { createAppCommands } from "./app/commands/builtinCommands";
+import { defaultLayerName, resolveDrawTarget } from "./app/drawing/drawTarget";
+import { reorderSelection } from "./app/document/reorder";
+import { addEntitiesChangeSet } from "./core/history";
 import type { AppRequest } from "./app/commands/builtinCommands";
 import { isTypingTarget } from "./utils/dom";
 import { summarizeSource } from "./io/dxf/source";
@@ -95,11 +98,34 @@ export default function App() {
   const isDocumentOpen = fileInfo !== null;
 
   // コマンド(ツールバー・ショートカット・コマンドライン・図面のクリックは、すべてこの1つの入口から動く)
-  const [commands] = useState(() => createAppCommands({ isDocumentOpen }));
+  // 初期のコンテキストは「描けない」。実際の状態は、下のeffectがすぐに設定する(コマンドを動かせるのは、その後)
+  const [commands] = useState(() =>
+    createAppCommands({
+      isDocumentOpen,
+      drawTarget: { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
+      allocateEntityId: () => {
+        throw new Error("図面の準備ができていません");
+      },
+    }),
+  );
   const commandSession = commands.session;
+  // 新しい図形を描くレイヤー(現在のレイヤー)。図面を開くたびに、初期値(レイヤー0など)に戻す
+  const [currentLayerName, setCurrentLayerName] = useState<string | null>(null);
+  // ドキュメントと履歴の準備(元データの読み込み)が終わっていて、編集できるか
+  const [isDocumentEditable, setIsDocumentEditable] = useState(false);
   useEffect(() => {
-    commands.setContext({ isDocumentOpen });
-  }, [commands, isDocumentOpen]);
+    commands.setContext({
+      isDocumentOpen,
+      drawTarget: isDocumentEditable
+        ? resolveDrawTarget(layers, currentLayerName)
+        : { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
+      allocateEntityId: () => {
+        const session = documentSessionRef.current;
+        if (session === null) throw new Error("図面の準備ができていません");
+        return session.allocateEntityId();
+      },
+    });
+  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName]);
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +178,8 @@ export default function App() {
         // 元データは、図面の表示を遅らせないよう、続けて届く(sourceメッセージ)。それまでは、前の図面の分を残さない
         sourceRef.current = null;
         documentSessionRef.current = null;
+        setIsDocumentEditable(false);
+        setCurrentLayerName(defaultLayerName(message.cadModel.layers));
         setDrawingKey((key) => key + 1);
         setSourceSummary(null);
         // 前の図面のコマンドの途中経過と直前の点は、新しい図面には持ち越さない
@@ -170,6 +198,7 @@ export default function App() {
           const session = new DocumentSession(documentFromCadModel(pendingModel));
           session.subscribe(handleDocumentChange);
           documentSessionRef.current = session;
+          setIsDocumentEditable(true);
         }
         pendingModel = null;
         setSourceSummary(summarizeSource(message.source));
@@ -220,6 +249,7 @@ export default function App() {
     setCadModel(null);
     sourceRef.current = null;
     documentSessionRef.current = null;
+    setIsDocumentEditable(false);
     setSourceSummary(null);
     setCursorWorld(null);
     setSelectedEntityIds(new Set());
@@ -320,6 +350,50 @@ export default function App() {
     [appendCommandLog],
   );
 
+  /** 作図コマンドが作った図形を、描画順の末尾(最前面)へ追加する(Undoの1段階) */
+  const applyNewEntities = useCallback(
+    (entities: readonly CadEntity[], label: string) => {
+      const session = documentSessionRef.current;
+      if (session === null) {
+        appendCommandLog([DOCUMENT_NOT_READY_MESSAGE]);
+        return;
+      }
+      try {
+        const outcome = session.apply(addEntitiesChangeSet(session.document, entities, label));
+        if (!outcome.ok) {
+          appendCommandLog([`図形を追加できませんでした: ${outcome.error}`]);
+          return;
+        }
+        // 描いている途中で、レイヤーを非表示にされたときは、見えない理由を伝える
+        const layerName = entities[0]?.layer;
+        if (layers.some((layer) => layer.name === layerName && !layer.visible)) {
+          appendCommandLog([`レイヤー「${layerName}」は非表示のため、追加した図形は表示されません`]);
+        }
+      } catch (error) {
+        console.error("[App] failed to update the view after adding entities", error);
+        appendCommandLog(["表示の更新に失敗しました。図面を開き直してください"]);
+      }
+    },
+    [appendCommandLog, layers],
+  );
+
+  const performReorder = useCallback(
+    (direction: "front" | "back") => {
+      const session = documentSessionRef.current;
+      if (session === null) {
+        appendCommandLog([DOCUMENT_NOT_READY_MESSAGE]);
+        return;
+      }
+      try {
+        appendCommandLog([reorderSelection(session, selectedEntityIds, direction)]);
+      } catch (error) {
+        console.error("[App] failed to update the view after reordering", error);
+        appendCommandLog(["表示の更新に失敗しました。図面を開き直してください"]);
+      }
+    },
+    [appendCommandLog, selectedEntityIds],
+  );
+
   const executeRequest = useCallback(
     (request: AppRequest) => {
       switch (request.type) {
@@ -344,6 +418,12 @@ export default function App() {
         case "redo":
           performHistoryStep("redo");
           break;
+        case "addEntities":
+          applyNewEntities(request.entities, request.label);
+          break;
+        case "reorder":
+          performReorder(request.direction);
+          break;
       }
     },
     [
@@ -353,6 +433,8 @@ export default function App() {
       handleToggleMeasurementMode,
       handleToggleFullscreen,
       performHistoryStep,
+      applyNewEntities,
+      performReorder,
     ],
   );
 
@@ -407,8 +489,14 @@ export default function App() {
       if (historyShortcut !== null) {
         if (!isDocumentOpen) return;
         event.preventDefault();
-        // コマンドが入力を待っている間は、図面を戻さない(先にEscでコマンドを取り消す)
-        if (commandSession.active) return;
+        // コマンドが入力を待っている間は、図面を戻さない。ただし作図中のCtrl+Zは、「1点戻す(U)」として働く
+        const active = commandSession.active;
+        if (active !== null) {
+          if (historyShortcut === "undo" && active.keywords.includes("U")) {
+            applyCommandResult(commandSession.submitKeyword("U"));
+          }
+          return;
+        }
         runCommand(historyShortcut === "undo" ? "UNDO" : "REDO");
         return;
       }
@@ -439,9 +527,14 @@ export default function App() {
         !event.metaKey &&
         !event.altKey
       ) {
-        // Enterキーで、コマンドラインの入力欄へ移る
         event.preventDefault();
-        commandInputRef.current?.focus();
+        if (commandSession.active?.acceptsEnter) {
+          // 作図中(点の指示を待っていて、Enterで終われる)のEnterは、作図の終了
+          applyCommandResult(commandSession.submitText(""));
+        } else {
+          // Enterキーで、コマンドラインの入力欄へ移る
+          commandInputRef.current?.focus();
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown);

@@ -5,6 +5,14 @@ import type { CadDocument, EntityId } from "../../core/model";
 import { applyChangeSet, DocumentHistory } from "../../core/history";
 import type { ChangeSet, HistoryOutcome } from "../../core/history";
 
+/** 画面が、ボタンの有効・無効や、未保存の表示に使う状態 */
+export type DocumentSessionState = {
+  canUndo: boolean;
+  canRedo: boolean;
+  /** 保存した(または、開いた)時点から、図面が変わっているか */
+  isDirty: boolean;
+};
+
 /** 図面が変わったことの知らせ */
 export type DocumentChange = {
   kind: "apply" | "undo" | "redo";
@@ -12,6 +20,8 @@ export type DocumentChange = {
   label: string;
   /** 変更後のドキュメント */
   document: CadDocument;
+  /** 変更後の状態 */
+  state: DocumentSessionState;
 };
 
 export type DocumentChangeListener = (change: DocumentChange) => void;
@@ -22,10 +32,27 @@ export class DocumentSession {
   private current: CadDocument;
   private readonly history: DocumentHistory;
   private readonly listeners = new Set<DocumentChangeListener>();
+  /** 保存した(または、開いた)時点の、履歴の状態番号 */
+  private savedStateId: number;
 
   constructor(document: CadDocument, undoLimit?: number) {
     this.current = document;
     this.history = new DocumentHistory(undoLimit);
+    this.savedStateId = this.history.currentStateId;
+  }
+
+  /** 保存した(または、開いた)時点から、図面が変わっているか。Undoで同じ状態に戻れば、false に戻る */
+  get isDirty(): boolean {
+    return this.history.currentStateId !== this.savedStateId;
+  }
+
+  /** いまの図面を「保存済み」として覚える(保存の Phase で、保存に成功したときに呼ぶ) */
+  markSaved(): void {
+    this.savedStateId = this.history.currentStateId;
+  }
+
+  get state(): DocumentSessionState {
+    return { canUndo: this.history.canUndo, canRedo: this.history.canRedo, isDirty: this.isDirty };
   }
 
   get document(): CadDocument {
@@ -54,7 +81,7 @@ export class DocumentSession {
     if (!result.ok) return { ok: false, error: result.error };
     this.current = result.document;
     this.history.record(changeSet);
-    this.notify({ kind: "apply", label: changeSet.label, document: this.current });
+    this.notify({ kind: "apply", label: changeSet.label, document: this.current, state: this.state });
     return { ok: true };
   }
 
@@ -87,7 +114,7 @@ export class DocumentSession {
   private step(kind: "undo" | "redo", outcome: HistoryOutcome): HistoryOutcome {
     if (outcome.type === "done") {
       this.current = outcome.document;
-      this.notify({ kind, label: outcome.label, document: this.current });
+      this.notify({ kind, label: outcome.label, document: this.current, state: this.state });
     }
     return outcome;
   }

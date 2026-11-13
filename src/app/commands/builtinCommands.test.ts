@@ -6,16 +6,17 @@ import {
   createAppCommandSession,
   formatCoordinate,
 } from "./builtinCommands";
+import { makeContext } from "./testHelpers";
 
 function session(isDocumentOpen = true) {
-  const state = { isDocumentOpen };
+  const state = makeContext({ isDocumentOpen });
   return { s: createAppCommandSession(() => state), state };
 }
 
 describe("built-in commands", () => {
   it("registers every command without name conflicts", () => {
     const registry = createAppCommandRegistry();
-    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "ID"]);
+    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "TOFRONT", "TOBACK", "ID"]);
     expect(BUILTIN_COMMANDS.every((d) => d.description.length > 0)).toBe(true);
   });
 
@@ -33,11 +34,13 @@ describe("built-in commands", () => {
     expect(requestOf("undo")).toEqual([{ type: "undo" }]);
     expect(requestOf("u")).toEqual([{ type: "undo" }]);
     expect(requestOf("redo")).toEqual([{ type: "redo" }]);
+    expect(requestOf("tofront")).toEqual([{ type: "reorder", direction: "front" }]);
+    expect(requestOf("toback")).toEqual([{ type: "reorder", direction: "back" }]);
   });
 
   it("needs an open document, except for OPEN and FULLSCREEN", () => {
     const { s } = session(false);
-    for (const name of ["close", "fit", "measure", "id", "undo", "u", "redo"]) {
+    for (const name of ["close", "fit", "measure", "id", "undo", "u", "redo", "line", "l", "pline", "pl", "rect", "rec", "tofront", "toback"]) {
       const result = s.submitText(name);
       expect(result.requests, name).toEqual([]);
       expect(result.messages, name).toEqual(["図面が開かれていません"]);
@@ -50,7 +53,14 @@ describe("built-in commands", () => {
   it("ID prints the clicked point", () => {
     const { s } = session();
     const started = s.submitText("id");
-    expect(started.active).toEqual({ name: "ID", prompt: "点を指示してください", expect: "point" });
+    expect(started.active).toEqual({
+      name: "ID",
+      prompt: "点を指示してください",
+      expect: "point",
+      keywords: [],
+      acceptsEnter: false,
+      hasPreview: false,
+    });
     const done = s.submitPoint({ x: 1234.5678, y: -0.0001 });
     expect(done.messages).toEqual(["X = 1234.568, Y = 0.000"]);
     expect(done.active).toBeNull();
@@ -76,11 +86,11 @@ describe("built-in commands", () => {
   });
 
   it("createAppCommands follows the context set later (document opened/closed)", () => {
-    const commands = createAppCommands({ isDocumentOpen: false });
+    const commands = createAppCommands(makeContext({ isDocumentOpen: false }));
     expect(commands.session.submitText("fit").messages).toEqual(["図面が開かれていません"]);
-    commands.setContext({ isDocumentOpen: true });
+    commands.setContext(makeContext({ isDocumentOpen: true }));
     expect(commands.session.submitText("fit").requests).toEqual([{ type: "fitDrawing" }]);
-    commands.setContext({ isDocumentOpen: false });
+    commands.setContext(makeContext({ isDocumentOpen: false }));
     expect(commands.session.submitText("fit").requests).toEqual([]);
   });
 
