@@ -277,6 +277,55 @@ describe("ARC (C = center, start, end)", () => {
   });
 });
 
+describe("Codex review fixes (Phase 5)", () => {
+  it("the 3-point failure message covers every reason (collinear, a repeated point, too large a radius)", () => {
+    const { session } = start();
+    session.submitText("arc");
+    session.submitPoint({ x: 0, y: 0 });
+    session.submitPoint({ x: 1, y: 1 });
+    // 終点が始点と同じ点
+    const repeated = session.submitPoint({ x: 0, y: 0 });
+    expect(repeated.requests).toEqual([]);
+    expect(repeated.messages[0]).toContain("円弧になりません");
+    expect(repeated.messages[0]).toContain("同じ点");
+  });
+
+  it("each failure of the center-start-end step has its own message and keeps waiting", () => {
+    const { session } = start();
+    session.submitText("arc");
+    session.submitText("c");
+    session.submitPoint({ x: 0, y: 0 });
+    session.submitPoint({ x: 10, y: 0 });
+    const sameDirection = session.submitPoint({ x: 20, y: 0 });
+    expect(sameDirection.messages[0]).toContain("同じ方向");
+    const atCenter = session.submitPoint({ x: 0, y: 0 });
+    expect(atCenter.messages[0]).toContain("中心と同じ点");
+    expect(session.active).not.toBeNull();
+    expect(session.previewAt({ x: 0, y: 10 })[0]).toMatchObject({ kind: "arc" });
+    expect(added(session.submitPoint({ x: 0, y: 10 }).requests).entities).toHaveLength(1);
+    // 追加は1回だけ
+    expect(session.active).toBeNull();
+  });
+
+  it("after a refused diameter, a valid diameter still draws once; Esc at the diameter step draws nothing", () => {
+    const { session } = start();
+    session.submitText("circle");
+    session.submitPoint({ x: 0, y: 0 });
+    session.submitText("d");
+    session.submitText("0");
+    const done = session.submitText("40");
+    expect(added(done.requests).entities).toHaveLength(1);
+    expect((added(done.requests).entities[0] as CadCircle).radius).toBe(20);
+
+    session.submitText("circle");
+    session.submitPoint({ x: 0, y: 0 });
+    session.submitText("d");
+    const esc = session.cancel();
+    expect(esc.requests).toEqual([]);
+    expect(esc.active).toBeNull();
+  });
+});
+
 describe("acceptsDistance applies only to steps that declare it", () => {
   it("a plain number is still an error for LINE and RECT", () => {
     const { session } = start();

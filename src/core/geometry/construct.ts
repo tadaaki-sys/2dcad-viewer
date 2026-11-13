@@ -9,6 +9,8 @@ export const MAX_RADIUS = 1e9;
 
 /** 一直線とみなす基準。2辺の間の角の sin がこれ以下なら、3点は一直線上にあるとして扱う */
 const COLLINEAR_SIN_LIMIT = 1e-9;
+/** 3点を通る円の、中心から各点までの距離と半径の食い違い(半径に対する割合)の上限。座標の丸めで、3点を通らない円ができるのを防ぐ */
+const RADIUS_RESIDUAL_LIMIT = 1e-4;
 /** 始点と終点の方向がこれ(ラジアン)より近いと、角度の範囲が0の円弧として扱い、作らない */
 const MIN_ARC_SPAN = 1e-9;
 
@@ -69,6 +71,10 @@ export function arcThroughThreePoints(start: Point2D, through: Point2D, end: Poi
   const center = { x: start.x + ux, y: start.y + uy };
   const radius = Math.hypot(ux, uy);
   if (!isUsableRadius(radius) || !Number.isFinite(center.x) || !Number.isFinite(center.y)) return null;
+  // 中心を絶対座標に戻すと、非常に大きな座標では丸められて、3点を通らない円になることがある。その場合は作らない
+  for (const point of [start, through, end]) {
+    if (Math.abs(Math.hypot(point.x - center.x, point.y - center.y) - radius) > RADIUS_RESIDUAL_LIMIT * radius) return null;
+  }
 
   // 始点→通過点→終点が反時計回りなら、そのまま。時計回りなら、始点と終点を入れ替えて、反時計回りで表す
   const counterClockwise = bx * (end.y - through.y) - by * (end.x - through.x) > 0;
@@ -80,7 +86,7 @@ export function arcThroughThreePoints(start: Point2D, through: Point2D, end: Poi
   return { center, radius, startAngle, endAngle };
 }
 
-export type CenterStartEndFailure = "radius" | "end-at-center" | "same-direction";
+export type CenterStartEndFailure = "non-finite" | "radius" | "end-at-center" | "same-direction";
 
 /**
  * 中心・始点・終点から作る円弧。半径は中心から始点までの距離。終点は中心からの方向だけを使い、円の上になくてもよい。
@@ -91,6 +97,8 @@ export function arcFromCenterStartEnd(
   start: Point2D,
   end: Point2D,
 ): { ok: true; arc: ArcShape } | { ok: false; reason: CenterStartEndFailure } {
+  // 座標が有限でなければ、角度が NaN の円弧を成功として返さない
+  if (![center.x, center.y, start.x, start.y, end.x, end.y].every(Number.isFinite)) return { ok: false, reason: "non-finite" };
   const radius = Math.hypot(start.x - center.x, start.y - center.y);
   if (!isUsableRadius(radius)) return { ok: false, reason: "radius" };
   if (Math.hypot(end.x - center.x, end.y - center.y) < MIN_RADIUS) return { ok: false, reason: "end-at-center" };

@@ -98,7 +98,8 @@ function circleStart(context: AppCommandContext, style: DrawingStyle): Step {
   };
 }
 
-const THREE_POINT_FAILURE = "3点が一直線上にあるか、半径が大きすぎるため、円弧になりません。別の点を指示してください";
+const THREE_POINT_FAILURE =
+  "この3点では円弧になりません(一直線上にある、同じ点がある、または半径が大きすぎます)。別の点を指示してください";
 
 /** ARC(3点)の終点の段階 */
 function threePointEndStep(context: AppCommandContext, style: DrawingStyle, start: Point2D, through: Point2D): Step {
@@ -159,11 +160,13 @@ function centerEndStep(context: AppCommandContext, style: DrawingStyle, center: 
       if (input.kind !== "point") return step;
       const result = arcFromCenterStartEnd(center, start, input.point);
       if (!result.ok) {
-        const message =
-          result.reason === "end-at-center"
-            ? "中心と同じ点です。別の点を指示してください"
-            : "始点と同じ方向です(角度の範囲が0になります)。別の点を指示してください";
-        return { ...step, messages: [message] };
+        const messages: Record<typeof result.reason, string> = {
+          "non-finite": "座標の値が正しくありません。別の点を指示してください",
+          radius: radiusRangeMessage(),
+          "end-at-center": "中心と同じ点です。別の点を指示してください",
+          "same-direction": "始点と同じ方向です(角度の範囲が0になります)。別の点を指示してください",
+        };
+        return { ...step, messages: [messages[result.reason]] };
       }
       return { type: "done", ...arcAdded(context, style, result.arc) };
     },

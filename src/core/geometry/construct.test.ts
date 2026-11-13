@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Point2D } from "../../types/cad";
-import { angleOf, arcFromCenterStartEnd, arcSweep, arcThroughThreePoints, isUsableRadius, MAX_RADIUS, normalizeAngle } from "./construct";
-import { isAngleInSweep } from "./geometry";
+import { angleOf, arcFromCenterStartEnd, arcSweep, arcThroughThreePoints, isUsableRadius, MAX_RADIUS, normalizeAngle } from "./construct";import { isAngleInSweep } from "./geometry";
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -131,6 +130,55 @@ describe("arcFromCenterStartEnd", () => {
     expect(arcFromCenterStartEnd(center, { x: 15, y: 20 }, { x: 99, y: 20 })).toEqual({ ok: false, reason: "same-direction" });
     expect(arcFromCenterStartEnd(center, { x: 15, y: 20 }, { x: 99, y: 20 + 1e-12 })).toEqual({ ok: false, reason: "same-direction" });
     expect(arcFromCenterStartEnd(center, { x: 10 + MAX_RADIUS * 2, y: 20 }, { x: 20, y: 30 })).toEqual({ ok: false, reason: "radius" });
+  });
+});
+
+describe("Codex review fixes (Phase 5)", () => {
+  it("arcFromCenterStartEnd never returns an arc with a non-finite angle", () => {
+    const center = { x: 0, y: 0 };
+    const start = { x: 1, y: 0 };
+    for (const end of [{ x: Number.NaN, y: 1 }, { x: 1, y: Number.NaN }, { x: Number.POSITIVE_INFINITY, y: 1 }, { x: 0, y: Number.NEGATIVE_INFINITY }]) {
+      expect(arcFromCenterStartEnd(center, start, end)).toEqual({ ok: false, reason: "non-finite" });
+    }
+    expect(arcFromCenterStartEnd({ x: Number.NaN, y: 0 }, start, { x: 0, y: 1 })).toEqual({ ok: false, reason: "non-finite" });
+    expect(arcFromCenterStartEnd(center, { x: Number.NaN, y: 0 }, { x: 0, y: 1 })).toEqual({ ok: false, reason: "non-finite" });
+  });
+
+  it("arcThroughThreePoints refuses coordinates so large that the rounded center no longer lies on the three points", () => {
+    expect(arcThroughThreePoints({ x: 1e16, y: 0 }, { x: 1e16, y: 2 }, { x: 1e16 + 2, y: 0 })).toBeNull();
+    // 同じ形でも、座標が丸めの影響を受けない大きさなら作れる
+    const ok = arcThroughThreePoints({ x: 1e6, y: 0 }, { x: 1e6, y: 2 }, { x: 1e6 + 2, y: 0 });
+    expect(ok).not.toBeNull();
+    expect(ok!.radius).toBeCloseTo(Math.SQRT2, 6);
+  });
+
+  it("the smallest angle range: just above is accepted, just below is refused (both directions around the start)", () => {
+    const center = { x: 0, y: 0 };
+    const start = { x: 1, y: 0 };
+    const at = (angle: number) => ({ x: Math.cos(angle), y: Math.sin(angle) });
+    expect(arcFromCenterStartEnd(center, start, at(2e-9)).ok).toBe(true);
+    expect(arcFromCenterStartEnd(center, start, at(5e-10))).toEqual({ ok: false, reason: "same-direction" });
+    // 反時計回りにほぼ一周(終点が始点のすぐ手前)
+    expect(arcFromCenterStartEnd(center, start, at(-2e-9)).ok).toBe(true);
+    expect(arcFromCenterStartEnd(center, start, at(-5e-10))).toEqual({ ok: false, reason: "same-direction" });
+  });
+
+  it("the radius limits are enforced on both sides for center/start/end", () => {
+    const center = { x: 0, y: 0 };
+    const end = { x: 0, y: 5 };
+    expect(arcFromCenterStartEnd(center, { x: 5e-7, y: 0 }, end)).toEqual({ ok: false, reason: "radius" });
+    expect(arcFromCenterStartEnd(center, { x: 2e-6, y: 0 }, end).ok).toBe(true);
+    expect(arcFromCenterStartEnd(center, { x: MAX_RADIUS, y: 0 }, end).ok).toBe(true);
+    expect(arcFromCenterStartEnd(center, { x: MAX_RADIUS * 1.0001, y: 0 }, end)).toEqual({ ok: false, reason: "radius" });
+  });
+
+  it("an arc across 0 degrees keeps start above end (the sweep still goes counter-clockwise through the middle point)", () => {
+    // 330度 → 0度 → 30度 を通る、反時計回りの円弧
+    const arc = arcThroughThreePoints(onCircle({ x: 5, y: 5 }, 10, (330 * Math.PI) / 180), onCircle({ x: 5, y: 5 }, 10, 0), onCircle({ x: 5, y: 5 }, 10, (30 * Math.PI) / 180));
+    expect(arc).not.toBeNull();
+    expect(arc!.startAngle).toBeCloseTo((330 * Math.PI) / 180, 9);
+    expect(arc!.endAngle).toBeCloseTo((30 * Math.PI) / 180, 9);
+    expect(arcSweep(arc!)).toBeCloseTo((60 * Math.PI) / 180, 9);
   });
 });
 
