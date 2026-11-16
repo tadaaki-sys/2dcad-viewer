@@ -6,6 +6,7 @@ import { lineWeightToScreenWidthPx } from "../../core/style/lineWeight";
 import type { Camera } from "../../core/view/Camera";
 import type { PreviewShape } from "../../core/commands";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
+import { drawGrid, drawSnapMarker } from "./snapMarker";
 import { TEXT_LINE_HEIGHT_FACTOR } from "../../core/geometry/entityGeometry";
 import { BOUNDS_STRIDE } from "../../core/spatial/entityBounds";
 
@@ -16,9 +17,7 @@ const WINDOW_BOX_COLOR = "#4a90e2";
 const CROSSING_BOX_COLOR = "#50c878";
 const MEASUREMENT_COLOR = "#ff8c00";
 const MEASUREMENT_MARKER_RADIUS_PX = 4;
-const SNAP_MARKER_COLOR = "#00e5ff";
 const PREVIEW_COLOR = "#ffffff";
-const SNAP_MARKER_HALF_SIZE_PX = 5;
 const MEASUREMENT_FONT = "11px sans-serif";
 
 // 画面上でこれより小さいフォントサイズになったTEXTは、視認できず描画コストだけかかるため省略する
@@ -392,12 +391,16 @@ export class CanvasRenderer implements Renderer {
     measurements,
     selectedMeasurementId,
     pendingMeasurementPoint,
-    snapMarkerPoint,
+    snapMarker,
+    gridSpacing,
     previewShapes,
     spatialIndex,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, viewportWidth, viewportHeight);
+
+    // 格子点(図形より下)
+    if (gridSpacing) drawGrid(ctx, camera, viewportWidth, viewportHeight, gridSpacing);
 
     ctx.lineWidth = LINE_WIDTH_PX;
 
@@ -549,14 +552,6 @@ export class CanvasRenderer implements Renderer {
       drawPreviewShapes(ctx, camera, previewShapes);
     }
 
-    if (snapMarkerPoint) {
-      const screen = camera.worldToScreen(snapMarkerPoint);
-      ctx.save();
-      ctx.strokeStyle = SNAP_MARKER_COLOR;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([]);
-      ctx.strokeRect(screen.x - SNAP_MARKER_HALF_SIZE_PX, screen.y - SNAP_MARKER_HALF_SIZE_PX, SNAP_MARKER_HALF_SIZE_PX * 2, SNAP_MARKER_HALF_SIZE_PX * 2);
-      ctx.restore();
-    }
+    if (snapMarker) drawSnapMarker(ctx, camera, snapMarker);
   }
 }

@@ -1,36 +1,19 @@
-import {
-  closestPointOnSegment,
-  distance,
-  intersectSegments,
-  isAngleInSweep,
-  normalizeArcSpan,
-  pointOnArc,
-  pointOnEllipse,
-  pointToSegmentDistance,
-} from "../geometry/geometry";
+import { distance, normalizeArcSpan, pointOnArc, pointOnEllipse } from "../geometry/geometry";
 import { getEntitySegments } from "../geometry/entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 import type { SpatialIndex } from "../spatial/SpatialIndex";
+import { collectCenterCandidates, collectQuadrantCandidates } from "./centerQuadrantCandidates";
+import { collectExtensionCandidates } from "./extensionCandidates";
+import { collectIntersectionCandidates } from "./intersectionCandidates";
+import { collectPerpendicularCandidates, collectTangentCandidates } from "./perpendicularTangentCandidates";
+import type { GeneratorContext } from "./snapContext";
+import { nearestPointOnEntity } from "./snapGeometry";
+import type { SnapCandidate, SnapType } from "./snapTypes";
 
-export type SnapType = "endpoint" | "midpoint" | "intersection" | "nearest";
-
-export type SnapCandidate = {
-  point: Point2D;
-  type: SnapType;
-};
-
-type CandidateGenerator = (
-  entities: readonly CadEntity[],
-  visibleLayerNames: ReadonlySet<string>,
-  worldPoint: Point2D,
-  toleranceWorld: number,
-) => SnapCandidate[];
+export type { SnapCandidate, SnapType } from "./snapTypes";
 
 // 全周(または全周とみなせる誤差)のCIRCLE/ELLIPSEには自然な端点/中点がないため候補から除外する際の許容誤差
 const FULL_SWEEP_EPSILON = 1e-6;
-
-// カーソル近傍の線分数がこれを超える場合は交点スナップを計算しない(総当たりは線分数の2乗)
-const MAX_INTERSECTION_SEGMENTS = 600;
 
 function isFullSweep(span: number): boolean {
   return span >= Math.PI * 2 - FULL_SWEEP_EPSILON;
@@ -57,12 +40,7 @@ function endpointsOf(entity: CadEntity): Point2D[] {
   return entity.vertices;
 }
 
-function collectEndpointCandidates(
-  entities: readonly CadEntity[],
-  visibleLayerNames: ReadonlySet<string>,
-  worldPoint: Point2D,
-  toleranceWorld: number,
-): SnapCandidate[] {
+function collectEndpointCandidates({ entities, visibleLayerNames, worldPoint, toleranceWorld }: GeneratorContext): SnapCandidate[] {
   const results: SnapCandidate[] = [];
   for (const entity of entities) {
     if (!visibleLayerNames.has(entity.layer)) continue;
@@ -75,12 +53,7 @@ function collectEndpointCandidates(
   return results;
 }
 
-function collectMidpointCandidates(
-  entities: readonly CadEntity[],
-  visibleLayerNames: ReadonlySet<string>,
-  worldPoint: Point2D,
-  toleranceWorld: number,
-): SnapCandidate[] {
+function collectMidpointCandidates({ entities, visibleLayerNames, worldPoint, toleranceWorld }: GeneratorContext): SnapCandidate[] {
   const results: SnapCandidate[] = [];
   for (const entity of entities) {
     if (!visibleLayerNames.has(entity.layer)) continue;
@@ -115,92 +88,6 @@ function collectMidpointCandidates(
   return results;
 }
 
-/** segmentの(スナップ半径分だけ広げた)バウンディングボックスがworldPointを含むか */
-function isSegmentNearPoint(a: Point2D, b: Point2D, worldPoint: Point2D, radius: number): boolean {
-  const minX = Math.min(a.x, b.x) - radius;
-  const maxX = Math.max(a.x, b.x) + radius;
-  const minY = Math.min(a.y, b.y) - radius;
-  const maxY = Math.max(a.y, b.y) + radius;
-  return worldPoint.x >= minX && worldPoint.x <= maxX && worldPoint.y >= minY && worldPoint.y <= maxY;
-}
-
-function collectIntersectionCandidates(
-  entities: readonly CadEntity[],
-  visibleLayerNames: ReadonlySet<string>,
-  worldPoint: Point2D,
-  toleranceWorld: number,
-): SnapCandidate[] {
-  // 交点がtoleranceWorld以内になり得るのは、両方の線分がカーソル近傍を通る場合のみ。
-  // 全Entity同士の総当たりを避けるため、まずカーソル近傍の線分だけに絞り込む(正確性を保った絞り込み)。
-  const nearbySegments: Array<[Point2D, Point2D]> = [];
-  for (const entity of entities) {
-    if (!visibleLayerNames.has(entity.layer)) continue;
-    for (const segment of getEntitySegments(entity)) {
-      // 交点は両方の線分上にあり、かつカーソルからtoleranceWorld以内なので、各線分自身がその範囲に入っている必要がある。
-      // 安価なバウンディングボックス判定で粗く絞ってから、実距離で絞ると、後段の総当たり(線分数の2乗)が大きく減る。
-      if (
-        isSegmentNearPoint(segment[0], segment[1], worldPoint, toleranceWorld) &&
-        pointToSegmentDistance(worldPoint, segment[0], segment[1]) <= toleranceWorld
-      ) {
-        nearbySegments.push(segment);
-      }
-    }
-  }
-
-  // 線分が極端に密集している箇所(ハッチングなど)で総当たりをすると操作が固まるため、交点スナップは諦める
-  if (nearbySegments.length > MAX_INTERSECTION_SEGMENTS) return [];
-
-  const results: SnapCandidate[] = [];
-  for (let i = 0; i < nearbySegments.length; i++) {
-    for (let j = i + 1; j < nearbySegments.length; j++) {
-      const point = intersectSegments(
-        nearbySegments[i][0],
-        nearbySegments[i][1],
-        nearbySegments[j][0],
-        nearbySegments[j][1],
-      );
-      if (point && distance(point, worldPoint) <= toleranceWorld) {
-        results.push({ point, type: "intersection" });
-      }
-    }
-  }
-  return results;
-}
-
-/** entity上でworldPointに最も近い点。TEXTなど線を持たない図形はnull */
-function nearestPointOnEntity(entity: CadEntity, worldPoint: Point2D): Point2D | null {
-  if (entity.type === "TEXT") return null;
-  if (entity.type === "POINT") return entity.position;
-  if (entity.type === "CIRCLE" || entity.type === "ARC") {
-    const dx = worldPoint.x - entity.center.x;
-    const dy = worldPoint.y - entity.center.y;
-    const fromCenter = Math.hypot(dx, dy);
-    if (entity.type === "ARC") {
-      const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
-      if (!(fromCenter > 0) || !isAngleInSweep(Math.atan2(dy, dx), entity.startAngle, span)) {
-        // 弧の範囲外では、近い方の端点が最も近い点
-        const start = pointOnArc(entity.center, entity.radius, entity.startAngle);
-        const end = pointOnArc(entity.center, entity.radius, entity.startAngle + span);
-        return distance(start, worldPoint) <= distance(end, worldPoint) ? start : end;
-      }
-    }
-    if (!(fromCenter > 0)) return null; // 円の中心からは最近点が定まらない
-    return { x: entity.center.x + (dx / fromCenter) * entity.radius, y: entity.center.y + (dy / fromCenter) * entity.radius };
-  }
-
-  let best: Point2D | null = null;
-  let bestDistance = Infinity;
-  for (const [a, b] of getEntitySegments(entity)) {
-    const candidate = closestPointOnSegment(worldPoint, a, b);
-    const d = distance(candidate, worldPoint);
-    if (d < bestDistance) {
-      bestDistance = d;
-      best = candidate;
-    }
-  }
-  return best;
-}
-
 /** 線の上の最も近い点(最近点スナップ)。端点・中点・交点が無いときの代わりに使う */
 function findNearestOnLine(
   entities: readonly CadEntity[],
@@ -225,21 +112,103 @@ function findNearestOnLine(
 
 export type SnapOptions = {
   /**
-   * 端点・中点・交点が見つからなかったとき、この距離以内の線上の最も近い点へ吸い付く(ワールド単位)。
+   * 端点・中点・交点などが見つからなかったとき、この距離以内の線上の最も近い点へ吸い付く(ワールド単位)。
    * toleranceWorldより大きくてもよい。未指定なら最近点スナップは行わない。
    */
   nearestToleranceWorld?: number;
+  /**
+   * 有効にする種類。未指定なら、これまでどおり(端点・中点・交点。最近点は nearestToleranceWorld を指定したとき)。
+   * 指定したときは、ここに含まれる種類だけを調べる(最近点は、"nearest" を含み、nearestToleranceWorld が正のとき)。
+   * "grid" を含めると、図形への吸着が無いとき、格子点へ吸い付く(gridSpacing が必要)。
+   */
+  enabledTypes?: ReadonlySet<SnapType>;
+  /** 垂線・接線の基準の点(作図中の直前の点など)。無ければ、垂線・接線は出さない */
+  fromPoint?: Point2D | null;
+  /** 格子の間隔(mm)。"grid" が有効なときに使う */
+  gridSpacing?: number;
+  /** 延長の対象にする、端点とカーソルの最大距離(ワールド単位)。未指定なら、延長は出さない */
+  extensionAcquireWorld?: number;
 };
 
-const CANDIDATE_GENERATORS: CandidateGenerator[] = [
-  collectEndpointCandidates,
-  collectMidpointCandidates,
-  collectIntersectionCandidates,
-];
+type NamedGenerator = { type: SnapType; generate: (context: GeneratorContext) => SnapCandidate[] };
 
 /**
- * worldPointからtoleranceWorld以内にある最も近いSnap候補(Endpoint/Midpoint/Intersection)を返す。
- * 非表示レイヤーのEntityはSnap対象から除外する。将来Snap種類を追加する場合はCANDIDATE_GENERATORSに追加する。
+ * 候補を調べる順。距離が同じときは、あとの種類が選ばれる。
+ * これまでの3種類(端点・中点・交点)の順は変えない(同じ距離のときの結果を変えないため)。新しい種類は、その前に置く。
+ */
+const GENERATORS: readonly NamedGenerator[] = [
+  { type: "extension", generate: collectExtensionCandidates },
+  { type: "tangent", generate: collectTangentCandidates },
+  { type: "perpendicular", generate: collectPerpendicularCandidates },
+  { type: "quadrant", generate: collectQuadrantCandidates },
+  { type: "center", generate: collectCenterCandidates },
+  { type: "endpoint", generate: collectEndpointCandidates },
+  { type: "midpoint", generate: collectMidpointCandidates },
+  { type: "intersection", generate: collectIntersectionCandidates },
+];
+
+const DEFAULT_ENABLED_TYPES: ReadonlySet<SnapType> = new Set<SnapType>(["endpoint", "midpoint", "intersection", "nearest"]);
+
+// 円弧・楕円の中心の索引(中心の Snap 用)。外接の矩形がカーソルから離れていても、中心はカーソルの近くにあり得るため、
+// 空間索引(外接の矩形による)では探せない。中心の x 座標で並べておき、二分探索で、カーソルの近くの中心だけを取り出す
+// (円弧が非常に多い図面で、毎回全件を調べないため)。空間索引ごとに1回だけ作る(索引は、図面が変わるたびに作り直される)。
+type CenterIndex = { entities: CadEntity[]; xs: Float64Array };
+const centerIndexCache = new WeakMap<SpatialIndex, CenterIndex>();
+
+function centerIndexOf(entities: readonly CadEntity[], index: SpatialIndex): CenterIndex {
+  let built = centerIndexCache.get(index);
+  if (built === undefined) {
+    const owners = entities.filter(
+      (entity): entity is Extract<CadEntity, { type: "ARC" | "ELLIPSE" }> =>
+        (entity.type === "ARC" || entity.type === "ELLIPSE") && Number.isFinite(entity.center.x) && Number.isFinite(entity.center.y),
+    );
+    // 並べ替えは、図形のオブジェクトではなく、番号の配列(型付き配列)で行う(円弧が非常に多いとき、こちらが速い)
+    const unsortedXs = Float64Array.from(owners, (entity) => entity.center.x);
+    const order = Uint32Array.from(owners, (_, i) => i).sort((a, b) => unsortedXs[a] - unsortedXs[b]);
+    built = {
+      entities: Array.from(order, (i) => owners[i] as CadEntity),
+      xs: Float64Array.from(order, (i) => unsortedXs[i]),
+    };
+    centerIndexCache.set(index, built);
+  }
+  return built;
+}
+
+/** xs(昇順)のうち、value 以上になる最初の位置 */
+function lowerBound(xs: Float64Array, value: number): number {
+  let low = 0;
+  let high = xs.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (xs[mid] < value) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+/** 中心の x 座標が [minX, maxX] にある、円弧・楕円 */
+function centerOwnersNear(entities: readonly CadEntity[], index: SpatialIndex, minX: number, maxX: number): CadEntity[] {
+  const built = centerIndexOf(entities, index);
+  const result: CadEntity[] = [];
+  for (let i = lowerBound(built.xs, minX); i < built.xs.length && built.xs[i] <= maxX; i++) result.push(built.entities[i]);
+  return result;
+}
+
+/** 格子点のうち、point に最も近い点。間隔が使えない値、または結果が有限でないときは null */
+export function nearestGridPoint(point: Point2D, spacing: number): Point2D | null {
+  if (!(spacing > 0) || !Number.isFinite(spacing)) return null;
+  const x = Math.round(point.x / spacing) * spacing;
+  const y = Math.round(point.y / spacing) * spacing;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  // -0 は 0 にそろえる
+  return { x: x === 0 ? 0 : x, y: y === 0 ? 0 : y };
+}
+
+/**
+ * worldPointからtoleranceWorld以内にある最も近いSnap候補を返す。
+ * 種類は、端点・中点・交点・中心・四半円点・垂線・接線・延長(図形への吸着)、最近点、格子(options.enabledTypes で選ぶ)。
+ * 非表示レイヤーのEntityはSnap対象から除外する。
+ * 優先順位: 図形への吸着のうち、カーソルに最も近いもの → 無ければ最近点 → 無ければ格子。
  */
 export function findSnapPoint(
   entities: readonly CadEntity[],
@@ -249,31 +218,61 @@ export function findSnapPoint(
   index?: SpatialIndex | null,
   options: SnapOptions = {},
 ): SnapCandidate | null {
+  const enabled = options.enabledTypes ?? DEFAULT_ENABLED_TYPES;
+  const nearestTolerance = enabled.has("nearest") ? (options.nearestToleranceWorld ?? 0) : 0;
+  const acquire = enabled.has("extension") ? (options.extensionAcquireWorld ?? 0) : 0;
+
+  const queryEntities = (radius: number): readonly CadEntity[] =>
+    index
+      ? index.grid
+          .queryRect(worldPoint.x - radius, worldPoint.y - radius, worldPoint.x + radius, worldPoint.y + radius)
+          .map((i) => entities[i])
+      : entities;
+
+  // 端点・中点・交点・最近点などは図形自身の上にあるので、カーソル周辺にバウンディングボックスがある図形だけ調べればよい
+  const nearbyEntities = queryEntities(Math.max(toleranceWorld, nearestTolerance));
+
   let best: SnapCandidate | null = null;
-  let bestDistance = toleranceWorld;
-  const nearestTolerance = options.nearestToleranceWorld ?? 0;
-
-  // 端点・中点・交点・最近点はいずれも図形自身の上にあるので、カーソル周辺にバウンディングボックスがある図形だけ調べればよい
-  const queryTolerance = Math.max(toleranceWorld, nearestTolerance);
-  const nearbyEntities = index
-    ? index.grid
-        .queryRect(worldPoint.x - queryTolerance, worldPoint.y - queryTolerance, worldPoint.x + queryTolerance, worldPoint.y + queryTolerance)
-        .map((i) => entities[i])
-    : entities;
-
-  for (const generate of CANDIDATE_GENERATORS) {
-    for (const candidate of generate(nearbyEntities, visibleLayerNames, worldPoint, toleranceWorld)) {
-      const dist = distance(candidate.point, worldPoint);
-      if (dist <= bestDistance) {
-        bestDistance = dist;
-        best = candidate;
+  const objectTypesEnabled = GENERATORS.some((g) => enabled.has(g.type));
+  if (objectTypesEnabled) {
+    const wantsCenter = enabled.has("center");
+    const context: GeneratorContext = {
+      entities: nearbyEntities,
+      visibleLayerNames,
+      worldPoint,
+      toleranceWorld,
+      fromPoint: options.fromPoint ?? null,
+      centerEntities: wantsCenter
+        ? index
+          ? [
+              ...nearbyEntities.filter((entity) => entity.type === "CIRCLE"),
+              ...centerOwnersNear(entities, index, worldPoint.x - toleranceWorld, worldPoint.x + toleranceWorld),
+            ]
+          : entities
+        : [],
+      extensionEntities: acquire > 0 ? queryEntities(acquire) : [],
+      extensionAcquireWorld: acquire,
+    };
+    let bestDistance = toleranceWorld;
+    for (const { type, generate } of GENERATORS) {
+      if (!enabled.has(type)) continue;
+      for (const candidate of generate(context)) {
+        const dist = distance(candidate.point, worldPoint);
+        if (dist <= bestDistance) {
+          bestDistance = dist;
+          best = candidate;
+        }
       }
     }
   }
 
-  // 端点・中点・交点が無いときだけ、近くの線の上の最も近い点へ吸い付く(端点などが常に優先)
-  if (!best && nearestTolerance > 0) {
-    return findNearestOnLine(nearbyEntities, visibleLayerNames, worldPoint, nearestTolerance);
+  // 端点などが無いときだけ、近くの線の上の最も近い点へ吸い付く(端点などが常に優先)
+  if (!best && nearestTolerance > 0) best = findNearestOnLine(nearbyEntities, visibleLayerNames, worldPoint, nearestTolerance);
+
+  // それも無いときだけ、格子点へ吸い付く(許容距離は無く、いちばん近い格子点)
+  if (!best && enabled.has("grid") && options.gridSpacing !== undefined) {
+    const point = nearestGridPoint(worldPoint, options.gridSpacing);
+    if (point !== null) best = { point, type: "grid" };
   }
   return best;
 }

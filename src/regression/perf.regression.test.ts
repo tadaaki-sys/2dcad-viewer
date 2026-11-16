@@ -6,6 +6,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
 import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Selection";
 import { findSnapPoint } from "../core/snap/SnapEngine";
+import type { SnapType } from "../core/snap/SnapEngine";
+import { DEFAULT_SNAP_SETTINGS, enabledSnapTypes } from "../core/snap/snapSettings";
 import type { CadModel } from "../types/cad";
 import { REAL_ENABLED, REGRESSION_DIR, UPDATE_BASELINE, loadDrawing, readManifest } from "./loadDrawing";
 import { cameraAt, installRecordingPath2D, renderModel } from "./recordingContext";
@@ -60,11 +62,44 @@ function measure(model: CadModel, base: { dwgConvertMs: number; parseMs: number;
     timeIt(() => {
       for (const p of points) findSnapPoint(model.entities, visible, p, tolerance, index, { nearestToleranceWorld: 5 });
     }) / points.length;
+  // 全種類(端点・中点・交点・中心・四半円点・垂線・接線・近接・延長・グリッド)を有効にしたときの Snap(Phase 7)
+  const allTypes = new Set<SnapType>(["endpoint", "midpoint", "intersection", "center", "quadrant", "perpendicular", "tangent", "nearest", "extension", "grid"]);
+  const snapAllTypesMs =
+    timeIt(() => {
+      for (const p of points) {
+        findSnapPoint(model.entities, visible, p, tolerance, index, {
+          enabledTypes: allTypes,
+          nearestToleranceWorld: 5,
+          fromPoint: points[0],
+          gridSpacing: Math.max(width, height) / 100,
+          extensionAcquireWorld: tolerance * 15,
+        });
+      }
+    }) / points.length;
+  // 初期設定(端点・中点・交点・中心・四半円点・近接)での Snap。ふだんの操作の時間
+  const snapDefaultSettingsMs =
+    timeIt(() => {
+      for (const p of points) {
+        findSnapPoint(model.entities, visible, p, tolerance, index, { enabledTypes: enabledSnapTypes(DEFAULT_SNAP_SETTINGS), nearestToleranceWorld: 5 });
+      }
+    }) / points.length;
+  // 重くなりやすい種類(延長: 広い範囲を調べる)だけを有効にしたとき
+  const snapExtensionOnlyMs =
+    timeIt(() => {
+      for (const p of points) {
+        findSnapPoint(model.entities, visible, p, tolerance, index, { enabledTypes: new Set<SnapType>(["extension"]), extensionAcquireWorld: tolerance * 15 });
+      }
+    }) / points.length;
+  // 図面を変更したあとの、最初の Snap(円弧・楕円の中心の索引を作る時間を含む)。索引は、変更のたびに作り直される
+  const freshIndex = buildSpatialIndex(model);
+  const snapFirstAfterEditMs = timeIt(() => {
+    findSnapPoint(model.entities, visible, points[0], tolerance, freshIndex, { enabledTypes: enabledSnapTypes(DEFAULT_SNAP_SETTINGS), nearestToleranceWorld: 5 });
+  });
   const boxSelectMs = timeIt(() => {
     findEntitiesInBox(model.entities, visible, { min: points[0], max: { x: points[0].x + width / 10, y: points[0].y + height / 10 } }, "crossing", index);
   });
 
-  return { ...base, indexMs, fullRenderMs, zoomRenderMs, selectionMs, snapMs, boxSelectMs, entityCount: model.entities.length };
+  return { ...base, indexMs, fullRenderMs, zoomRenderMs, selectionMs, snapMs, snapDefaultSettingsMs, snapExtensionOnlyMs, snapAllTypesMs, snapFirstAfterEditMs, boxSelectMs, entityCount: model.entities.length };
 }
 
 describe.skipIf(!REAL_ENABLED || manifest.length === 0)("performance baseline (warn only)", () => {

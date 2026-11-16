@@ -15,6 +15,7 @@ export type {
   AppCommandSession,
   AppRequest,
   DrawTarget,
+  SnapToggleSetting,
 } from "./types";
 
 /** 図面が開いているときだけ、依頼を返すコマンドを作る */
@@ -47,6 +48,9 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
   ...CIRCLE_ARC_COMMANDS,
   documentCommand("TOFRONT", [], "選択中の新しい図形を最前面へ", { type: "reorder", direction: "front" }),
   documentCommand("TOBACK", [], "選択中の新しい図形を最背面へ", { type: "reorder", direction: "back" }),
+  documentCommand("OSNAP", [], "図形への吸着(端点・中点など)のオン・オフ", { type: "toggleSnapSetting", setting: "objectSnap" }),
+  documentCommand("SNAP", [], "格子点への吸着のオン・オフ", { type: "toggleSnapSetting", setting: "gridSnap" }),
+  documentCommand("GRID", [], "格子点の表示のオン・オフ", { type: "toggleSnapSetting", setting: "gridDisplay" }),
   {
     // 点の指示(図面のクリックと座標の入力)の動作確認用のコマンド。図面は変更しない
     name: "ID",

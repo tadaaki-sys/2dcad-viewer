@@ -15,7 +15,12 @@ export type AppRequest =
   /** 図形を、描画順の末尾(最前面)へ追加する。1つの依頼が、Undoの1段階になる */
   | { type: "addEntities"; entities: readonly CadEntity[]; label: string }
   /** 選択中の図形(新しく描いたもの)の描画順を変える */
-  | { type: "reorder"; direction: "front" | "back" };
+  | { type: "reorder"; direction: "front" | "back" }
+  /** Snap の設定のオン・オフ(OSNAP=図形への吸着、SNAP=格子点への吸着、GRID=格子点の表示) */
+  | { type: "toggleSnapSetting"; setting: SnapToggleSetting };
+
+/** オン・オフを切り替えられる Snap の設定 */
+export type SnapToggleSetting = "objectSnap" | "gridSnap" | "gridDisplay";
 
 /** 新しい図形を描く先(現在のレイヤー)。描けないときは、理由を持つ */
 export type DrawTarget = { ok: true; layer: string; color: string } | { ok: false; reason: string };

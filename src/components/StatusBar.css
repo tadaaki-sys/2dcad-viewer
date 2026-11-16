@@ -70,6 +70,34 @@
   padding: 1px 0;
 }
 
+/* GRID・SNAP・OSNAP のボタン(クリックでオン・オフ。オンのときは強調) */
+.status-bar__toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 12px;
+}
+
+.status-bar__toggle {
+  padding: 1px 6px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.status-bar__toggle:hover {
+  border-color: var(--color-text-muted);
+}
+
+.status-bar__toggle--on {
+  background: #1f4f78;
+  border-color: #4a90e2;
+  color: #ffffff;
+}
+
 .status-bar__dirty {
   color: #e2a33d;
   white-space: nowrap;

@@ -33,6 +33,9 @@ import {
 } from "./core/commands";
 import type { ActiveCommand, DynamicField, DynamicMode, DynamicValues, SessionResult } from "./core/commands";
 import { DynamicInput } from "./components/DynamicInput";
+import type { SnapSettings } from "./core/snap/snapSettings";
+import type { SnapToggleSetting } from "./app/commands/builtinCommands";
+import { loadSnapSettings, saveSnapSettings } from "./utils/snapSettingsStorage";
 import { createAppCommands } from "./app/commands/builtinCommands";
 import { defaultLayerName, resolveDrawTarget } from "./app/drawing/drawTarget";
 import { reorderSelection } from "./app/document/reorder";
@@ -65,6 +68,16 @@ function historyShortcutOf(event: KeyboardEvent): "undo" | "redo" | null {
 const NO_HISTORY_STATE: DocumentSessionState = { canUndo: false, canRedo: false, isDirty: false };
 
 const EMPTY_DYNAMIC_VALUES: DynamicValues = {};
+
+/** Snap の設定の切り替えを、コマンドラインに表示するときの名前 */
+const SNAP_SETTING_LABELS: Record<SnapToggleSetting, string> = {
+  objectSnap: "OSNAP(図形への吸着)",
+  gridSnap: "SNAP(格子点への吸着)",
+  gridDisplay: "GRID(格子点の表示)",
+};
+
+/** F3=OSNAP、F7=GRID、F9=SNAP(AutoCAD と同じ) */
+const SNAP_FUNCTION_KEYS: Record<string, SnapToggleSetting> = { F3: "objectSnap", F7: "gridDisplay", F9: "gridSnap" };
 
 /** コマンドラインに残すメッセージの最大行数 */
 const COMMAND_LOG_LIMIT = 100;
@@ -133,6 +146,11 @@ export default function App() {
   const [sessionState, setSessionState] = useState<DocumentSessionState>(NO_HISTORY_STATE);
   // コマンドの状態が変わるたびに増える番号(ゴム紐を作り直すきっかけ)
   const [commandRevision, setCommandRevision] = useState(0);
+  // Snap の設定(OSNAP・SNAP・GRID と、種類ごとのオン・オフ、格子の間隔)。このブラウザに保存する
+  const [snapSettings, setSnapSettings] = useState<SnapSettings>(loadSnapSettings);
+  useEffect(() => {
+    saveSnapSettings(snapSettings);
+  }, [snapSettings]);
   useEffect(() => {
     commands.setContext({
       isDocumentOpen,
@@ -510,6 +528,12 @@ export default function App() {
         case "toggleFullscreen":
           handleToggleFullscreen();
           break;
+        case "toggleSnapSetting": {
+          const next = { ...snapSettings, [request.setting]: !snapSettings[request.setting] };
+          setSnapSettings(next);
+          appendCommandLog([`${SNAP_SETTING_LABELS[request.setting]}: ${next[request.setting] ? "オン" : "オフ"}`]);
+          break;
+        }
         case "undo":
           performHistoryStep("undo");
           break;
@@ -536,7 +560,14 @@ export default function App() {
       confirmDiscardChanges,
       loadingProgress,
       appendCommandLog,
+      snapSettings,
     ],
+  );
+
+  /** GRID・SNAP・OSNAP のオン・オフ(ステータスバーのボタンと F7・F9・F3)。実行中のコマンドは、終わらせずに続ける */
+  const handleToggleSnap = useCallback(
+    (setting: SnapToggleSetting) => executeRequest({ type: "toggleSnapSetting", setting }),
+    [executeRequest],
   );
 
   /** コマンドの結果を反映する(メッセージの表示、実行中の状態、アプリへの依頼の実行)。echo は、入力した文字の表示 */
@@ -656,6 +687,13 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      // F3・F7・F9(Snap の切り替え)は、文字ではないので、コマンドラインに打っている最中でも効く。実行中のコマンドは終わらせない
+      const snapSetting = SNAP_FUNCTION_KEYS[event.key];
+      if (snapSetting !== undefined && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        if (isDocumentOpen) handleToggleSnap(snapSetting);
+        return;
+      }
       // 入力欄に文字を打っているときは、ショートカットとして扱わない(コマンドラインへの「f」で全体表示しないように)
       if (isTypingTarget(event.target)) return;
       // コマンドが数値を待っているときの、数字・小数点・マイナスのキーは、コマンドラインへ移して打ち始める
@@ -732,6 +770,7 @@ export default function App() {
     applyCommandResult,
     runCommand,
     handleDeleteMeasurement,
+    handleToggleSnap,
   ]);
 
   /** コマンドラインの入力欄でのCtrl+Z。作図中なら「1点戻す(U)」として受け取る。受け取れないときは false(入力欄の文字の取り消し) */
@@ -871,6 +910,8 @@ export default function App() {
             onPointPick={handlePointPick}
             getPreview={getPreview}
             previewRevision={commandRevision + dynamicTick}
+            snapSettings={snapSettings}
+            snapFromPoint={activeCommand?.basePoint ?? null}
             onCursorMove={handleCursorMove}
           />
           {dynamicMode !== null && (
@@ -937,6 +978,9 @@ export default function App() {
         stats={cadModel?.stats ?? null}
         isDirty={sessionState.isDirty}
         currentLayerName={currentLayerName}
+        snapSettings={snapSettings}
+        onToggleSnap={handleToggleSnap}
+        onChangeSnapSettings={setSnapSettings}
       />
       {loadingProgress && loadStartedAt !== null && (
         <LoadingOverlay stage={loadingProgress.stage} entityCount={loadingProgress.entityCount} startedAt={loadStartedAt} />

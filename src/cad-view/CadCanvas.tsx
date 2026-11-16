@@ -6,6 +6,9 @@ import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
 import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Selection";
 import { findSnapPoint } from "../core/snap/SnapEngine";
 import type { SnapCandidate } from "../core/snap/SnapEngine";
+import { enabledSnapTypes } from "../core/snap/snapSettings";
+import type { SnapSettings } from "../core/snap/snapSettings";
+import type { SnapMarker } from "./renderer/snapMarker";
 import { findMeasurementAtPoint } from "../core/measurement/Measurement";
 import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
 import { unionOfVisibleEntityBounds } from "../core/spatial/entityBounds";
@@ -21,6 +24,8 @@ const SAME_SPOT_TOLERANCE_PX = 3;
 const SNAP_TOLERANCE_PX = 10;
 // 測定時、線からこの距離(図面の単位=mm)以内なら、線の上の最も近い点へ吸い付く
 const NEAREST_SNAP_DISTANCE_WORLD = 5;
+// 延長の Snap の対象にする、端点とカーソルの最大距離(画面上のpx)
+const EXTENSION_ACQUIRE_PX = 150;
 
 type OverlapCycleState = {
   screenPoint: Point2D;
@@ -69,6 +74,10 @@ type CadCanvasProps = {
   getPreview?: (worldPoint: Point2D) => readonly PreviewShape[];
   /** コマンドの状態が変わるたびに増える番号。変わったら、いまのカーソル位置でゴム紐を作り直す */
   previewRevision?: number;
+  /** Snap の設定(OSNAP・種類ごとのオン・オフ・グリッド) */
+  snapSettings: SnapSettings;
+  /** 垂線・接線の基準の点(作図中の直前の点など)。無ければ null */
+  snapFromPoint?: Point2D | null;
   /** カーソルの位置(図面上の点は吸着後)。screenPoint は、キャンバスの左上からのピクセル位置(カーソル付近の表示用) */
   onCursorMove?: (worldPoint: Point2D | null, screenPoint: Point2D | null) => void;
 };
@@ -110,6 +119,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     onPointPick,
     getPreview,
     previewRevision,
+    snapSettings,
+    snapFromPoint = null,
     onCursorMove,
   },
   ref,
@@ -121,7 +132,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const dragSelectionBoxRef = useRef<DragSelectionBox | null>(null);
   const overlapCycleRef = useRef<OverlapCycleState | null>(null);
   const pendingMeasurementPointRef = useRef<Point2D | null>(null);
-  const snapMarkerRef = useRef<Point2D | null>(null);
+  const snapMarkerRef = useRef<SnapMarker | null>(null);
   // 作図中のゴム紐と、そのもとになったカーソル位置(図面上。吸着後)
   const previewRef = useRef<readonly PreviewShape[]>([]);
   const lastPointerWorldRef = useRef<Point2D | null>(null);
@@ -140,7 +151,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   // 図面を読み込んだ時に1回だけ作る。選択・スナップ・描画が全図形の総当たりにならないようにするための索引。
   const spatialIndex = useMemo(() => (model ? buildSpatialIndex(model) : null), [model]);
 
+  // 有効な Snap の種類(設定から求める。設定が変わったときだけ作り直す)
+  const snapEnabledTypes = useMemo(() => enabledSnapTypes(snapSettings), [snapSettings]);
+
   const stateRef = useRef({
+    snapEnabledTypes,
     model,
     spatialIndex,
     visibleLayerNames,
@@ -155,9 +170,12 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     onMeasurementSelect,
     onPointPick,
     getPreview,
+    snapSettings,
+    snapFromPoint,
     onCursorMove,
   });
   stateRef.current = {
+    snapEnabledTypes,
     model,
     spatialIndex,
     visibleLayerNames,
@@ -172,6 +190,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     onMeasurementSelect,
     onPointPick,
     getPreview,
+    snapSettings,
+    snapFromPoint,
     onCursorMove,
   };
 
@@ -208,7 +228,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       measurements: currentMeasurements,
       selectedMeasurementId: currentSelectedMeasurementId,
       pendingMeasurementPoint: pendingMeasurementPointRef.current,
-      snapMarkerPoint: snapMarkerRef.current,
+      snapMarker: snapMarkerRef.current,
+      gridSpacing: stateRef.current.snapSettings.gridDisplay ? stateRef.current.snapSettings.gridSpacing : null,
       previewShapes: previewRef.current,
       spatialIndex: currentSpatialIndex,
     });
@@ -315,6 +336,13 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleLayerNames]);
 
+  // Snap の設定が変わったら、古い目印を捨てて、格子の表示も更新する
+  useEffect(() => {
+    snapMarkerRef.current = null;
+    draw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapSettings]);
+
   useEffect(() => {
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -405,14 +433,22 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel) return { worldPoint, snap: null };
 
       const scale = cameraRef.current.scale;
+      const { snapSettings: settings, snapEnabledTypes: enabledTypes } = stateRef.current;
       const snap = findSnapPoint(
         currentModel.entities,
         currentVisible,
         worldPoint,
         SNAP_TOLERANCE_PX / scale,
         stateRef.current.spatialIndex,
-        // 線の近く(図面上5mm以内、または画面上の吸着距離以内のどちらか広い方)なら、線の上の最も近い点へ吸い付く
-        { nearestToleranceWorld: Math.max(NEAREST_SNAP_DISTANCE_WORLD, SNAP_TOLERANCE_PX / scale) },
+        {
+          // 線の近く(図面上5mm以内、または画面上の吸着距離以内のどちらか広い方)なら、線の上の最も近い点へ吸い付く
+          nearestToleranceWorld: Math.max(NEAREST_SNAP_DISTANCE_WORLD, SNAP_TOLERANCE_PX / scale),
+          enabledTypes,
+          // 垂線・接線の基準: 測定中は、1点目。作図中は、コマンドの段階が持つ基準点
+          fromPoint: currentMeasurementModeEnabled ? pendingMeasurementPointRef.current : stateRef.current.snapFromPoint,
+          gridSpacing: settings.gridSpacing,
+          extensionAcquireWorld: EXTENSION_ACQUIRE_PX / scale,
+        },
       );
       return { worldPoint, snap };
     }
@@ -620,10 +656,19 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     // 吸着先の目印。測定モード中のホバーで、吸い付いた位置が分かるように表示する
-    function updateSnapMarker(point: Point2D | null) {
+    function updateSnapMarker(candidate: SnapCandidate | null) {
       const previous = snapMarkerRef.current;
-      if (previous === point || (previous && point && previous.x === point.x && previous.y === point.y)) return;
-      snapMarkerRef.current = point;
+      if (previous === null && candidate === null) return;
+      if (
+        previous &&
+        candidate &&
+        previous.type === candidate.type &&
+        previous.point.x === candidate.point.x &&
+        previous.point.y === candidate.point.y
+      ) {
+        return;
+      }
+      snapMarkerRef.current = candidate ? { point: candidate.point, type: candidate.type } : null;
       requestDraw();
     }
 
@@ -638,7 +683,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         return;
       }
       const { worldPoint, snap } = findSnapAt(event.clientX, event.clientY);
-      updateSnapMarker(isPanning ? null : snap ? snap.point : null);
+      updateSnapMarker(isPanning ? null : snap);
       if (stateRef.current.pointPickEnabled) {
         // 作図中: カーソルの位置(吸着後)に応じて、ゴム紐を作る(図面のデータは変えず、重ねて描くだけ)
         const cursor = snap ? snap.point : worldPoint;
