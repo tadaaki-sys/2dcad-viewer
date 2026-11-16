@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveCommand } from "./session";
 import {
+  applyTypedValues,
   dynamicModeOf,
   formatDynamicValue,
   inputFieldsOf,
@@ -174,6 +175,47 @@ describe("resolveDynamicPoint", () => {
       expect(Math.abs(resolved.point.x - target.x)).toBeLessThan(1e-6);
       expect(Math.abs(resolved.point.y - target.y)).toBeLessThan(1e-6);
     }
+  });
+});
+
+describe("applyTypedValues (the point shown by the rubber band, the display and the click)", () => {
+  const base = { x: 0, y: 0 };
+  const cursor = { x: 100, y: 0 };
+
+  it("nothing typed, no mode, or an unreadable text: the cursor itself", () => {
+    expect(applyTypedValues(null, base, cursor, {}, "length", "50")).toBe(cursor);
+    expect(applyTypedValues("polar", base, cursor, {}, "length", "")).toBe(cursor);
+    expect(applyTypedValues("polar", base, cursor, {}, "length", "abc")).toBe(cursor);
+    expect(applyTypedValues("polar", base, cursor, {}, "length", "-5")).toBe(cursor);
+    expect(applyTypedValues("polar", base, null, {}, "length", "5")).toBeNull();
+  });
+
+  it("the text being typed and the locked values are both applied", () => {
+    // 長さ1500を確定し、角度90を打っている途中 -> 真上へ1500
+    const point = applyTypedValues("polar", base, cursor, { length: 1500 }, "angle", "90");
+    expect(point!.x).toBeCloseTo(0, 9);
+    expect(point!.y).toBeCloseTo(1500, 9);
+    // 長さだけ(確定済み): 角度はカーソルの向き
+    expect(applyTypedValues("polar", base, cursor, { length: 40 }, "angle", "")).toEqual({ x: 40, y: 0 });
+    // 絶対座標: Xだけ確定
+    expect(applyTypedValues("absolute", null, { x: 5, y: 7 }, { x: 99 }, "y", "")).toEqual({ x: 99, y: 7 });
+  });
+
+  it("when the typed values cannot make a point (no cursor to fill in the rest), the cursor is returned", () => {
+    expect(applyTypedValues("polar", base, null, { length: 5 }, "angle", "")).toBeNull();
+  });
+});
+
+describe("non-finite values never become a point", () => {
+  it("a NaN or infinite cursor, and differences that overflow", () => {
+    const base = { x: 0, y: 0 };
+    expect(resolveDynamicPoint("polar", base, { x: Number.NaN, y: 0 }, { length: 5 }).ok).toBe(false);
+    expect(resolveDynamicPoint("polar", base, { x: Number.POSITIVE_INFINITY, y: 0 }, { angle: 10 }).ok).toBe(false);
+    expect(resolveDynamicPoint("absolute", null, { x: Number.NaN, y: 0 }, { y: 1 }).ok).toBe(false);
+    // 差が溢れる(端から端)
+    const huge = readoutAt({ x: Number.MAX_VALUE, y: 0 }, { x: -Number.MAX_VALUE, y: 0 });
+    expect(Number.isFinite(huge.length!)).toBe(false);
+    expect(resolveDynamicPoint("polar", { x: -Number.MAX_VALUE, y: 0 }, { x: Number.MAX_VALUE, y: 0 }, { angle: 0 }).ok).toBe(false);
   });
 });
 

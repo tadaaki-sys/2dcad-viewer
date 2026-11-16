@@ -24,9 +24,10 @@ type CommandLineProps = {
   onTextChange?: (text: string) => void;
   /**
    * Tab が押されたとき。ダイナミック入力の「次の項目へ」として受け取れば true を返す(そのとき入力欄は空になり、
-   * ブラウザ標準のフォーカス移動は行わない)。false なら、標準のまま
+   * ブラウザ標準のフォーカス移動は行わない)。"keep" は、受け取ったが、入力欄の文字は残す(打った値が読み取れなかったとき)。
+   * false なら、標準のまま
    */
-  onTab?: (text: string, backwards: boolean) => boolean;
+  onTab?: (text: string, backwards: boolean) => boolean | "keep";
   /** 値が変わったら、入力途中の文字を捨てる(コマンドの状態が進んだとき。案内の文が同じ段階が続いても、古い文字を残さない) */
   resetKey: number;
 };
@@ -74,10 +75,13 @@ export function CommandLine({
       return;
     }
     if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      if (onTab?.(text, event.shiftKey)) {
+      const handled = onTab?.(text, event.shiftKey) ?? false;
+      if (handled !== false) {
         event.preventDefault();
-        setText("");
-        history.resetCursor();
+        if (handled === true) {
+          setText("");
+          history.resetCursor();
+        }
       }
       return;
     }

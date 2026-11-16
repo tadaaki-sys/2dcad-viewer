@@ -232,11 +232,11 @@ test.describe("keyboard", () => {
     await expect(row(page, "length")).toContainText("70.0"); // 確定した値は残っている
   });
 
-  test("clicking a point while values are typed uses the click; the typed values are dropped", async ({ page }) => {
+  test("clicking a point while a length is locked gives the point the rubber band shows (the click decides the direction); the values are then dropped", async ({ page }) => {
     const mapping = await openEditable(page);
     await typeCommand(page, "line");
     await typeCommand(page, "550,50");
-    await moveTo(page, at(mapping, 650, 50));
+    await moveTo(page, at(mapping, 650, 90)); // 始点から約108mm、約22度の向き
     await input(page).focus();
     await page.keyboard.type("70");
     await page.keyboard.press("Tab");
@@ -246,6 +246,9 @@ test.describe("keyboard", () => {
     await expect(row(page, "length")).toHaveClass(/dynamic-input__row--active/);
     await expect(input(page)).toHaveValue("");
     await page.keyboard.press("Escape");
+    // 描かれた線の長さは、確定した 70(クリックした点までの約108ではない)。中点は (582,63) 付近
+    await selectAt(page, at(mapping, 582.5, 63));
+    await expect(propertyPanel(page)).toContainText("70.0 mm");
   });
 
   test("coordinates, keywords and an empty Enter still work as before", async ({ page }) => {
@@ -260,6 +263,99 @@ test.describe("keyboard", () => {
     await expect(log(page)).toContainText("1本の線を追加しました");
     expect(await entityCount(page)).toBe(before + 1);
     void mapping;
+  });
+});
+
+test.describe("Codex review fixes (Phase 6)", () => {
+  test("an unreadable value on Tab is not locked: the text stays, the field does not move, and the earlier value is not used by mistake", async ({ page }) => {
+    const mapping = await openEditable(page);
+    const before = await entityCount(page);
+    await typeCommand(page, "line");
+    await typeCommand(page, "550,50");
+    await moveTo(page, at(mapping, 650, 50));
+    await input(page).focus();
+    await page.keyboard.type("100");
+    await page.keyboard.press("Tab"); // 長さ100を確定し、角度へ
+    await page.keyboard.press("Tab"); // 空のTabで、長さへ戻る
+    await expect(row(page, "length")).toHaveClass(/dynamic-input__row--active/);
+    await page.keyboard.type("-5");
+    await page.keyboard.press("Tab"); // 読み取れない値
+    await expect(log(page)).toContainText("長さは0以上の数値で入力してください");
+    await expect(input(page)).toHaveValue("-5"); // 文字は残る(直せる)
+    await expect(row(page, "length")).toHaveClass(/dynamic-input__row--active/); // 項目は動かない
+    await expect(row(page, "length")).toHaveAttribute("data-state", "typing");
+    // 直して Enter: 直した値(30)が使われる
+    await input(page).fill("30");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    expect(await entityCount(page)).toBe(before + 1);
+    await selectAt(page, at(mapping, 565, 50));
+    await expect(propertyPanel(page)).toContainText("30.0 mm");
+  });
+
+  test("the display-only fields follow the point made from the typed values (they agree with the rubber band)", async ({ page }) => {
+    const mapping = await openEditable(page);
+    await typeCommand(page, "line");
+    await typeCommand(page, "550,50");
+    await moveTo(page, at(mapping, 700, 300)); // 入力とは関係ない場所
+    await input(page).focus();
+    await page.keyboard.type("100");
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("90");
+    // 基準点 (550,50) から真上へ100 -> (550,150)。表示専用の X・Y も、カーソルの値ではなく、この点
+    await expect(row(page, "x")).toContainText("550.0");
+    await expect(row(page, "y")).toContainText("150.0");
+    await expect(row(page, "x")).toHaveClass(/dynamic-input__row--readonly/);
+    await page.keyboard.press("Escape");
+  });
+
+  test("Esc, and a keyword that moves the command forward, drop the typed and locked values", async ({ page }) => {
+    const mapping = await openEditable(page);
+    await typeCommand(page, "line");
+    await typeCommand(page, "550,50");
+    await typeCommand(page, "@100,0");
+    await moveTo(page, at(mapping, 700, 60));
+    await input(page).focus();
+    await page.keyboard.type("70");
+    await page.keyboard.press("Tab");
+    await expect(row(page, "length")).toHaveAttribute("data-state", "locked");
+    // 「1点戻す」で、段階が変わる -> 古い値は消える
+    await typeCommand(page, "u");
+    await expect(row(page, "length")).toHaveAttribute("data-state", "live");
+    await expect(row(page, "length")).toHaveClass(/dynamic-input__row--active/);
+
+    await page.keyboard.type("40");
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Escape");
+    await expect(tooltip(page)).toHaveCount(0);
+    // 新しいコマンドでは、前の値が残っていない
+    await typeCommand(page, "line");
+    await typeCommand(page, "600,100");
+    await moveTo(page, at(mapping, 700, 100));
+    await expect(row(page, "length")).toHaveAttribute("data-state", "live");
+    await expect(row(page, "angle")).toHaveAttribute("data-state", "live");
+    await page.keyboard.press("Escape");
+  });
+
+  test("with the cursor outside the drawing, a value that needs the cursor is refused with the reason; typing both values works", async ({ page }) => {
+    const mapping = await openEditable(page);
+    const before = await entityCount(page);
+    await typeCommand(page, "line");
+    await typeCommand(page, "550,50");
+    await moveTo(page, at(mapping, 650, 50));
+    await page.mouse.move(400, 10); // ツールバーの上(図面の外)
+    await input(page).focus();
+    await page.keyboard.type("50");
+    await page.keyboard.press("Enter");
+    await expect(log(page)).toContainText("カーソルを図面の上に置くか");
+    expect(await entityCount(page)).toBe(before);
+    // 長さと角度の両方なら、カーソルが無くても指示できる
+    await page.keyboard.type("50");
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("90");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    expect(await entityCount(page)).toBe(before + 1);
   });
 });
 

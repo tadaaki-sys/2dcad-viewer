@@ -22,6 +22,7 @@ import type { DocumentChange, DocumentSessionState } from "./app/document/docume
 import { renderModelFromDocument } from "./app/document/renderModel";
 import {
   FIELD_LABELS,
+  applyTypedValues,
   dynamicModeOf,
   formatDynamicValue,
   inputFieldsOf,
@@ -608,7 +609,7 @@ export default function App() {
 
   /** コマンドラインでの Tab: ダイナミック入力の、次(Shift+Tab なら前)の項目へ。打っていた値は、その項目の値として確定する */
   const handleCommandTab = useCallback(
-    (text: string, backwards: boolean): boolean => {
+    (text: string, backwards: boolean): boolean | "keep" => {
       const dynamic = dynamicRef.current;
       // 項目が1つだけ(数値だけを待つ段階)や、対象でない段階では、何もしない(ブラウザ標準の動き)
       if (dynamic.mode !== "absolute" && dynamic.mode !== "polar") return false;
@@ -617,8 +618,9 @@ export default function App() {
       if (trimmed !== "") {
         const parsed = parseFieldText(dynamic.field, trimmed);
         if (!parsed.ok) {
+          // 読み取れない値は、確定せず、項目も動かさない。打った文字は残す(直せるように)
           appendCommandLog([`> ${trimmed}`, parsed.error]);
-          return true;
+          return "keep";
         }
         locked = { ...locked, [dynamic.field]: parsed.value };
       }
@@ -642,7 +644,10 @@ export default function App() {
   /** 図面のクリックで点が指示された */
   const handlePointPick = useCallback(
     (worldPoint: Point2D) => {
-      const result = commandSession.submitPoint(worldPoint);
+      // 打っている値・確定した値があるときは、ゴム紐に見えているとおりの点を指示する(クリックは、向きなどを決める)
+      const d = dynamicRef.current;
+      const point = applyTypedValues(d.mode, d.base, worldPoint, d.locked, d.field, d.text) ?? worldPoint;
+      const result = commandSession.submitPoint(point);
       applyCommandResult(result);
       focusCommandLineFor(result);
     },
@@ -743,19 +748,8 @@ export default function App() {
    */
   const getPreview = useCallback(
     (worldPoint: Point2D) => {
-      const dynamic = dynamicRef.current;
-      let point = worldPoint;
-      if (dynamic.mode !== null) {
-        const values: DynamicValues = { ...dynamic.locked };
-        if (dynamic.text.trim() !== "") {
-          const parsed = parseFieldText(dynamic.field, dynamic.text);
-          if (parsed.ok) values[dynamic.field] = parsed.value;
-        }
-        if (Object.keys(values).length > 0) {
-          const resolved = resolveDynamicPoint(dynamic.mode, dynamic.base, worldPoint, values);
-          if (resolved.ok) point = resolved.point;
-        }
-      }
+      const d = dynamicRef.current;
+      const point = applyTypedValues(d.mode, d.base, worldPoint, d.locked, d.field, d.text) ?? worldPoint;
       return commandSession.previewAt(point);
     },
     [commandSession],
@@ -882,7 +876,8 @@ export default function App() {
           {dynamicMode !== null && (
             <DynamicInput
               mode={dynamicMode}
-              cursor={cursorWorld}
+              // 打っている値・確定した値を当てはめた点(ゴム紐・クリックでの指示と同じ点)。表示専用の項目も、これに合わせる
+              cursor={applyTypedValues(dynamicMode, activeCommand?.basePoint ?? null, cursorWorld, dynamicLocked, dynamicField, commandText)}
               screen={cursorScreen}
               base={activeCommand?.basePoint ?? null}
               locked={dynamicLocked}

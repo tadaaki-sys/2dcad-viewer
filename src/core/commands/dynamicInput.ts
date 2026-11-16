@@ -110,6 +110,30 @@ export function resolveDynamicPoint(
   return finite({ x: base.x + length * Math.cos(radians), y: base.y + length * Math.sin(radians) });
 }
 
+/**
+ * カーソルの点に、打っている値(いま入力中の項目の文字)と、確定した値を当てはめた、実効の点。
+ * ゴム紐・クリックでの指示・カーソル付近の表示は、すべてこの点を使う(見えているものと、確定するものを一致させる)。
+ * 何も打っていない、読み取れない、点にできないときは、カーソルの点のまま(カーソルが無ければ null)。
+ */
+export function applyTypedValues(
+  mode: DynamicMode | null,
+  base: Point2D | null,
+  cursor: Point2D | null,
+  locked: DynamicValues,
+  field: DynamicField,
+  typedText: string,
+): Point2D | null {
+  if (mode === null) return cursor;
+  const values: DynamicValues = { ...locked };
+  if (typedText.trim() !== "") {
+    const parsed = parseFieldText(field, typedText);
+    if (parsed.ok) values[field] = parsed.value;
+  }
+  if (Object.keys(values).length === 0) return cursor;
+  const resolved = resolveDynamicPoint(mode, base, cursor, values);
+  return resolved.ok ? resolved.point : cursor;
+}
+
 function finite(point: Point2D): DynamicResolveResult {
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return { ok: false, error: "値が大きすぎて計算できません" };
   return { ok: true, point };

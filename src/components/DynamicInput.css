@@ -10,6 +10,9 @@
   font-family: Consolas, "Courier New", monospace;
   font-size: 12px;
   line-height: 20px;
+  /* 表示領域が狭くても、はみ出さない */
+  max-width: calc(100% - 4px);
+  overflow: hidden;
   /* 表示だけ。クリック・ドラッグなどのマウス操作は、下の図面へ通す */
   pointer-events: none;
   user-select: none;
@@ -31,6 +34,11 @@
 
 .dynamic-input__value {
   text-align: right;
+  /* 長い入力は、末尾を省略する(行が折り返さない) */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 入力できる項目は枠で示し、いま入力している項目は強調する。ほかは、表示だけ */

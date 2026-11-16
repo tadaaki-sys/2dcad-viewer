@@ -2,6 +2,7 @@ export { parseCoordinateInput, normalizeCoordinateText } from "./coordinateInput
 export type { CoordinateParseResult } from "./coordinateInput";
 export {
   FIELD_LABELS,
+  applyTypedValues,
   dynamicModeOf,
   formatDynamicValue,
   inputFieldsOf,
