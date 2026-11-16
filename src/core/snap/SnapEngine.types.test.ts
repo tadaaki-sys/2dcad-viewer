@@ -59,6 +59,36 @@ describe("center", () => {
     expect(findSnapPoint(entities, visible, { x: 0.2, y: 0.1 }, 1, undefined, only("center"))).toEqual(result);
   });
 
+  it("with candidates at the same distance, the result does not depend on the spatial index (Codex review)", () => {
+    // 同じ形の2つの円弧。中心 (1,0) と (-1,0)。カーソル (0,0) から、どちらも距離1。図面の並びで、あとの方が選ばれる
+    const entities = [arc("right", 1, 0, 100, 0, 6), arc("left", -1, 0, 100, 0, 6)];
+    const index = indexOf(entities);
+    const withIndex = findSnapPoint(entities, visible, { x: 0, y: 0 }, 2, index, only("center"));
+    const without = findSnapPoint(entities, visible, { x: 0, y: 0 }, 2, undefined, only("center"));
+    expect(withIndex).toEqual(without);
+    expect(withIndex?.point).toEqual({ x: -1, y: 0 });
+    // 並びを逆にすると、選ばれる方も逆になる(どちらの場合も、索引の有無で同じ)
+    const reversed = [entities[1], entities[0]];
+    const reversedIndex = indexOf(reversed);
+    expect(findSnapPoint(reversed, visible, { x: 0, y: 0 }, 2, reversedIndex, only("center"))?.point).toEqual({ x: 1, y: 0 });
+    expect(findSnapPoint(reversed, visible, { x: 0, y: 0 }, 2, undefined, only("center"))?.point).toEqual({ x: 1, y: 0 });
+    // 円と円弧が同じ距離のときも、同じ
+    const mixed = [circle("c", 1, 0, 5), arc("a", -1, 0, 100, 0, 6), circle("d", 0, 1, 5)];
+    const mixedIndex = indexOf(mixed);
+    expect(findSnapPoint(mixed, visible, { x: 0, y: 0 }, 2, mixedIndex, only("center"))).toEqual(findSnapPoint(mixed, visible, { x: 0, y: 0 }, 2, undefined, only("center")));
+  });
+
+  it("a column of arcs with the same x: only the ones near the cursor in y are found (Codex review)", () => {
+    // x=0 に、y=1000 から縦に 2000 個の円弧。カーソルの近く (0,0) には無い。1つだけ、(0,1500) にある
+    const entities: CadEntity[] = [];
+    for (let i = 0; i < 2000; i++) entities.push(arc(`a${i}`, 0, 1000 + i, 5, 0, 90));
+    const index = indexOf(entities);
+    expect(findSnapPoint(entities, visible, { x: 0.2, y: 0.2 }, 2, index, only("center"))).toBeNull();
+    const found = findSnapPoint(entities, visible, { x: 0.3, y: 1500.4 }, 2, index, only("center"));
+    expect(found).toEqual({ point: { x: 0, y: 1500 }, type: "center" });
+    expect(findSnapPoint(entities, visible, { x: 0.3, y: 1500.4 }, 2, undefined, only("center"))).toEqual(found);
+  });
+
   it("hidden layers are not snapped to", () => {
     expect(findSnapPoint([circle("c", 0, 0, 5)], new Set(), { x: 0.1, y: 0 }, 1, undefined, only("center"))).toBeNull();
   });

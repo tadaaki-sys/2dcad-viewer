@@ -136,6 +136,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   // 作図中のゴム紐と、そのもとになったカーソル位置(図面上。吸着後)
   const previewRef = useRef<readonly PreviewShape[]>([]);
   const lastPointerWorldRef = useRef<Point2D | null>(null);
+  // マウスの、画面上の最後の位置(キャンバスの上にあるとき)。Snap の設定が変わったときに、同じ位置で作り直すため
+  const lastClientPointRef = useRef<{ x: number; y: number } | null>(null);
+  const refreshAtPointerRef = useRef<(() => void) | null>(null);
   const perfRef = useRef<CadCanvasPerformanceStats & { lastDrawAt: number }>({
     renderMs: 0,
     fps: null,
@@ -336,9 +339,10 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleLayerNames]);
 
-  // Snap の設定が変わったら、古い目印を捨てて、格子の表示も更新する
+  // Snap の設定が変わったら、古い目印を捨てて、いまのカーソル位置で吸着・ゴム紐・座標表示を作り直し、格子の表示も更新する
   useEffect(() => {
     snapMarkerRef.current = null;
+    refreshAtPointerRef.current?.();
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapSettings]);
@@ -672,17 +676,15 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       requestDraw();
     }
 
-    function handleMouseMove(event: MouseEvent) {
+    /** カーソル(画面の位置)に対する、吸着・目印・ゴム紐・座標表示を更新する */
+    function applyPointer(clientX: number, clientY: number) {
       if (!stateRef.current.measurementModeEnabled && !stateRef.current.pointPickEnabled) {
         updateSnapMarker(null);
         if (!stateRef.current.onCursorMove) return;
-        scheduleCursorUpdate(
-          computeWorldPointWithSnap(event.clientX, event.clientY),
-          getCanvasRelativePoint(canvas!, event.clientX, event.clientY),
-        );
+        scheduleCursorUpdate(computeWorldPointWithSnap(clientX, clientY), getCanvasRelativePoint(canvas!, clientX, clientY));
         return;
       }
-      const { worldPoint, snap } = findSnapAt(event.clientX, event.clientY);
+      const { worldPoint, snap } = findSnapAt(clientX, clientY);
       updateSnapMarker(isPanning ? null : snap);
       if (stateRef.current.pointPickEnabled) {
         // 作図中: カーソルの位置(吸着後)に応じて、ゴム紐を作る(図面のデータは変えず、重ねて描くだけ)
@@ -692,11 +694,23 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         requestDraw();
       }
       if (stateRef.current.onCursorMove) {
-        scheduleCursorUpdate(snap ? snap.point : worldPoint, getCanvasRelativePoint(canvas!, event.clientX, event.clientY));
+        scheduleCursorUpdate(snap ? snap.point : worldPoint, getCanvasRelativePoint(canvas!, clientX, clientY));
       }
     }
 
+    function handleMouseMove(event: MouseEvent) {
+      lastClientPointRef.current = { x: event.clientX, y: event.clientY };
+      applyPointer(event.clientX, event.clientY);
+    }
+
+    // Snap の設定が変わったとき(マウスは動いていない)に、いまのカーソル位置で、吸着・ゴム紐・座標表示を作り直す
+    refreshAtPointerRef.current = () => {
+      const point = lastClientPointRef.current;
+      if (point !== null) applyPointer(point.x, point.y);
+    };
+
     function handleMouseLeave() {
+      lastClientPointRef.current = null;
       updateSnapMarker(null);
       if (previewRef.current.length > 0) {
         previewRef.current = [];
@@ -717,6 +731,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     window.addEventListener("blur", handleWindowBlur);
 
     return () => {
+      refreshAtPointerRef.current = null;
       canvas.removeEventListener("wheel", handleWheel);
       canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mousemove", handleMouseMove);

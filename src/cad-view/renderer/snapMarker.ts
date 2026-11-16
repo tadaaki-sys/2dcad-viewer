@@ -111,13 +111,19 @@ export function drawGrid(ctx: CanvasRenderingContext2D, camera: Camera, width: n
   const lastI = Math.floor(maxX / spacing);
   const firstJ = Math.ceil(minY / spacing);
   const lastJ = Math.floor(maxY / spacing);
+  // 格子の番号が、正確な整数として扱える範囲(2^53 未満)にないときは描かない(番号を1つ増やしても値が変わらず、ループが終わらなくなる)
+  if (![firstI, lastI, firstJ, lastJ].every(Number.isSafeInteger)) return;
+  const countI = lastI - firstI + 1;
+  const countJ = lastJ - firstJ + 1;
+  if (countI <= 0 || countJ <= 0) return;
   // 点の数の上限(画面の大きさを、最小の間隔で割った数)。それを超える見込みなら描かない
-  if ((lastI - firstI + 1) * (lastJ - firstJ + 1) > (width / MIN_GRID_SCREEN_SPACING_PX + 2) * (height / MIN_GRID_SCREEN_SPACING_PX + 2)) return;
+  if (countI * countJ > (width / MIN_GRID_SCREEN_SPACING_PX + 2) * (height / MIN_GRID_SCREEN_SPACING_PX + 2)) return;
   ctx.save();
   ctx.fillStyle = GRID_COLOR;
-  for (let i = firstI; i <= lastI; i++) {
-    for (let j = firstJ; j <= lastJ; j++) {
-      const screen = camera.worldToScreen({ x: i * spacing, y: j * spacing });
+  // 番号そのものではなく、回数で数える(番号は、先頭からの差を足して求める)
+  for (let ni = 0; ni < countI; ni++) {
+    for (let nj = 0; nj < countJ; nj++) {
+      const screen = camera.worldToScreen({ x: (firstI + ni) * spacing, y: (firstJ + nj) * spacing });
       ctx.fillRect(Math.round(screen.x) - 1, Math.round(screen.y) - 1, 2, 2);
     }
   }

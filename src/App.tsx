@@ -691,7 +691,8 @@ export default function App() {
       const snapSetting = SNAP_FUNCTION_KEYS[event.key];
       if (snapSetting !== undefined && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
         event.preventDefault();
-        if (isDocumentOpen) handleToggleSnap(snapSetting);
+        // 押し続けたときのキーの繰り返しでは、切り替えない(繰り返しの回数で、最終的な状態が変わらないように)
+        if (isDocumentOpen && !event.repeat) handleToggleSnap(snapSetting);
         return;
       }
       // 入力欄に文字を打っているときは、ショートカットとして扱わない(コマンドラインへの「f」で全体表示しないように)

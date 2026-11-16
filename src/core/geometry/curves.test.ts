@@ -107,6 +107,75 @@ describe("intersectCircles", () => {
   });
 });
 
+describe("Codex review fixes (Phase 7): numerically hard cases", () => {
+  it("a very long segment that clearly misses the circle is not taken as tangent", () => {
+    // 線 y=2 は、半径1の円(中心 (0,0))から、距離2離れている。交点は無い
+    expect(intersectSegmentCircle({ x: -1e6, y: 2 }, { x: 1e6, y: 2 }, { x: 0, y: 0 }, 1)).toEqual([]);
+    expect(intersectSegmentCircle({ x: -1e9, y: 1.5 }, { x: 1e9, y: 1.5 }, { x: 0, y: 0 }, 1)).toEqual([]);
+  });
+
+  it("a very long segment still gives both intersections (no loss to rounding)", () => {
+    const points = sorted(intersectSegmentCircle({ x: -1e9, y: 0 }, { x: 1e9, y: 0 }, { x: 0, y: 0 }, 1));
+    expect(points).toHaveLength(2);
+    expect(points[0].x).toBeCloseTo(-1, 6);
+    expect(points[1].x).toBeCloseTo(1, 6);
+    expect(Math.abs(points[0].y) + Math.abs(points[1].y)).toBeLessThan(1e-6);
+  });
+
+  it("a very long tilted segment: the points are on the circle and on the line", () => {
+    const a = { x: -1e8, y: -1e8 };
+    const b = { x: 1e8, y: 1e8 + 5 };
+    const points = intersectSegmentCircle(a, b, { x: 3, y: 4 }, 10);
+    expect(points).toHaveLength(2);
+    for (const p of points) expect(Math.abs(Math.hypot(p.x - 3, p.y - 4) - 10)).toBeLessThan(1e-5);
+  });
+
+  it("a segment that just touches the circle (tangent) still gives the touching point; one that stops short gives none", () => {
+    const touch = intersectSegmentCircle({ x: -50, y: 1 }, { x: 50, y: 1 }, { x: 0, y: 0 }, 1);
+    expect(touch).toHaveLength(1);
+    expect(touch[0].x).toBeCloseTo(0, 9);
+    expect(intersectSegmentCircle({ x: -50, y: 1 }, { x: -1, y: 1 }, { x: 0, y: 0 }, 1)).toEqual([]);
+  });
+
+  it("a small circle inside a huge one, with a gap, does not get an invented touching point", () => {
+    // 大きな円(半径 1e9)の内側の、半径 1 の円。円周の間に 0.5 の隙間がある
+    expect(intersectCircles({ x: 0, y: 0 }, 1e9, { x: 999999998.5, y: 0 }, 1)).toEqual([]);
+    // 本当に接する(内接)ときは、接点が出る
+    const touching = intersectCircles({ x: 0, y: 0 }, 1e9, { x: 999999999, y: 0 }, 1);
+    expect(touching.length).toBeGreaterThanOrEqual(1);
+    expect(touching[0].x).toBeCloseTo(1e9, 0);
+  });
+
+  it("huge circles that really cross: the points lie on both circles", () => {
+    const c1 = { x: 0, y: 0 };
+    const c2 = { x: 1.5e9, y: 1e8 };
+    const points = intersectCircles(c1, 1e9, c2, 8e8);
+    expect(points).toHaveLength(2);
+    for (const p of points) {
+      expect(Math.abs(Math.hypot(p.x - c1.x, p.y - c1.y) - 1e9)).toBeLessThan(1e-3);
+      expect(Math.abs(Math.hypot(p.x - c2.x, p.y - c2.y) - 8e8)).toBeLessThan(1e-3);
+    }
+  });
+
+  it("random long segments: every returned point is on the circle and inside the segment", () => {
+    const rand = mulberry32(31);
+    let total = 0;
+    for (let n = 0; n < 300; n++) {
+      const c = { x: (rand() - 0.5) * 100, y: (rand() - 0.5) * 100 };
+      const r = 0.5 + rand() * 20;
+      const angle = rand() * Math.PI * 2;
+      const reach = 10 ** (3 + rand() * 5); // 1e3 〜 1e8
+      const a = { x: c.x + Math.cos(angle) * reach, y: c.y + Math.sin(angle) * reach };
+      const b = { x: c.x - Math.cos(angle + (rand() - 0.5) * 1e-5) * reach, y: c.y - Math.sin(angle + (rand() - 0.5) * 1e-5) * reach };
+      for (const p of intersectSegmentCircle(a, b, c, r)) {
+        total++;
+        expect(Math.abs(Math.hypot(p.x - c.x, p.y - c.y) - r)).toBeLessThan(1e-4 + reach * 1e-12);
+      }
+    }
+    expect(total).toBeGreaterThan(100);
+  });
+});
+
 describe("tangentPointsFromPoint", () => {
   it("from a point outside the circle: two points, each with the radius perpendicular to the tangent line", () => {
     const points = tangentPointsFromPoint({ x: 10, y: 0 }, { x: 0, y: 0 }, 5);

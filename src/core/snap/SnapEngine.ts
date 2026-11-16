@@ -152,22 +152,29 @@ const DEFAULT_ENABLED_TYPES: ReadonlySet<SnapType> = new Set<SnapType>(["endpoin
 // 円弧・楕円の中心の索引(中心の Snap 用)。外接の矩形がカーソルから離れていても、中心はカーソルの近くにあり得るため、
 // 空間索引(外接の矩形による)では探せない。中心の x 座標で並べておき、二分探索で、カーソルの近くの中心だけを取り出す
 // (円弧が非常に多い図面で、毎回全件を調べないため)。空間索引ごとに1回だけ作る(索引は、図面が変わるたびに作り直される)。
-type CenterIndex = { entities: CadEntity[]; xs: Float64Array };
+// ids は、図面の図形の並び(entities)での番号。同じ距離の候補が複数あるとき、索引を使っても使わなくても同じ結果になるよう、
+// 取り出したあとで、番号の順(図面の並び)にそろえる。
+type CenterIndex = { ids: Uint32Array; xs: Float64Array; ys: Float64Array };
 const centerIndexCache = new WeakMap<SpatialIndex, CenterIndex>();
 
 function centerIndexOf(entities: readonly CadEntity[], index: SpatialIndex): CenterIndex {
   let built = centerIndexCache.get(index);
   if (built === undefined) {
-    const owners = entities.filter(
-      (entity): entity is Extract<CadEntity, { type: "ARC" | "ELLIPSE" }> =>
-        (entity.type === "ARC" || entity.type === "ELLIPSE") && Number.isFinite(entity.center.x) && Number.isFinite(entity.center.y),
-    );
+    const ownerIds: number[] = [];
+    for (let i = 0; i < entities.length; i++) {
+      const entity = entities[i];
+      if ((entity.type === "ARC" || entity.type === "ELLIPSE") && Number.isFinite(entity.center.x) && Number.isFinite(entity.center.y)) {
+        ownerIds.push(i);
+      }
+    }
     // 並べ替えは、図形のオブジェクトではなく、番号の配列(型付き配列)で行う(円弧が非常に多いとき、こちらが速い)
-    const unsortedXs = Float64Array.from(owners, (entity) => entity.center.x);
-    const order = Uint32Array.from(owners, (_, i) => i).sort((a, b) => unsortedXs[a] - unsortedXs[b]);
+    const centerOf = (i: number) => (entities[i] as Extract<CadEntity, { type: "ARC" | "ELLIPSE" }>).center;
+    const unsortedXs = Float64Array.from(ownerIds, (i) => centerOf(i).x);
+    const order = Uint32Array.from(ownerIds, (_, k) => k).sort((a, b) => unsortedXs[a] - unsortedXs[b]);
     built = {
-      entities: Array.from(order, (i) => owners[i] as CadEntity),
-      xs: Float64Array.from(order, (i) => unsortedXs[i]),
+      ids: Uint32Array.from(order, (k) => ownerIds[k]),
+      xs: Float64Array.from(order, (k) => unsortedXs[k]),
+      ys: Float64Array.from(order, (k) => centerOf(ownerIds[k]).y),
     };
     centerIndexCache.set(index, built);
   }
@@ -186,12 +193,41 @@ function lowerBound(xs: Float64Array, value: number): number {
   return low;
 }
 
-/** 中心の x 座標が [minX, maxX] にある、円弧・楕円 */
-function centerOwnersNear(entities: readonly CadEntity[], index: SpatialIndex, minX: number, maxX: number): CadEntity[] {
+/** 中心が矩形(minX〜maxX、minY〜maxY)にある、円弧・楕円の、図面の並びでの番号(昇順)。x で絞ってから、y で絞る(配列には、y も合うものだけを入れる) */
+function centerOwnerIdsNear(entities: readonly CadEntity[], index: SpatialIndex, minX: number, maxX: number, minY: number, maxY: number): number[] {
   const built = centerIndexOf(entities, index);
-  const result: CadEntity[] = [];
-  for (let i = lowerBound(built.xs, minX); i < built.xs.length && built.xs[i] <= maxX; i++) result.push(built.entities[i]);
-  return result;
+  const ids: number[] = [];
+  for (let k = lowerBound(built.xs, minX); k < built.xs.length && built.xs[k] <= maxX; k++) {
+    if (built.ys[k] >= minY && built.ys[k] <= maxY) ids.push(built.ids[k]);
+  }
+  return ids.sort((a, b) => a - b);
+}
+
+/**
+ * 中心を調べる図形。索引が無ければ全図形。あれば、カーソル付近の円と、中心がカーソルの近くにある円弧・楕円を、
+ * 図面の並びの順にそろえて返す(索引の有無で、同じ距離の候補の選ばれ方が変わらないように)。
+ */
+function centerEntitiesFor(
+  entities: readonly CadEntity[],
+  index: SpatialIndex | null | undefined,
+  nearbyIds: readonly number[] | null,
+  worldPoint: Point2D,
+  toleranceWorld: number,
+): readonly CadEntity[] {
+  if (!index || nearbyIds === null) return entities;
+  const ids = nearbyIds.filter((i) => entities[i].type === "CIRCLE");
+  ids.push(
+    ...centerOwnerIdsNear(
+      entities,
+      index,
+      worldPoint.x - toleranceWorld,
+      worldPoint.x + toleranceWorld,
+      worldPoint.y - toleranceWorld,
+      worldPoint.y + toleranceWorld,
+    ),
+  );
+  ids.sort((a, b) => a - b);
+  return ids.map((i) => entities[i]);
 }
 
 /** 格子点のうち、point に最も近い点。間隔が使えない値、または結果が有限でないときは null */
@@ -222,15 +258,17 @@ export function findSnapPoint(
   const nearestTolerance = enabled.has("nearest") ? (options.nearestToleranceWorld ?? 0) : 0;
   const acquire = enabled.has("extension") ? (options.extensionAcquireWorld ?? 0) : 0;
 
-  const queryEntities = (radius: number): readonly CadEntity[] =>
-    index
-      ? index.grid
-          .queryRect(worldPoint.x - radius, worldPoint.y - radius, worldPoint.x + radius, worldPoint.y + radius)
-          .map((i) => entities[i])
-      : entities;
+  // カーソル周辺に外接の矩形がある図形の番号(昇順)。索引が無いときは、null(全図形)
+  const queryIds = (radius: number): readonly number[] | null =>
+    index ? index.grid.queryRect(worldPoint.x - radius, worldPoint.y - radius, worldPoint.x + radius, worldPoint.y + radius) : null;
+  const queryEntities = (radius: number): readonly CadEntity[] => {
+    const ids = queryIds(radius);
+    return ids === null ? entities : ids.map((i) => entities[i]);
+  };
 
   // 端点・中点・交点・最近点などは図形自身の上にあるので、カーソル周辺にバウンディングボックスがある図形だけ調べればよい
-  const nearbyEntities = queryEntities(Math.max(toleranceWorld, nearestTolerance));
+  const nearbyIds = queryIds(Math.max(toleranceWorld, nearestTolerance));
+  const nearbyEntities = nearbyIds === null ? entities : nearbyIds.map((i) => entities[i]);
 
   let best: SnapCandidate | null = null;
   const objectTypesEnabled = GENERATORS.some((g) => enabled.has(g.type));
@@ -242,14 +280,7 @@ export function findSnapPoint(
       worldPoint,
       toleranceWorld,
       fromPoint: options.fromPoint ?? null,
-      centerEntities: wantsCenter
-        ? index
-          ? [
-              ...nearbyEntities.filter((entity) => entity.type === "CIRCLE"),
-              ...centerOwnersNear(entities, index, worldPoint.x - toleranceWorld, worldPoint.x + toleranceWorld),
-            ]
-          : entities
-        : [],
+      centerEntities: wantsCenter ? centerEntitiesFor(entities, index, nearbyIds, worldPoint, toleranceWorld) : [],
       extensionEntities: acquire > 0 ? queryEntities(acquire) : [],
       extensionAcquireWorld: acquire,
     };

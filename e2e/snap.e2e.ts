@@ -157,6 +157,36 @@ test.describe("OSNAP, SNAP and GRID", () => {
     await page.keyboard.press("Escape");
   });
 
+  test("holding a function key (key repeat) toggles only once (Codex review)", async ({ page }) => {
+    await openEditable(page);
+    await expect(toggle(page, "osnap")).toHaveAttribute("aria-pressed", "true");
+    // キーを押し続ける: 押したままの2回目以降は、繰り返し(repeat)として届く
+    await page.keyboard.down("F3");
+    await page.keyboard.down("F3"); // 繰り返し(repeat)
+    await page.keyboard.up("F3");
+    await expect(toggle(page, "osnap")).toHaveAttribute("aria-pressed", "false"); // 繰り返しも切り替えると、2回切り替わって、オンに戻ってしまう
+    await page.keyboard.press("F3"); // 改めて1回押すと、戻る
+    await expect(toggle(page, "osnap")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("turning OSNAP off while the mouse rests on a snap point updates the cursor position at once (Codex review)", async ({ page }) => {
+    const mapping = await openEditable(page);
+    await typeCommand(page, "line");
+    await typeCommand(page, "700,30");
+    // 線 (100,100)-(500,100) の左端 (100,100) の近く(3mm ずらした位置)にマウスを置く。吸着して、座標表示は (100.0, 100.0)
+    const p = at(mapping, 103, 97);
+    await page.mouse.move(p.x, p.y);
+    await expect(page.locator(".status-bar__coords")).toContainText("X: 100.0 mm  Y: 100.0 mm");
+    // マウスを動かさずに OSNAP をオフにする -> 吸着が外れて、その位置そのままの座標になる
+    await page.keyboard.press("F3");
+    await expect(toggle(page, "osnap")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator(".status-bar__coords")).not.toContainText("X: 100.0 mm  Y: 100.0 mm");
+    // オンに戻すと、また吸着する
+    await page.keyboard.press("F3");
+    await expect(page.locator(".status-bar__coords")).toContainText("X: 100.0 mm  Y: 100.0 mm");
+    await page.keyboard.press("Escape");
+  });
+
   test("the command line commands OSNAP, SNAP and GRID do the same", async ({ page }) => {
     await openEditable(page);
     await typeCommand(page, "snap");

@@ -3,33 +3,37 @@
 import type { Point2D } from "../../types/cad";
 import { isAngleInSweep, normalizeArcSpan } from "./geometry";
 
-/** 接する(重根)ときの判定の許容。半径に対する割合 */
+/** 接する(重根)ときの判定の許容。(小さい方の)半径に対する割合 */
 const TANGENT_RELATIVE_EPSILON = 1e-9;
+/** 線分の端の判定の許容(mm)。端の上の交点が、丸め誤差で線分の外になるのを防ぐ */
+const SEGMENT_END_EPSILON = 1e-9;
 
-/** 線分 a-b と、円(中心 center、半径 radius)の交点(0〜2個)。線分の上にあるものだけ */
+/**
+ * 線分 a-b と、円(中心 center、半径 radius)の交点(0〜2個)。線分の上にあるものだけ。
+ * 判別式ではなく、中心から直線までの距離(垂線の長さ)と、垂線の足の位置で求める
+ * (線分が円に比べて非常に長いときに、桁落ちで、離れた線を接線と取り違えたり、交点を失ったりしないため)。
+ */
 export function intersectSegmentCircle(a: Point2D, b: Point2D, center: Point2D, radius: number): Point2D[] {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
-  const fx = a.x - center.x;
-  const fy = a.y - center.y;
-  const A = dx * dx + dy * dy;
-  if (!(A > 0) || !(radius > 0)) return [];
-  const B = 2 * (fx * dx + fy * dy);
-  const C = fx * fx + fy * fy - radius * radius;
-  let discriminant = B * B - 4 * A * C;
-  if (!Number.isFinite(discriminant)) return [];
-  if (discriminant < 0) {
-    // ほぼ接している(わずかに負)ときは、接点として扱う
-    if (discriminant < -TANGENT_RELATIVE_EPSILON * Math.max(B * B, 4 * A * Math.abs(C), 1)) return [];
-    discriminant = 0;
-  }
-  const root = Math.sqrt(discriminant);
-  const parameters = root === 0 ? [-B / (2 * A)] : [(-B - root) / (2 * A), (-B + root) / (2 * A)];
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0) || !Number.isFinite(length) || !(radius > 0)) return [];
+  const ux = dx / length;
+  const uy = dy / length;
+  const fx = center.x - a.x;
+  const fy = center.y - a.y;
+  const along = fx * ux + fy * uy; // a から、中心の垂線の足までの、線に沿った距離
+  const distanceToLine = Math.abs(fx * uy - fy * ux); // 中心から直線までの距離
+  if (!Number.isFinite(along) || !Number.isFinite(distanceToLine)) return [];
+  if (distanceToLine > radius * (1 + TANGENT_RELATIVE_EPSILON)) return [];
+  // 接する(距離が半径とほぼ同じ)ときは、足が接点。そうでなければ、足から両側へ、弦の半分の長さ
+  const half = distanceToLine >= radius ? 0 : Math.sqrt((radius - distanceToLine) * (radius + distanceToLine));
+  const positions = half === 0 ? [along] : [along - half, along + half];
   const points: Point2D[] = [];
-  for (const t of parameters) {
-    if (t < -1e-12 || t > 1 + 1e-12) continue;
-    const clamped = Math.min(1, Math.max(0, t));
-    points.push({ x: a.x + dx * clamped, y: a.y + dy * clamped });
+  for (const position of positions) {
+    if (position < -SEGMENT_END_EPSILON || position > length + SEGMENT_END_EPSILON) continue;
+    const clamped = Math.min(length, Math.max(0, position));
+    points.push({ x: a.x + ux * clamped, y: a.y + uy * clamped });
   }
   return points;
 }
@@ -39,11 +43,13 @@ export function intersectCircles(c1: Point2D, r1: number, c2: Point2D, r2: numbe
   const dx = c2.x - c1.x;
   const dy = c2.y - c1.y;
   const d = Math.hypot(dx, dy);
-  if (!(d > 0) || !(r1 > 0) || !(r2 > 0)) return [];
-  const eps = TANGENT_RELATIVE_EPSILON * Math.max(r1, r2, d);
+  if (!(d > 0) || !Number.isFinite(d) || !(r1 > 0) || !(r2 > 0)) return [];
+  // 接するときの許容は、小さい方の円に合わせる(大きな円の半径に比例させると、小さな円との間の隙間を、接していると取り違える)
+  const eps = TANGENT_RELATIVE_EPSILON * Math.min(r1, r2);
   if (d > r1 + r2 + eps || d < Math.abs(r1 - r2) - eps) return [];
-  const a = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
-  const hSquared = r1 * r1 - a * a;
+  // c1 から、2つの交点を結ぶ線(共通弦)までの距離 a。(d² + r1² - r2²) / (2d) と同じ値を、桁落ちしにくい形で求める
+  const a = (d + ((r1 - r2) * (r1 + r2)) / d) / 2;
+  const hSquared = (r1 - a) * (r1 + a);
   const h = hSquared > 0 ? Math.sqrt(hSquared) : 0;
   const mx = c1.x + (a * dx) / d;
   const my = c1.y + (a * dy) / d;
@@ -55,7 +61,6 @@ export function intersectCircles(c1: Point2D, r1: number, c2: Point2D, r2: numbe
     { x: mx - ox, y: my - oy },
   ];
 }
-
 /** 点 from から、円(中心 center、半径 radius)へ引いた接線の接点(0〜2個)。from が円の上または中にあるときは無い */
 export function tangentPointsFromPoint(from: Point2D, center: Point2D, radius: number): Point2D[] {
   const dx = from.x - center.x;
