@@ -1,10 +1,11 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { CadLayer, CadModel, Measurement, Point2D } from "../types/cad";
 import { Camera } from "../core/view/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
 import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Selection";
 import type { SnapCandidate } from "../core/snap/SnapEngine";
+import { ObjectTrackingAcquirer } from "../core/tracking/acquisition";
 import { resolveCursor } from "../core/tracking/resolveCursor";
 import type { CursorResolution } from "../core/tracking/resolveCursor";
 import type { TrackingGuide } from "../core/tracking/trackingGeometry";
@@ -30,10 +31,6 @@ const SNAP_TOLERANCE_PX = 10;
 const NEAREST_SNAP_DISTANCE_WORLD = 5;
 // 延長の Snap の対象にする、端点とカーソルの最大距離(画面上のpx)
 const EXTENSION_ACQUIRE_PX = 150;
-// OTRACK: 吸着点の上にカーソルをこの時間(ミリ秒)とどめると、その点を取得する
-const OBJECT_TRACKING_DWELL_MS = 300;
-// OTRACK で同時に取得しておける点の数(多いと、取得した古い点が消える)
-const MAX_ACQUIRED_POINTS = 3;
 
 type OverlapCycleState = {
   screenPoint: Point2D;
@@ -156,8 +153,17 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   // トラッキング: 一時補助線、説明、OTRACK で取得した点、取得のためのとどめ時間の計測
   const trackingGuidesRef = useRef<readonly TrackingGuide[]>([]);
   const trackingLabelRef = useRef<TrackingLabel | null>(null);
-  const acquiredRef = useRef<Point2D[]>([]);
-  const dwellRef = useRef<{ candidate: Point2D | null; timer: number | null }>({ candidate: null, timer: null });
+  // OTRACK の取得点の管理(吸着点の上にカーソルをとどめると取得。時間の計測は window.setTimeout)。取得点が変わったら、再描画して、いまのカーソル位置で作り直す
+  const [acquirer] = useState(
+    () =>
+      new ObjectTrackingAcquirer(
+        { setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs), clearTimeout: (handle) => window.clearTimeout(handle as number) },
+        () => {
+          requestDraw();
+          refreshAtPointerRef.current?.();
+        },
+      ),
+  );
   const perfRef = useRef<CadCanvasPerformanceStats & { lastDrawAt: number }>({
     renderMs: 0,
     fps: null,
@@ -255,7 +261,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       snapMarker: snapMarkerRef.current,
       gridSpacing: stateRef.current.snapSettings.gridDisplay ? stateRef.current.snapSettings.gridSpacing : null,
       trackingGuides: trackingGuidesRef.current,
-      acquiredPoints: acquiredRef.current,
+      acquiredPoints: acquirer.points,
       trackingLabel: trackingLabelRef.current,
       previewShapes: previewRef.current,
       spatialIndex: currentSpatialIndex,
@@ -365,23 +371,6 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
   // ---- トラッキング(OTRACK の取得点、一時補助線) ----
 
-  /** 取得のためのとどめ時間の計測をやめる */
-  function clearDwell() {
-    const dwell = dwellRef.current;
-    if (dwell.timer !== null) window.clearTimeout(dwell.timer);
-    dwell.timer = null;
-    dwell.candidate = null;
-  }
-
-  /** 取得した点を、すべて捨てる */
-  function clearAcquired() {
-    clearDwell();
-    if (acquiredRef.current.length > 0) {
-      acquiredRef.current = [];
-      requestDraw();
-    }
-  }
-
   /** 一時補助線と説明を、いまの結果に合わせる(トラッキングで揃えていなければ、消す) */
   function setTrackingVisuals(resolution: CursorResolution | null) {
     const guides = resolution?.tracking?.guides ?? [];
@@ -394,46 +383,19 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     if (changed) requestDraw();
   }
 
-  /**
-   * OTRACK: 吸着点の上に、カーソルを OBJECT_TRACKING_DWELL_MS とどめると、その点を取得する(取得済みの点なら、取得を解除する)。
-   * 同じ点の上にいる間は、1回だけ。カーソルが吸着点を離れたら、やり直し。
-   */
-  function updateAcquisition(acquirable: SnapCandidate | null) {
-    if (!stateRef.current.trackingSettings.objectTracking || acquirable === null) {
-      clearDwell();
-      return;
-    }
-    const dwell = dwellRef.current;
-    const same = dwell.candidate !== null && dwell.candidate.x === acquirable.point.x && dwell.candidate.y === acquirable.point.y;
-    if (same) return;
-    clearDwell();
-    const target = acquirable.point;
-    dwell.candidate = target;
-    dwell.timer = window.setTimeout(() => {
-      dwell.timer = null; // 候補は残す(同じ点の上にいる間に、また取得しないため)
-      const acquired = acquiredRef.current;
-      const existing = acquired.findIndex((p) => p.x === target.x && p.y === target.y);
-      if (existing >= 0) acquired.splice(existing, 1);
-      else {
-        acquired.push(target);
-        if (acquired.length > MAX_ACQUIRED_POINTS) acquired.shift();
-      }
-      acquiredRef.current = [...acquired];
-      requestDraw();
-      refreshAtPointerRef.current?.();
-    }, OBJECT_TRACKING_DWELL_MS);
-  }
+  // 画面を閉じるとき、とどめ時間の計測を止める(古いタイマーが、あとから動かないように)
+  useEffect(() => () => acquirer.clearDwell(), [acquirer]);
 
   // コマンドの状態が進んだとき(点の指示・コマンドの終了など)は、取得した点を捨てる
   useEffect(() => {
-    clearAcquired();
+    acquirer.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingResetKey]);
 
   // 点の指示も測定もしていないときは、取得した点・補助線を捨てる
   useEffect(() => {
     if (!pointPickEnabled && !measurementModeEnabled) {
-      clearAcquired();
+      acquirer.clear();
       setTrackingVisuals(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -441,7 +403,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
   // トラッキングの設定が変わったら、(OTRACK がオフなら)取得した点を捨てて、いまのカーソル位置で作り直す
   useEffect(() => {
-    if (!trackingSettings.objectTracking) clearAcquired();
+    if (!trackingSettings.objectTracking) acquirer.clear();
     refreshAtPointerRef.current?.();
     requestDraw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -566,7 +528,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         },
         base,
         tracking: stateRef.current.trackingSettings,
-        acquired: acquiredRef.current,
+        acquired: acquirer.points,
       });
       return { worldPoint, ...resolution };
     }
@@ -578,6 +540,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     function handleMeasurementClick(event: MouseEvent) {
       const point = computeWorldPointWithSnap(event.clientX, event.clientY);
       const pendingPoint = pendingMeasurementPointRef.current;
+      // 測定の点を確定するたびに、取得した点を捨てる(測定は、コマンドの状態(trackingResetKey)が変わらないので、ここで捨てる)
+      acquirer.clear();
       if (pendingPoint === null) {
         pendingMeasurementPointRef.current = point;
       } else {
@@ -794,7 +758,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       if (!stateRef.current.measurementModeEnabled && !stateRef.current.pointPickEnabled) {
         updateSnapMarker(null);
         setTrackingVisuals(null);
-        clearDwell();
+        acquirer.clearDwell();
         if (!stateRef.current.onCursorMove) return;
         scheduleCursorUpdate(computeWorldPointWithSnap(clientX, clientY), getCanvasRelativePoint(canvas!, clientX, clientY));
         return;
@@ -802,7 +766,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       const resolution = findSnapAt(clientX, clientY);
       updateSnapMarker(isPanning ? null : resolution.snap);
       setTrackingVisuals(isPanning ? null : resolution);
-      updateAcquisition(isPanning ? null : resolution.acquirable);
+      // OTRACK がオンで、パン中でなければ、取得できる吸着点の上に、カーソルがあるかを渡す(とどめ時間の計測は、acquirer が行う)
+      acquirer.update(isPanning || !stateRef.current.trackingSettings.objectTracking ? null : (resolution.acquirable?.point ?? null));
       if (stateRef.current.pointPickEnabled) {
         // 作図中: カーソルの位置(吸着・トラッキング後)に応じて、ゴム紐を作る(図面のデータは変えず、重ねて描くだけ)
         const cursor = resolution.point;
@@ -830,7 +795,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       lastClientPointRef.current = null;
       updateSnapMarker(null);
       setTrackingVisuals(null);
-      clearDwell();
+      acquirer.clearDwell();
       if (previewRef.current.length > 0) {
         previewRef.current = [];
         requestDraw();
@@ -861,6 +826,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
+    // 画面の状態は stateRef と ref から読む(このイベントの登録は、最初の1回だけ)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

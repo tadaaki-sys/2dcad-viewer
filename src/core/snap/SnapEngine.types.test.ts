@@ -345,6 +345,26 @@ describe("an approximation vertex is not an intersection (found while testing OR
     expect(crossing?.point.y).toBeCloseTo(150, 9);
   });
 
+  it("segments that are not next to each other but meet at a shared point are a real self-crossing (Codex review)", () => {
+    // 折れ線 (-10,0) → (0,0) → (10,0) → (0,-10) → (0,0) → (0,10): 横の線と縦の線が、原点を通る(隣り合わない線分が、同じ頂点で交わる)
+    const polyline: CadEntity = {
+      ...base,
+      id: "p",
+      type: "LWPOLYLINE",
+      vertices: [{ x: -10, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: -10 }, { x: 0, y: 0 }, { x: 0, y: 10 }],
+      closed: false,
+    };
+    const result = snap([polyline], { x: 0.3, y: -0.2 }, 2, opts);
+    expect(result?.type).toBe("intersection");
+    expect(result?.point).toEqual({ x: 0, y: 0 });
+  });
+
+  it("the closing corner of a closed polygon (first and last segments) is not an intersection", () => {
+    const square: CadEntity = { ...base, id: "q", type: "LWPOLYLINE", vertices: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }], closed: true };
+    expect(snap([square], { x: 0.2, y: 0.2 }, 2, opts)).toBeNull();
+    expect(snap([square], { x: 10.2, y: 9.9 }, 2, opts)).toBeNull();
+  });
+
   it("a polyline that crosses itself still has its intersection; its ordinary corners are endpoints, not intersections", () => {
     const figureEight: CadEntity = { ...base, id: "p", type: "LWPOLYLINE", vertices: [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 0 }, { x: 0, y: 10 }], closed: false };
     const cross = snap([figureEight], { x: 5.2, y: 5.1 }, 2, opts);

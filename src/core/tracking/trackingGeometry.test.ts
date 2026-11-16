@@ -160,6 +160,49 @@ describe("POLAR", () => {
   });
 });
 
+describe("Codex review fixes (Phase 8)", () => {
+  it("a tiny distance increment never produces a non-finite point (it is ignored when the quotient overflows)", () => {
+    const result = trackCursor({ x: 100, y: 0 }, params({ settings: settings({ polar: true, polarAngleIncrement: 90, distanceIncrement: 1e-320 }), toleranceWorld: 1 }));
+    expect(result).not.toBeNull();
+    expect(Number.isFinite(result!.point.x)).toBe(true);
+    expect(Number.isFinite(result!.point.y)).toBe(true);
+    close(result!.point, 100, 0);
+  });
+
+  it("which guides pass through the result does not depend on where in the world it is (translation invariance)", () => {
+    const run = (offset: number) => {
+      const acquired = [
+        { x: offset - 100, y: offset },
+        { x: offset - 100, y: offset + 1 },
+      ];
+      return trackCursor(
+        { x: offset, y: offset },
+        params({ base: null, settings: settings({ objectTracking: true }), acquired, toleranceWorld: 2 }),
+      );
+    };
+    const near = run(0);
+    const far = run(1e9);
+    // どちらも、下側の水平線(y が offset)の上の点。1mm離れた上側の水平線は、その点を通っていない
+    expect(near!.guides.filter((g) => g.angleDeg === 0)).toHaveLength(1);
+    expect(far!.guides.filter((g) => g.angleDeg === 0)).toHaveLength(1);
+    expect(far!.guides).toEqual(near!.guides.map((g) => ({ ...g, origin: { x: g.origin.x + 1e9, y: g.origin.y + 1e9 } })));
+  });
+
+  it("at an intersection of a polar ray and an acquired point's line the distance increment is not applied (the point stays on both lines)", () => {
+    // 基準点 (0,0) から 0 度の半直線と、取得した点 (13, 100) からの垂直な線は、(13, 0) で交わる。間隔 10 の倍数(10)には、丸めない
+    const result = trackCursor(
+      { x: 13, y: 0 },
+      params({
+        settings: settings({ polar: true, objectTracking: true, polarAngleIncrement: 90, distanceIncrement: 10 }),
+        acquired: [{ x: 13, y: 100 }],
+        toleranceWorld: 1,
+      }),
+    );
+    close(result!.point, 13, 0);
+    expect(result!.guides.map((g) => g.kind).sort()).toEqual(["object", "polar"]);
+  });
+});
+
 describe("OTRACK", () => {
   const otrack = (extra: Partial<TrackingSettings> = {}) => settings({ objectTracking: true, ...extra });
 

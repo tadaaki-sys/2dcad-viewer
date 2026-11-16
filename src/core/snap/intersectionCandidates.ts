@@ -30,10 +30,24 @@ function isOnCurve(curve: Curve, point: Point2D): boolean {
   return curve.type === "CIRCLE" || isPointInArcSweep(curve.center, point, curve.startAngle, curve.endAngle);
 }
 
-/** point が、2本の線分のどちらの端にもあるか(2本が、その頂点を共有しているか) */
-function isSharedVertex(point: Point2D, first: { a: Point2D; b: Point2D }, second: { a: Point2D; b: Point2D }): boolean {
-  const near = (p: Point2D, q: Point2D) => Math.abs(p.x - q.x) <= SHARED_VERTEX_EPSILON && Math.abs(p.y - q.y) <= SHARED_VERTEX_EPSILON;
-  const atEnd = (segment: { a: Point2D; b: Point2D }) => near(point, segment.a) || near(point, segment.b);
+/** 図形の線分の一覧(getEntitySegments)での、線分の位置の情報 */
+type SegmentInfo = { a: Point2D; b: Point2D; owner: number; index: number; count: number; closedLoop: boolean };
+
+function nearPoint(p: Point2D, q: Point2D): boolean {
+  return Math.abs(p.x - q.x) <= SHARED_VERTEX_EPSILON && Math.abs(p.y - q.y) <= SHARED_VERTEX_EPSILON;
+}
+
+/**
+ * 同じ図形の、隣り合う2本の線分(続けて並んでいる、または、閉じた図形で、最初と最後)が、point の頂点を共有しているか。
+ * 隣り合わない線分が、同じ点で交わるもの(折れ線が自分自身と交わる点)は、含めない。
+ */
+function isAdjacentSharedVertex(point: Point2D, first: SegmentInfo, second: SegmentInfo): boolean {
+  if (first.owner !== second.owner) return false;
+  const consecutive = Math.abs(first.index - second.index) === 1;
+  const wrapsAround =
+    first.closedLoop && ((first.index === 0 && second.index === first.count - 1) || (second.index === 0 && first.index === first.count - 1));
+  if (!consecutive && !wrapsAround) return false;
+  const atEnd = (segment: SegmentInfo) => nearPoint(point, segment.a) || nearPoint(point, segment.b);
   return atEnd(first) && atEnd(second);
 }
 
@@ -41,8 +55,8 @@ export function collectIntersectionCandidates(context: GeneratorContext): SnapCa
   const { entities, visibleLayerNames, worldPoint, toleranceWorld } = context;
   // 交点がtoleranceWorld以内になり得るのは、両方の図形がカーソル近傍を通る場合のみ。
   // 全図形同士の総当たりを避けるため、まずカーソル近傍を通る線分・曲線だけに絞り込む(正確性を保った絞り込み)。
-  // owner は、線分が属する図形の通し番号(同じ図形の線分が頂点で接しているのを、交点と取り違えないために使う)
-  const nearbySegments: Array<{ a: Point2D; b: Point2D; owner: number }> = [];
+  // 線分が属する図形と、その中での位置の情報を持つ(同じ図形の、隣り合う線分が頂点で接しているのを、交点と取り違えないために使う)
+  const nearbySegments: SegmentInfo[] = [];
   const nearbyCurves: Curve[] = [];
   for (let owner = 0; owner < entities.length; owner++) {
     const entity = entities[owner];
@@ -51,13 +65,17 @@ export function collectIntersectionCandidates(context: GeneratorContext): SnapCa
       if (distanceToCurve(entity, worldPoint) <= toleranceWorld) nearbyCurves.push(entity);
       continue;
     }
-    for (const segment of getEntitySegments(entity)) {
+    const segments = getEntitySegments(entity);
+    // 閉じた図形(最後の線分の終点が、最初の線分の始点)か
+    const closedLoop = segments.length > 2 && nearPoint(segments[0][0], segments[segments.length - 1][1]);
+    for (let index = 0; index < segments.length; index++) {
+      const segment = segments[index];
       // 安価なバウンディングボックス判定で粗く絞ってから、実距離で絞る(後段の総当たりが大きく減る)
       if (
         isSegmentNearPoint(segment[0], segment[1], worldPoint, toleranceWorld) &&
         pointToSegmentDistance(worldPoint, segment[0], segment[1]) <= toleranceWorld
       ) {
-        nearbySegments.push({ a: segment[0], b: segment[1], owner });
+        nearbySegments.push({ a: segment[0], b: segment[1], owner, index, count: segments.length, closedLoop });
       }
     }
   }
@@ -77,7 +95,7 @@ export function collectIntersectionCandidates(context: GeneratorContext): SnapCa
       const point = intersectSegments(first.a, first.b, second.a, second.b);
       // 同じ図形の、隣り合う線分が、共有する頂点で接しているだけのものは、交点ではない
       // (楕円・スプラインは折れ線に近似しているので、近似の頂点が、交点として吸着してしまう。折れ線の頂点は、端点で吸着できる)
-      if (point !== null && first.owner === second.owner && isSharedVertex(point, first, second)) continue;
+      if (point !== null && isAdjacentSharedVertex(point, first, second)) continue;
       add(point);
     }
   }

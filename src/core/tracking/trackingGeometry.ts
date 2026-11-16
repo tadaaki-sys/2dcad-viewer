@@ -33,8 +33,11 @@ export type TrackingResult = {
   label: string | null;
 };
 
-/** 同じ点とみなす距離(ワールド単位)。補助線がある点を通っているかの判定に使う */
+/** 補助線がある点を通っているかの判定の許容(ワールド単位)。座標が大きいときの計算の誤差の分(座標の大きさに比例。倍精度の丸めの数倍)を足す */
 const ON_LINE_EPSILON = 1e-6;
+const ON_LINE_RELATIVE_EPSILON = 1e-14;
+/** 同じ点とみなす距離(ワールド単位)。同じ起点の線の判定に使う */
+const SAME_ORIGIN_EPSILON = 1e-6;
 /** 2本の線が平行とみなす、方向ベクトルの外積の大きさ(長さ1どうし) */
 const PARALLEL_EPSILON = 1e-9;
 
@@ -105,7 +108,11 @@ function intersectLines(a: Line, b: Line): Point2D | null {
 }
 
 function sameOrigin(a: Point2D, b: Point2D): boolean {
-  return Math.abs(a.x - b.x) < ON_LINE_EPSILON && Math.abs(a.y - b.y) < ON_LINE_EPSILON;
+  return Math.abs(a.x - b.x) < SAME_ORIGIN_EPSILON && Math.abs(a.y - b.y) < SAME_ORIGIN_EPSILON;
+}
+
+function isFinitePoint(p: Point2D): boolean {
+  return Number.isFinite(p.x) && Number.isFinite(p.y);
 }
 
 function formatAngle(angleDeg: number): string {
@@ -155,16 +162,21 @@ export function trackCursor(cursor: Point2D, params: TrackingParams): TrackingRe
 
   // ORTHO の直線は、常に対象。ほかは、カーソルから許容距離以内のものだけ
   const near = lines.filter((line) => line.kind === "ortho" || distanceToLine(line, target) <= toleranceWorld);
-  const guidesAt = (point: Point2D) => near.filter((line) => distanceToLine(line, point) <= ON_LINE_EPSILON + 1e-9 * Math.abs(point.x + point.y));
+  // 点を通っている補助線(座標の大きさに比例した誤差を許す。どこに平行移動しても、同じ結果になるように、座標そのものの足し算(x+y)は使わない)
+  const guidesAt = (point: Point2D) => {
+    const epsilon = ON_LINE_EPSILON + ON_LINE_RELATIVE_EPSILON * (Math.abs(point.x) + Math.abs(point.y));
+    return near.filter((line) => distanceToLine(line, point) <= epsilon);
+  };
   const toGuide = (line: Line): TrackingGuide => ({ kind: line.kind, origin: line.origin, angleDeg: line.angleDeg, oneSided: line.oneSided });
 
-  // 2本の補助線の交点のうち、いちばん近いもの
+  // 2本の補助線の交点のうち、いちばん近いもの。
+  // 交点は、2本の線の上の正確な点なので、トラッキング間隔の倍数への丸めは、適用しない(適用すると、線から外れる)
   let best: { point: Point2D; distance: number } | null = null;
   for (let i = 0; i < near.length; i++) {
     for (let j = i + 1; j < near.length; j++) {
       if (sameOrigin(near[i].origin, near[j].origin)) continue; // 同じ点から出る線どうしは、その点で交わるだけ
       const point = intersectLines(near[i], near[j]);
-      if (point === null) continue;
+      if (point === null || !isFinitePoint(point)) continue;
       const distance = Math.hypot(point.x - target.x, point.y - target.y);
       if (distance <= toleranceWorld && (best === null || distance < best.distance)) best = { point, distance };
     }
@@ -192,8 +204,13 @@ export function trackCursor(cursor: Point2D, params: TrackingParams): TrackingRe
     const d = directionOf(line.angleDeg);
     const length = (point.x - line.origin.x) * d.x + (point.y - line.origin.y) * d.y;
     const stepped = Math.round(length / settings.distanceIncrement) * settings.distanceIncrement;
-    if (stepped > 0) point = { x: line.origin.x + d.x * stepped, y: line.origin.y + d.y * stepped };
+    if (stepped > 0 && Number.isFinite(stepped)) {
+      const rounded = { x: line.origin.x + d.x * stepped, y: line.origin.y + d.y * stepped };
+      // 溢れたときは、丸める前の点のまま(座標が有限でない点を、返さない)
+      if (isFinitePoint(rounded)) point = rounded;
+    }
   }
+  if (!isFinitePoint(point)) return null;
   const guides = guidesAt(point).map(toGuide);
   return { point, guides: guides.length > 0 ? guides : [toGuide(line)], label: line.kind === "polar" ? formatAngle(line.angleDeg) : null };
 }

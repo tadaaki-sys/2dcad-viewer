@@ -18,6 +18,8 @@ export type TrackingSettings = {
 /** 角度の刻みとして選べる値(度) */
 export const POLAR_ANGLE_INCREMENTS: readonly number[] = [5, 10, 15, 18, 22.5, 30, 45, 90];
 
+/** トラッキング間隔の下限(mm。0 は「揃えない」)。極端に小さい値では、距離を間隔で割った値が溢れて、座標が有限でなくなる */
+export const MIN_DISTANCE_INCREMENT = 0.001;
 /** トラッキング間隔の上限(mm) */
 export const MAX_DISTANCE_INCREMENT = 1_000_000;
 
@@ -41,7 +43,8 @@ export function isValidAngleIncrement(value: unknown): value is number {
 }
 
 export function isValidDistanceIncrement(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_DISTANCE_INCREMENT;
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  return value === 0 || (value >= MIN_DISTANCE_INCREMENT && value <= MAX_DISTANCE_INCREMENT);
 }
 
 /** トラッキング間隔の文字(例: "10"、"２５"、"0")を読み取る。0 は「揃えない」 */
@@ -50,7 +53,7 @@ export function parseDistanceIncrement(text: string): { ok: true; value: number 
   if (!/^(\d+\.?\d*|\.\d+)$/.test(normalized)) return { ok: false, error: "トラッキング間隔は、数値(mm)で入力してください(0 なら、揃えません)" };
   const value = Number(normalized);
   if (!isValidDistanceIncrement(value)) {
-    return { ok: false, error: `トラッキング間隔は 0 〜 ${MAX_DISTANCE_INCREMENT} mm の範囲にしてください` };
+    return { ok: false, error: `トラッキング間隔は、0(揃えない)か、${MIN_DISTANCE_INCREMENT} 〜 ${MAX_DISTANCE_INCREMENT} mm の範囲にしてください` };
   }
   return { ok: true, value };
 }

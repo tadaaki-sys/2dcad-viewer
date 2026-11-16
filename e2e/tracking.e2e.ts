@@ -244,6 +244,19 @@ test.describe("OTRACK", () => {
     expect(end.x).not.toBe(500);
   });
 
+  test("in measurement mode a confirmed measurement point drops the acquired points (Codex review)", async ({ page }) => {
+    const mapping = await openEditable(page);
+    await setOn(page, "otrack", true);
+    await page.keyboard.press("m"); // 測定モード
+    await moveTo(page, at(mapping, 503, 97)); // 端点 (500,100)
+    await page.waitForTimeout(600); // 取得
+    await clickAt(page, at(mapping, 503, 97)); // 1点目(端点に吸着)。ここで、取得した点は捨てられる
+    await moveTo(page, at(mapping, 502.5, 250));
+    await clickAt(page, at(mapping, 502.5, 250)); // 2点目: 取得した点が残っていれば、x が 500 に揃って、水平方向の差(H)が 0 になる
+    await expect(page.locator(".measurement-panel")).not.toContainText("H: 0.0 mm");
+    await expect(page.locator(".measurement-panel")).toContainText("V: 150");
+  });
+
   test("turning OTRACK off drops the acquired points", async ({ page }) => {
     const mapping = await openEditable(page);
     await setOn(page, "otrack", true);

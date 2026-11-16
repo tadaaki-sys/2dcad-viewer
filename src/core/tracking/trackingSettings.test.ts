@@ -3,6 +3,7 @@ import {
   DEFAULT_TRACKING_SETTINGS,
   isValidAngleIncrement,
   isValidDistanceIncrement,
+  MIN_DISTANCE_INCREMENT,
   normalizeTrackingSettings,
   parseDistanceIncrement,
   POLAR_ANGLE_INCREMENTS,
@@ -86,5 +87,17 @@ describe("distance increment", () => {
     for (const text of ["", "abc", "-5", "1e3", "10mm", "1,5", "2000000"]) expect(parseDistanceIncrement(text).ok, text).toBe(false);
     expect(isValidDistanceIncrement(0)).toBe(true);
     expect(isValidDistanceIncrement(-1)).toBe(false);
+  });
+
+  it("a positive value must be at least the lower bound (a tiny one makes length / increment overflow)", () => {
+    expect(isValidDistanceIncrement(MIN_DISTANCE_INCREMENT)).toBe(true);
+    expect(isValidDistanceIncrement(MIN_DISTANCE_INCREMENT / 2)).toBe(false);
+    expect(isValidDistanceIncrement(1e-320)).toBe(false);
+    expect(parseDistanceIncrement("0.0001").ok).toBe(false);
+    expect(parseDistanceIncrement("0.001")).toEqual({ ok: true, value: 0.001 });
+    // 保存されていた値も、同じ検証(使えない値は、初期値の 0 になる)
+    expect(normalizeTrackingSettings({ distanceIncrement: 1e-320 }).distanceIncrement).toBe(0);
+    expect(normalizeTrackingSettings({ distanceIncrement: 0.0005 }).distanceIncrement).toBe(0);
+    expect(normalizeTrackingSettings({ distanceIncrement: 0.01 }).distanceIncrement).toBe(0.01);
   });
 });
