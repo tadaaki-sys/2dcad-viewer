@@ -20,11 +20,28 @@ type CommandLineProps = {
    * true なら、入力欄の文字の取り消し(ブラウザ標準)は行わない。false なら、標準のまま
    */
   onUndoShortcut?: () => boolean;
+  /** 入力欄の文字が変わるたびに呼ぶ(カーソル付近のダイナミック入力の表示に、打っている途中の値を映すため) */
+  onTextChange?: (text: string) => void;
+  /**
+   * Tab が押されたとき。ダイナミック入力の「次の項目へ」として受け取れば true を返す(そのとき入力欄は空になり、
+   * ブラウザ標準のフォーカス移動は行わない)。false なら、標準のまま
+   */
+  onTab?: (text: string, backwards: boolean) => boolean;
   /** 値が変わったら、入力途中の文字を捨てる(コマンドの状態が進んだとき。案内の文が同じ段階が続いても、古い文字を残さない) */
   resetKey: number;
 };
 
-export function CommandLine({ log, active, inputRef, onSubmit, onCancel, onUndoShortcut, resetKey }: CommandLineProps) {
+export function CommandLine({
+  log,
+  active,
+  inputRef,
+  onSubmit,
+  onCancel,
+  onUndoShortcut,
+  onTextChange,
+  onTab,
+  resetKey,
+}: CommandLineProps) {
   const [text, setText] = useState("");
   const [history] = useState(() => new CommandHistory());
   const logRef = useRef<HTMLDivElement>(null);
@@ -39,6 +56,10 @@ export function CommandLine({ log, active, inputRef, onSubmit, onCancel, onUndoS
     history.resetCursor();
   }
 
+  useEffect(() => {
+    onTextChange?.(text);
+  }, [text, onTextChange]);
+
   // 新しいメッセージが来たら、いちばん下までスクロールする
   useEffect(() => {
     const element = logRef.current;
@@ -50,6 +71,14 @@ export function CommandLine({ log, active, inputRef, onSubmit, onCancel, onUndoS
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z") {
       if (onUndoShortcut?.()) event.preventDefault();
+      return;
+    }
+    if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (onTab?.(text, event.shiftKey)) {
+        event.preventDefault();
+        setText("");
+        history.resetCursor();
+      }
       return;
     }
     if (event.key === "Enter") {

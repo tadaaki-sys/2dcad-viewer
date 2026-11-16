@@ -98,7 +98,7 @@ test.describe("CIRCLE", () => {
     await expect(log(page)).toContainText("半径が小さすぎるか大きすぎます");
     expect(await entityCount(page)).toBe(before);
     await typeCommand(page, "60");
-    await expect(log(page)).toContainText("円を追加しました(半径 60.000)");
+    await expect(log(page)).toContainText("円を追加しました(半径 60.0)");
     expect(await entityCount(page)).toBe(before + 1);
     await expectHue(page, at(mapping, ...BOTTOM), RED, true);
 
@@ -108,7 +108,7 @@ test.describe("CIRCLE", () => {
     await typeCommand(page, "d");
     await expect(log(page)).toContainText("直径を数値で入力してください");
     await typeCommand(page, "100");
-    await expect(log(page)).toContainText("円を追加しました(半径 50.000)");
+    await expect(log(page)).toContainText("円を追加しました(半径 50.0)");
     expect(await entityCount(page)).toBe(before + 2);
   });
 

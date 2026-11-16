@@ -28,7 +28,7 @@ describe("CIRCLE", () => {
     expect(request.label).toBe("円を追加");
     expect(request.entities).toHaveLength(1);
     expect(request.entities[0] as CadCircle).toEqual({ id: "n0", type: "CIRCLE", layer: "0", color: "#ffffff", center: { x: 100, y: 100 }, radius: 500 });
-    expect(done.messages).toEqual(["円を追加しました(半径 500.000)"]);
+    expect(done.messages).toEqual(["円を追加しました(半径 500.0)"]);
   });
 
   it("typed radius (a plain number), typed center, and the alias C", () => {

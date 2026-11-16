@@ -144,7 +144,7 @@ test.describe("point input (ID command)", () => {
     // 外枠の右上角(1000,600)の近くをクリック → 端点に吸い付く
     const nearCorner = mapping.toPage({ x: 996, y: 596 });
     await page.mouse.click(nearCorner.x, nearCorner.y);
-    await expect(log(page)).toContainText("X = 1000.000, Y = 600.000");
+    await expect(log(page)).toContainText("X = 1000.0, Y = 600.0");
     await expect(label(page)).toHaveText("コマンド:");
     // 終わったら入力欄から外れ、ショートカットが使える
     await expect(input(page)).not.toBeFocused();
@@ -156,13 +156,13 @@ test.describe("point input (ID command)", () => {
     await openDrawing(page, "factory.dxf", factoryLayoutDxf());
     await runInCommandLine(page, "id");
     await runInCommandLine(page, "1000,500");
-    await expect(log(page)).toContainText("X = 1000.000, Y = 500.000");
+    await expect(log(page)).toContainText("X = 1000.0, Y = 500.0");
     await runInCommandLine(page, "id");
     await runInCommandLine(page, "@500,0");
-    await expect(log(page)).toContainText("X = 1500.000, Y = 500.000");
+    await expect(log(page)).toContainText("X = 1500.0, Y = 500.0");
     await runInCommandLine(page, "id");
     await runInCommandLine(page, "＠１００＜９０"); // 全角でも入力できる
-    await expect(log(page)).toContainText("X = 1500.000, Y = 600.000");
+    await expect(log(page)).toContainText("X = 1500.0, Y = 600.0");
   });
 
   test("half-typed text is dropped when the command ends by a click (it is not run as a command name later)", async ({ page }) => {
@@ -172,7 +172,7 @@ test.describe("point input (ID command)", () => {
     await input(page).fill("100,200"); // 打ちかけ(Enterは押さない)
     const nearCorner = mapping.toPage({ x: 996, y: 596 });
     await page.mouse.click(nearCorner.x, nearCorner.y);
-    await expect(log(page)).toContainText("X = 1000.000, Y = 600.000");
+    await expect(log(page)).toContainText("X = 1000.0, Y = 600.0");
     await page.keyboard.press("Enter"); // 入力欄へ
     await expect(input(page)).toBeFocused();
     await expect(input(page)).toHaveValue("");
@@ -187,7 +187,7 @@ test.describe("point input (ID command)", () => {
     await expect(log(page)).toContainText("座標は「X,Y」の形で入力してください");
     await expect(label(page)).toHaveText("ID:");
     await runInCommandLine(page, "10,20");
-    await expect(log(page)).toContainText("X = 10.000, Y = 20.000");
+    await expect(log(page)).toContainText("X = 10.0, Y = 20.0");
   });
 
   test("a click is not taken by a command that is not waiting for a point (selection works)", async ({ page }) => {

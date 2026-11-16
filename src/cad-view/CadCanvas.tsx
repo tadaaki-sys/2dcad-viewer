@@ -69,7 +69,8 @@ type CadCanvasProps = {
   getPreview?: (worldPoint: Point2D) => readonly PreviewShape[];
   /** コマンドの状態が変わるたびに増える番号。変わったら、いまのカーソル位置でゴム紐を作り直す */
   previewRevision?: number;
-  onCursorMove?: (worldPoint: Point2D | null) => void;
+  /** カーソルの位置(図面上の点は吸着後)。screenPoint は、キャンバスの左上からのピクセル位置(カーソル付近の表示用) */
+  onCursorMove?: (worldPoint: Point2D | null, screenPoint: Point2D | null) => void;
 };
 
 function resizeCanvasToContainer(
@@ -343,16 +344,18 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
     let cursorRafId: number | null = null;
     let pendingCursorPoint: Point2D | null | undefined;
+    let pendingCursorScreen: Point2D | null = null;
 
     // カーソル座標コールバック(StatusBar表示用)もPan中は毎mousemoveごとのReact再描画を招くため、
     // 描画と同様に1フレームに1回へ間引く(実測に基づく最小限の最適化)
-    function scheduleCursorUpdate(point: Point2D | null) {
+    function scheduleCursorUpdate(point: Point2D | null, screenPoint: Point2D | null = null) {
       pendingCursorPoint = point;
+      pendingCursorScreen = screenPoint;
       if (cursorRafId !== null) return;
       cursorRafId = requestAnimationFrame(() => {
         cursorRafId = null;
         if (pendingCursorPoint !== undefined) {
-          stateRef.current.onCursorMove?.(pendingCursorPoint);
+          stateRef.current.onCursorMove?.(pendingCursorPoint, pendingCursorScreen);
         }
       });
     }
@@ -628,7 +631,10 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       if (!stateRef.current.measurementModeEnabled && !stateRef.current.pointPickEnabled) {
         updateSnapMarker(null);
         if (!stateRef.current.onCursorMove) return;
-        scheduleCursorUpdate(computeWorldPointWithSnap(event.clientX, event.clientY));
+        scheduleCursorUpdate(
+          computeWorldPointWithSnap(event.clientX, event.clientY),
+          getCanvasRelativePoint(canvas!, event.clientX, event.clientY),
+        );
         return;
       }
       const { worldPoint, snap } = findSnapAt(event.clientX, event.clientY);
@@ -640,7 +646,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         previewRef.current = stateRef.current.getPreview?.(cursor) ?? [];
         requestDraw();
       }
-      if (stateRef.current.onCursorMove) scheduleCursorUpdate(snap ? snap.point : worldPoint);
+      if (stateRef.current.onCursorMove) {
+        scheduleCursorUpdate(snap ? snap.point : worldPoint, getCanvasRelativePoint(canvas!, event.clientX, event.clientY));
+      }
     }
 
     function handleMouseLeave() {

@@ -1,0 +1,56 @@
+.dynamic-input {
+  position: absolute;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  background: rgba(28, 28, 28, 0.92);
+  border: 1px solid #5a5a5a;
+  border-radius: 4px;
+  color: #d8d8d8;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 20px;
+  /* 表示だけ。クリック・ドラッグなどのマウス操作は、下の図面へ通す */
+  pointer-events: none;
+  user-select: none;
+}
+
+.dynamic-input__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+
+.dynamic-input__label {
+  min-width: 2.6em;
+  color: #9aa0a6;
+}
+
+.dynamic-input__value {
+  text-align: right;
+}
+
+/* 入力できる項目は枠で示し、いま入力している項目は強調する。ほかは、表示だけ */
+.dynamic-input__row--readonly {
+  opacity: 0.55;
+}
+
+.dynamic-input__row--editable {
+  border-color: #4a4a4a;
+}
+
+.dynamic-input__row--active {
+  border-color: #4a90e2;
+  background: rgba(74, 144, 226, 0.22);
+}
+
+.dynamic-input__row--typing .dynamic-input__value {
+  color: #ffffff;
+}
+
+.dynamic-input__row--locked .dynamic-input__value {
+  color: #50c878;
+}

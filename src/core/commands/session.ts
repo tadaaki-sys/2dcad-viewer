@@ -18,6 +18,10 @@ export type ActiveCommand = {
   hasPreview: boolean;
   /** 終了すると図面の変更として確定される、描きかけの内容を持っているか */
   hasPendingChanges: boolean;
+  /** この段階が基準にする点(相対座標・極座標の基準。ダイナミック入力の長さ・角度の基準)。無ければ null(1点目など) */
+  basePoint: Point2D | null;
+  /** 点を待つ段階が、数値だけの入力(例: 半径)も受け取るか */
+  acceptsDistance: boolean;
 };
 
 export type SessionResult<R> = {
@@ -194,6 +198,8 @@ export class CommandSession<R, C> {
       acceptsEnter: step.expect === "text" ? false : step.acceptsEnter === true,
       hasPreview: step.expect === "point" && step.preview !== undefined,
       hasPendingChanges: step.pending === true,
+      basePoint: step.basePoint ?? null,
+      acceptsDistance: step.expect === "point" && step.acceptsDistance === true,
     };
   }
 

@@ -61,20 +61,22 @@ describe("built-in commands", () => {
       acceptsEnter: false,
       hasPreview: false,
       hasPendingChanges: false,
+      basePoint: null,
+      acceptsDistance: false,
     });
     const done = s.submitPoint({ x: 1234.5678, y: -0.0001 });
-    expect(done.messages).toEqual(["X = 1234.568, Y = 0.000"]);
+    expect(done.messages).toEqual(["X = 1234.6, Y = 0.0"]);
     expect(done.active).toBeNull();
   });
 
   it("ID prints a typed point, including relative input from the previous one", () => {
     const { s } = session();
     s.submitText("id");
-    expect(s.submitText("1000,500").messages).toEqual(["X = 1000.000, Y = 500.000"]);
+    expect(s.submitText("1000,500").messages).toEqual(["X = 1000.0, Y = 500.0"]);
     s.submitText("id");
-    expect(s.submitText("@500,0").messages).toEqual(["X = 1500.000, Y = 500.000"]);
+    expect(s.submitText("@500,0").messages).toEqual(["X = 1500.0, Y = 500.0"]);
     s.submitText("id");
-    expect(s.submitText("@100<90").messages).toEqual(["X = 1500.000, Y = 600.000"]);
+    expect(s.submitText("@100<90").messages).toEqual(["X = 1500.0, Y = 600.0"]);
   });
 
   it("ID keeps waiting after an invalid input", () => {
@@ -83,7 +85,7 @@ describe("built-in commands", () => {
     const bad = s.submitText("1,2,3");
     expect(bad.active?.name).toBe("ID");
     expect(bad.requests).toEqual([]);
-    expect(s.submitText("1,2").messages).toEqual(["X = 1.000, Y = 2.000"]);
+    expect(s.submitText("1,2").messages).toEqual(["X = 1.0, Y = 2.0"]);
   });
 
   it("createAppCommands follows the context set later (document opened/closed)", () => {
@@ -95,11 +97,11 @@ describe("built-in commands", () => {
     expect(commands.session.submitText("fit").requests).toEqual([]);
   });
 
-  it("formatCoordinate prints 3 decimals and never -0.000", () => {
-    expect(formatCoordinate(0)).toBe("0.000");
-    expect(formatCoordinate(-0)).toBe("0.000");
-    expect(formatCoordinate(-0.0004)).toBe("0.000");
-    expect(formatCoordinate(-1.5)).toBe("-1.500");
-    expect(formatCoordinate(123456.789123)).toBe("123456.789");
+  it("formatCoordinate prints 1 decimal and never -0.0 (display only; the values are not rounded)", () => {
+    expect(formatCoordinate(0)).toBe("0.0");
+    expect(formatCoordinate(-0)).toBe("0.0");
+    expect(formatCoordinate(-0.04)).toBe("0.0");
+    expect(formatCoordinate(-1.5)).toBe("-1.5");
+    expect(formatCoordinate(123456.789123)).toBe("123456.8");
   });
 });

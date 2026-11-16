@@ -108,6 +108,7 @@ function threePointEndStep(context: AppCommandContext, style: DrawingStyle, star
     prompt: "円弧の終点を指示してください",
     expect: "point",
     acceptsEnter: true,
+    basePoint: through,
     preview: (cursor): readonly PreviewShape[] => {
       const arc = arcThroughThreePoints(start, through, cursor);
       return arc !== null
@@ -132,6 +133,7 @@ function throughStep(context: AppCommandContext, style: DrawingStyle, start: Poi
     prompt: "円弧の通過点を指示してください",
     expect: "point",
     acceptsEnter: true,
+    basePoint: start,
     preview: (cursor): readonly PreviewShape[] =>
       isSamePoint(start, cursor) ? [] : [{ kind: "polyline", points: [start, cursor], closed: false }],
     onInput: (input) => {
@@ -151,6 +153,8 @@ function centerEndStep(context: AppCommandContext, style: DrawingStyle, center: 
     prompt: "円弧の終点を指示してください(中心からの方向だけが使われます。反時計回りに描きます)",
     expect: "point",
     acceptsEnter: true,
+    // 終点は、中心からの方向だけが意味を持つので、相対座標・極座標の基準も中心にする
+    basePoint: center,
     preview: (cursor): readonly PreviewShape[] => {
       const result = arcFromCenterStartEnd(center, start, cursor);
       return result.ok ? [{ kind: "arc", ...result.arc }] : [{ kind: "polyline", points: [center, cursor], closed: false }];

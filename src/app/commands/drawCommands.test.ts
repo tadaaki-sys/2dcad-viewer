@@ -223,7 +223,7 @@ describe("RECT", () => {
     const rect = request.entities[0] as CadPolyline;
     expect(rect).toMatchObject({ id: "n0", type: "LWPOLYLINE", closed: true });
     expect(rect.vertices).toEqual([{ x: 100, y: 100 }, { x: 600, y: 100 }, { x: 600, y: 400 }, { x: 100, y: 400 }]);
-    expect(done.messages).toEqual(["長方形を追加しました(500.000 × 300.000)"]);
+    expect(done.messages).toEqual(["長方形を追加しました(500.0 × 300.0)"]);
     expect(done.active).toBeNull();
   });
 
@@ -234,7 +234,7 @@ describe("RECT", () => {
     const done = session.submitText("@-500,-300");
     const rect = addRequest(done.requests).entities[0] as CadPolyline;
     expect(rect.vertices).toEqual([{ x: 1000, y: 1000 }, { x: 500, y: 1000 }, { x: 500, y: 700 }, { x: 1000, y: 700 }]);
-    expect(done.messages[0]).toContain("500.000 × 300.000");
+    expect(done.messages[0]).toContain("500.0 × 300.0");
   });
 
   it("refuses a zero width or height, and keeps waiting for another corner", () => {

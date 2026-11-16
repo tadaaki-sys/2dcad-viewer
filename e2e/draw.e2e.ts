@@ -193,14 +193,14 @@ test.describe("PLINE and RECT", () => {
     await expectHue(page, at(mapping, 650, 30), WHITE, true); // ゴム紐(長方形)の下辺
     await click(page, corner);
     // クリックは画素単位なので、寸法は 200 × 40 の近く(座標を入力すれば、厳密な値になる。下で確認)
-    await expect(log(page)).toContainText(/長方形を追加しました\((19\d|20\d)\.\d{3} × (3\d|4\d)\.\d{3}\)/);
+    await expect(log(page)).toContainText(/長方形を追加しました\((19\d|20\d)\.\d × (3\d|4\d)\.\d\)/);
     expect(await entityCount(page)).toBe(before + 1);
     await expectHue(page, at(mapping, 650, 70), GREEN, true); // 上辺
 
     await typeCommand(page, "rec");
     await typeCommand(page, "800,30");
     await typeCommand(page, "@100,40");
-    await expect(log(page)).toContainText("長方形を追加しました(100.000 × 40.000)");
+    await expect(log(page)).toContainText("長方形を追加しました(100.0 × 40.0)");
     expect(await entityCount(page)).toBe(before + 2);
   });
 

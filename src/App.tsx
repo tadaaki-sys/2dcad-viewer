@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Toolbar } from "./components/Toolbar";
 import { LayerPanel } from "./components/LayerPanel";
 import { PropertyPanel } from "./components/PropertyPanel";
@@ -20,7 +20,18 @@ import { documentFromCadModel, hasEntity } from "./core/model";
 import { describeHistoryOutcome, DOCUMENT_NOT_READY_MESSAGE, DocumentSession } from "./app/document/documentSession";
 import type { DocumentChange, DocumentSessionState } from "./app/document/documentSession";
 import { renderModelFromDocument } from "./app/document/renderModel";
-import type { ActiveCommand, SessionResult } from "./core/commands";
+import {
+  FIELD_LABELS,
+  dynamicModeOf,
+  formatDynamicValue,
+  inputFieldsOf,
+  nextField,
+  parseCoordinateInput,
+  parseFieldText,
+  resolveDynamicPoint,
+} from "./core/commands";
+import type { ActiveCommand, DynamicField, DynamicMode, DynamicValues, SessionResult } from "./core/commands";
+import { DynamicInput } from "./components/DynamicInput";
 import { createAppCommands } from "./app/commands/builtinCommands";
 import { defaultLayerName, resolveDrawTarget } from "./app/drawing/drawTarget";
 import { reorderSelection } from "./app/document/reorder";
@@ -51,6 +62,8 @@ function historyShortcutOf(event: KeyboardEvent): "undo" | "redo" | null {
 }
 
 const NO_HISTORY_STATE: DocumentSessionState = { canUndo: false, canRedo: false, isDirty: false };
+
+const EMPTY_DYNAMIC_VALUES: DynamicValues = {};
 
 /** コマンドラインに残すメッセージの最大行数 */
 const COMMAND_LOG_LIMIT = 100;
@@ -138,6 +151,48 @@ export default function App() {
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
+
+  // ダイナミック入力(カーソル付近の X・Y・長さ・角度の表示と、数値の入力)。
+  // 入力はコマンドラインで受け、Tab で確定した値(locked)と、いま入力している項目(field)をここで持つ。
+  // 値は、コマンドの状態が進む(revision が変わる)たびに捨てる。点の指示・キーワード・コマンドの終了のあと、古い値が残らないように
+  const [cursorScreen, setCursorScreen] = useState<Point2D | null>(null);
+  const [commandText, setCommandText] = useState("");
+  const [dynamicState, setDynamicState] = useState<{ revision: number; locked: DynamicValues; field: DynamicField }>({
+    revision: -1,
+    locked: {},
+    field: "x",
+  });
+  // 打っている途中の値が変わったときに増える(ゴム紐を作り直すきっかけ)
+  const [dynamicTick, setDynamicTick] = useState(0);
+  const dynamicMode = dynamicModeOf(activeCommand);
+  const dynamicFields = dynamicMode === null ? [] : inputFieldsOf(dynamicMode);
+  const dynamicIsCurrent = dynamicState.revision === commandRevision && dynamicFields.includes(dynamicState.field);
+  const dynamicLocked: DynamicValues = dynamicIsCurrent ? dynamicState.locked : EMPTY_DYNAMIC_VALUES;
+  const dynamicField: DynamicField = dynamicIsCurrent ? dynamicState.field : (dynamicFields[0] ?? "x");
+  // 描画・キー操作のコールバックから、最新の値を読むための入れ物(コールバックを作り直さずに済む)
+  const dynamicRef = useRef({
+    mode: null as DynamicMode | null,
+    base: null as Point2D | null,
+    locked: EMPTY_DYNAMIC_VALUES,
+    field: "x" as DynamicField,
+    text: "",
+    cursor: null as Point2D | null,
+    revision: 0,
+  });
+  // 描画後すぐ(子の effect より前)に最新の値へ更新する。子(CadCanvas)がゴム紐を作り直すとき、古い値を読まないように
+  useLayoutEffect(() => {
+    dynamicRef.current = {
+      mode: dynamicMode,
+      base: activeCommand?.basePoint ?? null,
+      locked: dynamicLocked,
+      field: dynamicField,
+      text: commandText,
+      cursor: cursorWorld,
+      revision: commandRevision,
+    };
+  });
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
+  const [canvasAreaSize, setCanvasAreaSize] = useState<{ width: number; height: number } | null>(null);
 
   const terminateWorker = useCallback(() => {
     workerRef.current?.terminate();
@@ -267,6 +322,7 @@ export default function App() {
     setSessionState(NO_HISTORY_STATE);
     setSourceSummary(null);
     setCursorWorld(null);
+    setCursorScreen(null);
     setSelectedEntityIds(new Set());
     setMeasurements([]);
     setSelectedMeasurementId(null);
@@ -302,8 +358,9 @@ export default function App() {
     cadCanvasRef.current?.fitToDrawing();
   }, []);
 
-  const handleCursorMove = useCallback((worldPoint: Point2D | null) => {
+  const handleCursorMove = useCallback((worldPoint: Point2D | null, screenPoint: Point2D | null) => {
     setCursorWorld(worldPoint);
+    setCursorScreen(screenPoint);
   }, []);
 
   const handleToggleFullscreen = useCallback(() => {
@@ -501,13 +558,82 @@ export default function App() {
     [applyCommandResult, commandSession],
   );
 
+  /** 点の指示を済ませたあとの、入力欄の扱い。続けて入力を待つなら、座標を打てるように入力欄へ。終わったなら、ショートカット(F・M)が効くように外す */
+  const focusCommandLineFor = useCallback((result: SessionResult<AppRequest>) => {
+    if (result.active) commandInputRef.current?.focus();
+    else commandInputRef.current?.blur();
+  }, []);
+
   const handleCommandSubmit = useCallback(
     (text: string) => {
       const trimmed = text.trim();
+      // ダイナミック入力: 数値だけ(例: 長さ 1500)を打った、または、Tab で確定した値があるときは、点に直して指示する。
+      // 座標(1000,500 など)・キーワード・コマンド名・空のEnter(確定した値が無いとき)は、これまでどおりコマンドへ渡す
+      const dynamic = dynamicRef.current;
+      if (dynamic.mode === "absolute" || dynamic.mode === "polar") {
+        const hasLocked = Object.keys(dynamic.locked).length > 0;
+        const isPlainNumber = trimmed !== "" && (() => {
+          const parsed = parseCoordinateInput(trimmed, null);
+          return parsed.ok && parsed.kind === "distance";
+        })();
+        if (isPlainNumber || (trimmed === "" && hasLocked)) {
+          const values: DynamicValues = { ...dynamic.locked };
+          if (isPlainNumber) {
+            const parsed = parseFieldText(dynamic.field, trimmed);
+            if (!parsed.ok) {
+              appendCommandLog([`> ${trimmed}`, parsed.error]);
+              return;
+            }
+            values[dynamic.field] = parsed.value;
+          }
+          const echo = inputFieldsOf(dynamic.mode)
+            .filter((field) => values[field] !== undefined)
+            .map((field) => `${FIELD_LABELS[field]} ${formatDynamicValue(field, values[field] as number)}`)
+            .join(", ");
+          const resolved = resolveDynamicPoint(dynamic.mode, dynamic.base, dynamic.cursor, values);
+          if (!resolved.ok) {
+            appendCommandLog([`> ${echo}`, resolved.error]);
+            return;
+          }
+          const result = commandSession.submitPoint(resolved.point);
+          applyCommandResult(result, echo);
+          focusCommandLineFor(result);
+          return;
+        }
+      }
       applyCommandResult(commandSession.submitText(text), trimmed === "" ? undefined : trimmed);
     },
-    [applyCommandResult, commandSession],
+    [applyCommandResult, appendCommandLog, commandSession, focusCommandLineFor],
   );
+
+  /** コマンドラインでの Tab: ダイナミック入力の、次(Shift+Tab なら前)の項目へ。打っていた値は、その項目の値として確定する */
+  const handleCommandTab = useCallback(
+    (text: string, backwards: boolean): boolean => {
+      const dynamic = dynamicRef.current;
+      // 項目が1つだけ(数値だけを待つ段階)や、対象でない段階では、何もしない(ブラウザ標準の動き)
+      if (dynamic.mode !== "absolute" && dynamic.mode !== "polar") return false;
+      const trimmed = text.trim();
+      let locked = dynamic.locked;
+      if (trimmed !== "") {
+        const parsed = parseFieldText(dynamic.field, trimmed);
+        if (!parsed.ok) {
+          appendCommandLog([`> ${trimmed}`, parsed.error]);
+          return true;
+        }
+        locked = { ...locked, [dynamic.field]: parsed.value };
+      }
+      setDynamicState({ revision: dynamic.revision, locked, field: nextField(dynamic.mode, dynamic.field, backwards) });
+      setDynamicTick((tick) => tick + 1);
+      return true;
+    },
+    [appendCommandLog],
+  );
+
+  /** コマンドラインに打っている文字が変わった。カーソル付近の表示と、ゴム紐に反映する */
+  const handleCommandTextChange = useCallback((text: string) => {
+    setCommandText(text);
+    setDynamicTick((tick) => tick + 1);
+  }, []);
 
   const handleCommandCancel = useCallback(() => {
     applyCommandResult(commandSession.cancel());
@@ -518,17 +644,27 @@ export default function App() {
     (worldPoint: Point2D) => {
       const result = commandSession.submitPoint(worldPoint);
       applyCommandResult(result);
-      // 続けて入力を待つなら、座標を打てるように入力欄へ。終わったなら、ショートカット(F・M)が効くように入力欄を外す
-      if (result.active) commandInputRef.current?.focus();
-      else commandInputRef.current?.blur();
+      focusCommandLineFor(result);
     },
-    [applyCommandResult, commandSession],
+    [applyCommandResult, commandSession, focusCommandLineFor],
   );
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       // 入力欄に文字を打っているときは、ショートカットとして扱わない(コマンドラインへの「f」で全体表示しないように)
       if (isTypingTarget(event.target)) return;
+      // コマンドが数値を待っているときの、数字・小数点・マイナスのキーは、コマンドラインへ移して打ち始める
+      // (カーソル付近の表示に、打っている値が映る)。フォーカスだけを移し、キーの入力は入力欄に入る
+      if (
+        /^[0-9.-]$/.test(event.key) &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        dynamicModeOf(commandSession.active) !== null
+      ) {
+        commandInputRef.current?.focus();
+        return;
+      }
       const historyShortcut = historyShortcutOf(event);
       if (historyShortcut !== null) {
         if (!isDocumentOpen) return;
@@ -601,8 +737,40 @@ export default function App() {
     return true;
   }, [applyCommandResult, commandSession]);
 
-  /** 作図中のゴム紐(カーソル位置に応じた仮の図形)。図面のデータは変えない */
-  const getPreview = useCallback((worldPoint: Point2D) => commandSession.previewAt(worldPoint), [commandSession]);
+  /**
+   * 作図中のゴム紐(カーソル位置に応じた仮の図形)。図面のデータは変えない。
+   * ダイナミック入力で値を打っている(または確定した)ときは、その値を反映した点を使う(例: 長さを打つと、その長さの線が見える)
+   */
+  const getPreview = useCallback(
+    (worldPoint: Point2D) => {
+      const dynamic = dynamicRef.current;
+      let point = worldPoint;
+      if (dynamic.mode !== null) {
+        const values: DynamicValues = { ...dynamic.locked };
+        if (dynamic.text.trim() !== "") {
+          const parsed = parseFieldText(dynamic.field, dynamic.text);
+          if (parsed.ok) values[dynamic.field] = parsed.value;
+        }
+        if (Object.keys(values).length > 0) {
+          const resolved = resolveDynamicPoint(dynamic.mode, dynamic.base, worldPoint, values);
+          if (resolved.ok) point = resolved.point;
+        }
+      }
+      return commandSession.previewAt(point);
+    },
+    [commandSession],
+  );
+
+  // カーソル付近の表示が、はみ出さずに収まる範囲(図面の表示領域の大きさ)
+  useEffect(() => {
+    const element = canvasAreaRef.current;
+    if (!element) return;
+    const update = () => setCanvasAreaSize({ width: element.clientWidth, height: element.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isDocumentOpen]);
 
   // 未保存の変更があるまま(または、描きかけの図形があるまま)、ページを閉じる・再読み込みしようとしたときに、ブラウザの確認を出す
   const hasUnsavedWork = sessionState.isDirty || (activeCommand?.hasPendingChanges ?? false);
@@ -691,7 +859,7 @@ export default function App() {
           />
         </ResizablePanel>
 
-        <div className="app-cad-layout__canvas-area">
+        <div className="app-cad-layout__canvas-area" ref={canvasAreaRef}>
           <CadCanvas
             ref={cadCanvasRef}
             model={cadModel}
@@ -708,9 +876,22 @@ export default function App() {
             onMeasurementSelect={handleMeasurementSelect}
             onPointPick={handlePointPick}
             getPreview={getPreview}
-            previewRevision={commandRevision}
+            previewRevision={commandRevision + dynamicTick}
             onCursorMove={handleCursorMove}
           />
+          {dynamicMode !== null && (
+            <DynamicInput
+              mode={dynamicMode}
+              cursor={cursorWorld}
+              screen={cursorScreen}
+              base={activeCommand?.basePoint ?? null}
+              locked={dynamicLocked}
+              field={dynamicField}
+              typedText={commandText}
+              showCursorValues={activeCommand?.expect === "point"}
+              area={canvasAreaSize}
+            />
+          )}
           {import.meta.env.DEV && (
             <PerformanceOverlay
               cadCanvasRef={cadCanvasRef}
@@ -750,6 +931,8 @@ export default function App() {
         inputRef={commandInputRef}
         onSubmit={handleCommandSubmit}
         onCancel={handleCommandCancel}
+        onTab={handleCommandTab}
+        onTextChange={handleCommandTextChange}
         onUndoShortcut={handleCommandLineUndoShortcut}
         resetKey={commandRevision}
       />
