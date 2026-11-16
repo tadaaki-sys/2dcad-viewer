@@ -8,6 +8,11 @@ export const IDENTITY_MATRIX: Affine2D = [1, 0, 0, 1, 0, 0];
 
 /** 剛体かの判定の許容(行列の各成分の誤差) */
 const RIGID_EPSILON = 1e-9;
+/**
+ * 移動・回転だけの経路(寸法に触らない)に入る、倍率の許容。回転の行列の丸め誤差(1e-16 程度)は許し、
+ * 利用者が指定した倍率(1.0000000001 など)は、拡大縮小の経路で、位置と大きさの両方に掛ける。
+ */
+const RIGID_SCALE_TOLERANCE = 1e-12;
 /** 回転角が 90° の倍数とみなす許容(ラジアン) */
 const QUARTER_TURN_EPSILON = 1e-12;
 /** 90° の倍数の判定を行う角度の上限(ラジアン)。これ以上では、浮動小数点の間隔(1e3 で約1e-13)が許容に近づく */
@@ -91,10 +96,14 @@ export function scaleMatrix(base: Point2D, factor: number): Affine2D {
  * 軸が水平・垂直・45度のときは、成分がぴったりの値(±1・0)になる。
  */
 export function reflectionMatrix(p: Point2D, q: Point2D): Affine2D | null {
-  const dx = q.x - p.x;
-  const dy = q.y - p.y;
+  const rawX = q.x - p.x;
+  const rawY = q.y - p.y;
+  const largest = Math.max(Math.abs(rawX), Math.abs(rawY));
+  if (!(largest > 0) || !Number.isFinite(largest)) return null;
+  // 大きい方の成分で割ってから計算する(二乗の桁あふれ・桁落ちを避ける)。軸が水平・垂直・45度なら、ux・uy は 0・±1 で、ぴったりの値になる
+  const dx = rawX / largest;
+  const dy = rawY / largest;
   const lengthSquared = dx * dx + dy * dy;
-  if (!(lengthSquared > 0) || !Number.isFinite(lengthSquared)) return null;
   // 軸の角度を φ として、線形部分は [[cos2φ, sin2φ], [sin2φ, -cos2φ]]。「|| 0」は、-0 を 0 にそろえる
   const cos2 = (dx * dx - dy * dy) / lengthSquared || 0;
   const sin2 = (2 * dx * dy) / lengthSquared || 0;
@@ -144,7 +153,8 @@ function transformSimilar(entity: CadEntity, matrix: Affine2D, move: (p: Point2D
     return result;
   };
   // 回転を伴わない変換(倍率だけ)のときは、角度の値には、触らない
-  const noRotation = !reflecting && b === 0 && c === 0;
+  // (a < 0 の b = c = 0 は、180度の回転を含むので、回転なしではない)
+  const noRotation = !reflecting && b === 0 && c === 0 && a > 0;
   const angle = reflecting || noRotation ? 0 : rotationAngleOf(matrix);
   const turn = (value: number): number => (noRotation ? value : normalizeAngle(value + angle));
   // 向きの角度を、変換した向きの角度にする(鏡像用。線形部分で、方向ベクトルを変換する)
@@ -202,7 +212,7 @@ export function transformEntityGeometry(entity: CadEntity, matrix: Affine2D): Ca
     return moved;
   };
   // 拡大縮小・鏡像を含む変換は、別の経路で扱う(移動・回転だけの変換の計算は、これまでと完全に同じ)
-  if (!isRigid(matrix)) return transformSimilar(entity, matrix, move);
+  if (!isRigid(matrix) || Math.abs(scaleFactorOf(matrix) - 1) > RIGID_SCALE_TOLERANCE) return transformSimilar(entity, matrix, move);
   const rotates = !(matrix[0] === 1 && matrix[1] === 0);
   const angle = rotates ? rotationAngleOf(matrix) : 0;
   const turn = (value: number): number => (rotates ? normalizeAngle(value + angle) : value);

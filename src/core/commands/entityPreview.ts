@@ -10,6 +10,25 @@ import type { PreviewShape } from "./registry";
 /** この数を超える図形を選んでいるときは、1つ1つの形ではなく、全体を囲む枠だけを表示する(カーソルを動かすたびの計算を、軽く保つ) */
 export const PREVIEW_ENTITY_LIMIT = 300;
 
+/**
+ * 図形の頂点の合計が、この数を超えるときも、枠だけを表示する(巨大な折れ線1本でも、カーソルを動かすたびに、全頂点を計算しないように)。
+ * 図形の数の上限(PREVIEW_ENTITY_LIMIT)とは別に、頂点の数でも見る。
+ */
+export const PREVIEW_VERTEX_LIMIT = 20_000;
+
+/** 仮表示の計算の重さ(頂点の数。頂点を持たない図形は 1) */
+function previewWeight(entity: CadEntity): number {
+  if (entity.type === "LWPOLYLINE" || entity.type === "POLYLINE") return Math.max(1, entity.vertices.length);
+  if (entity.type === "SPLINE") return Math.max(1, entity.points.length);
+  return 1;
+}
+
+function totalWeight(entities: readonly CadEntity[]): number {
+  let total = 0;
+  for (const entity of entities) total += previewWeight(entity);
+  return total;
+}
+
 /** 図形1つを、変換して動かした形の仮表示。点(POINT)は、表示する形が無いので、空 */
 export function entityPreviewShapes(entity: CadEntity, matrix: Affine2D): PreviewShape[] {
   let moved: CadEntity;
@@ -69,7 +88,7 @@ function boundingBox(entities: readonly CadEntity[]): { min: Point2D; max: Point
  * 図形が PREVIEW_ENTITY_LIMIT を超えるときは、全体を囲む枠だけを、変換ごとに1つ返す。
  */
 export function createSelectionPreview(entities: readonly CadEntity[], limit: number = PREVIEW_ENTITY_LIMIT): (matrices: readonly Affine2D[]) => readonly PreviewShape[] {
-  if (entities.length > limit) {
+  if (entities.length > limit || totalWeight(entities) > PREVIEW_VERTEX_LIMIT) {
     const box = boundingBox(entities);
     if (box === null) return () => [];
     const corners: Point2D[] = [
@@ -88,7 +107,7 @@ export function createSelectionPreview(entities: readonly CadEntity[], limit: nu
  * 図形が limit を超えるときは、移動した窓の枠だけを返す(カーソルを動かすたびの計算を、軽く保つため)。
  */
 export function createStretchPreview(entities: readonly CadEntity[], window: StretchWindow, limit: number = PREVIEW_ENTITY_LIMIT): (dx: number, dy: number) => readonly PreviewShape[] {
-  if (entities.length > limit) {
+  if (entities.length > limit || totalWeight(entities) > PREVIEW_VERTEX_LIMIT) {
     const corners = windowCorners(window);
     return (dx, dy) => [{ kind: "polyline", points: corners.map((corner) => ({ x: corner.x + dx, y: corner.y + dy })), closed: true }];
   }

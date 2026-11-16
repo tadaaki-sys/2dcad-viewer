@@ -1,7 +1,7 @@
 // STRETCH の、図形ごとの計算(Phase 10)
 import { describe, expect, it } from "vitest";
 import type { CadEntity, Point2D } from "../../types/cad";
-import { boundsTouchWindow, pointInWindow, stretchEntityGeometry, windowCorners, windowFromCorners } from "./stretch";
+import { boundsTouchWindow, ellipseExactBounds, pointInWindow, stretchEntityGeometry, windowCorners, windowFromCorners } from "./stretch";
 import type { StretchWindow } from "./stretch";
 
 const base = { layer: "0", color: "#ffffff" };
@@ -134,5 +134,63 @@ describe("overflow and broken data", () => {
     const original = line({ x: 50, y: 50 }, { x: 300, y: 50 });
     stretchEntityGeometry(original, WINDOW, 10, 10);
     expect(original).toEqual(line({ x: 50, y: 50 }, { x: 300, y: 50 }));
+  });
+});
+
+describe("ellipse: exact bounds (Codex review)", () => {
+  const ellipse = (over: Partial<Extract<CadEntity, { type: "ELLIPSE" }>> = {}): Extract<CadEntity, { type: "ELLIPSE" }> => ({
+    ...base,
+    id: "e",
+    type: "ELLIPSE",
+    center: { x: 5, y: -3 },
+    majorRadius: 30,
+    minorRadius: 12,
+    rotation: 0.6,
+    startParam: 0,
+    endParam: Math.PI * 2,
+    ...over,
+  });
+
+  it("matches a dense sampling of the curve (full ellipse, partial ranges, negative and wrapped ranges)", () => {
+    const cases = [
+      ellipse(),
+      ellipse({ startParam: 0.4, endParam: 3.9 }),
+      ellipse({ startParam: -1.2, endParam: 0.8 }), // 負の範囲(鏡像のあとの形)
+      ellipse({ startParam: 5, endParam: 1.5, rotation: 2.2 }), // 2π をまたぐ
+      ellipse({ rotation: 0, majorRadius: 10, minorRadius: 10 }), // 円
+      ellipse({ rotation: Math.PI / 2, startParam: 0.1, endParam: 0.2 }),
+      ellipse({ rotation: 0, startParam: 6, endParam: 0.5 }), // 2π をまたぐ短い範囲(掃引は 0.78。極値 t=π は範囲の外)
+    ];
+    for (const e of cases) {
+      const bounds = ellipseExactBounds(e)!;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const raw = e.endParam - e.startParam;
+      const sweep = Math.abs(raw) >= Math.PI * 2 - 1e-9 ? Math.PI * 2 : ((raw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      for (let i = 0; i <= 20000; i++) {
+        const t = e.startParam + (sweep * i) / 20000;
+        const x = e.center.x + e.majorRadius * Math.cos(e.rotation) * Math.cos(t) - e.minorRadius * Math.sin(e.rotation) * Math.sin(t);
+        const y = e.center.y + e.majorRadius * Math.sin(e.rotation) * Math.cos(t) + e.minorRadius * Math.cos(e.rotation) * Math.sin(t);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+      expect(bounds[0]).toBeCloseTo(minX, 5);
+      expect(bounds[1]).toBeCloseTo(minY, 5);
+      expect(bounds[2]).toBeCloseTo(maxX, 5);
+      expect(bounds[3]).toBeCloseTo(maxY, 5);
+    }
+  });
+
+  it("a window that exactly fits the ellipse moves it as a whole; a window a bit smaller only touches it (skipped)", () => {
+    const e = ellipse();
+    const [minX, minY, maxX, maxY] = ellipseExactBounds(e)!;
+    const exact = windowFromCorners({ x: minX, y: minY }, { x: maxX, y: maxY });
+    expect(stretchEntityGeometry(e, exact, 1, 1).kind).toBe("moved");
+    const smaller = windowFromCorners({ x: minX + 0.5, y: minY }, { x: maxX, y: maxY });
+    expect(stretchEntityGeometry(e, smaller, 1, 1)).toEqual({ kind: "partial-skipped" });
+    const away = windowFromCorners({ x: maxX + 1, y: minY }, { x: maxX + 10, y: maxY });
+    expect(stretchEntityGeometry(e, away, 1, 1)).toEqual({ kind: "unchanged" });
+  });
+
+  it("a non-finite ellipse has no exact bounds (the caller falls back)", () => {
+    expect(ellipseExactBounds(ellipse({ majorRadius: Number.NaN }))).toBeNull();
   });
 });

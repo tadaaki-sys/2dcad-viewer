@@ -232,3 +232,38 @@ describe("transformEntityGeometry with scaling and mirroring", () => {
     expect(moved.center).toEqual(applyAffine(m, { x: -20, y: 5 }));
   });
 });
+
+describe("Codex review fixes (Phase 10)", () => {
+  it("a negative uniform scale is a 180 degree turn: angles of an arc, an ellipse and a text are turned too", () => {
+    const m: Affine2D = [-2, 0, 0, -2, 0, 0];
+    const a = transformEntityGeometry({ ...arc, center: { x: 0, y: 0 } } as CadEntity, m) as typeof arc & { startAngle: number; endAngle: number; radius: number };
+    expect(angleDiff(a.startAngle, 0.3 + Math.PI)).toBeLessThan(1e-12);
+    expect(angleDiff(a.endAngle, 2.4 + Math.PI)).toBeLessThan(1e-12);
+    expect(a.radius).toBe(80);
+    expect(angleDiff((transformEntityGeometry(ellipse, m) as typeof ellipse & { rotation: number }).rotation, 0.5 + Math.PI)).toBeLessThan(1e-12);
+    expect(angleDiff((transformEntityGeometry(text, m) as typeof text & { rotation: number }).rotation, 0.2 + Math.PI)).toBeLessThan(1e-12);
+  });
+
+  it("a scale very close to 1 still scales the size (position and size agree); a real rotation still takes the rigid path", () => {
+    const big: CadEntity = { ...base, id: "big", type: "CIRCLE", center: { x: 1e12, y: 0 }, radius: 1e12 };
+    const scaled = transformEntityGeometry(big, scaleMatrix({ x: 0, y: 0 }, 1.0000000001)) as typeof big & { center: Point2D; radius: number };
+    expect(scaled.radius).toBeCloseTo(1e12 * 1.0000000001, 0);
+    expect(scaled.center.x).toBeCloseTo(1e12 * 1.0000000001, 0);
+    // 回転の丸め誤差(1e-16)では、半径に倍率を掛けない(これまでどおり、そのまま)
+    const turned = transformEntityGeometry(circle, rotationMatrix({ x: 3, y: 4 }, 0.7)) as typeof circle & { radius: number };
+    expect(turned.radius).toBe(25);
+  });
+
+  it("reflectionMatrix works for huge and tiny (but valid) axes, and refuses an axis that cannot be computed", () => {
+    expect(reflectionMatrix({ x: 0, y: 0 }, { x: 1e200, y: 0 })).toEqual([1, 0, 0, -1, 0, 0]);
+    expect(reflectionMatrix({ x: 0, y: 0 }, { x: 1e-200, y: 0 })).toEqual([1, 0, 0, -1, 0, 0]);
+    expect(reflectionMatrix({ x: 0, y: 0 }, { x: 0, y: -3e-300 })).toEqual([-1, 0, 0, 1, 0, 0]);
+    expect(reflectionMatrix({ x: 0, y: 0 }, { x: 5e100, y: 5e100 })).toEqual([0, 1, 1, 0, 0, 0]);
+    expect(reflectionMatrix({ x: -1e308, y: 0 }, { x: 1e308, y: 0 })).toBeNull(); // 差が桁あふれ
+    expect(reflectionMatrix({ x: 1, y: 1 }, { x: 1, y: 1 })).toBeNull();
+    const m = reflectionMatrix({ x: 0, y: 0 }, { x: 3e150, y: 4e150 })!;
+    expect(m.every(Number.isFinite)).toBe(true);
+    expect(m[0]).toBeCloseTo(-7 / 25, 12);
+    expect(m[1]).toBeCloseTo(24 / 25, 12);
+  });
+});

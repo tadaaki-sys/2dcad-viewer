@@ -143,6 +143,7 @@ function referenceSecondPointStep(targets: Targets, base: Point2D, first: Point2
       if (input.kind === "enter") return { type: "done", messages: [endedMessage("SCALE")] };
       if (input.kind !== "point") return step;
       const length = distance(first, input.point);
+      if (!Number.isFinite(length)) return { ...step, messages: ["2点が離れすぎていて、参照の長さを計算できません。別の点を指示してください"] };
       if (!(length > 0)) return { ...step, messages: ["1点目と同じ点です(参照の長さが0です)。別の点を指示してください"] };
       return newLengthStep(targets, base, length, preview);
     },

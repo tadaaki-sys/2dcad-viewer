@@ -7,7 +7,7 @@
 //   円・点・文字    中心(挿入点)が窓の中にあれば、図形ごと移動
 //   円弧・楕円     全体が窓の中にあるときだけ、図形ごと移動。一部だけ窓に入っているものは、対象外(partial-skipped)
 // 窓の辺の上にある点は、中にあるものとして扱う(境界を含む)。
-import type { Affine2D, CadEntity, Point2D } from "../../types/cad";
+import type { Affine2D, CadEllipse, CadEntity, Point2D } from "../../types/cad";
 import { computeAllEntityBounds } from "../spatial/entityBounds";
 import { transformEntityGeometry, translationMatrix } from "./transform";
 
@@ -27,6 +27,55 @@ export function pointInWindow(point: Point2D, window: StretchWindow): boolean {
 /** 図形の範囲([minX, minY, maxX, maxY])が、窓と重なるか(辺が触れるだけも含む) */
 export function boundsTouchWindow(bounds: ArrayLike<number>, offset: number, window: StretchWindow): boolean {
   return bounds[offset] <= window.max.x && bounds[offset + 2] >= window.min.x && bounds[offset + 1] <= window.max.y && bounds[offset + 3] >= window.min.y;
+}
+
+const TWO_PI = Math.PI * 2;
+
+/**
+ * 楕円(弧)の、厳密な範囲 [minX, minY, maxX, maxY]。点列で近似した範囲(余裕つき)ではなく、
+ * 端点と、範囲の中にある極値(x・y が最大・最小になる点)から求める。有限でないときは null。
+ * (「図形全体が窓の中」の判定に使う。余裕つきの範囲を使うと、窓がぴったり囲んでいる楕円まで、一部だけ入っているとみなしてしまう)
+ */
+export function ellipseExactBounds(ellipse: CadEllipse): [number, number, number, number] | null {
+  const { center, majorRadius: a, minorRadius: b, rotation, startParam, endParam } = ellipse;
+  const cosR = Math.cos(rotation);
+  const sinR = Math.sin(rotation);
+  // x(t) = cx + ax·cos t + bx·sin t、y(t) = cy + ay·cos t + by·sin t
+  const ax = a * cosR;
+  const bx = -b * sinR;
+  const ay = a * sinR;
+  const by = b * cosR;
+  const raw = endParam - startParam;
+  const full = Math.abs(raw) >= TWO_PI - 1e-9;
+  const sweep = full ? TWO_PI : ((raw % TWO_PI) + TWO_PI) % TWO_PI;
+  const inRange = (t: number): boolean => full || ((((t - startParam) % TWO_PI) + TWO_PI) % TWO_PI) <= sweep + 1e-12;
+  const candidates = [startParam, endParam];
+  for (const t of [Math.atan2(bx, ax), Math.atan2(by, ay)]) candidates.push(t, t + Math.PI);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const t of candidates) {
+    if (!inRange(t)) continue;
+    const x = center.x + ax * Math.cos(t) + bx * Math.sin(t);
+    const y = center.y + ay * Math.cos(t) + by * Math.sin(t);
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  return [minX, minY, maxX, maxY].every(Number.isFinite) ? [minX, minY, maxX, maxY] : null;
+}
+
+/** 範囲が、窓の中にすっかり入っているか(数値の誤差として、1e-9 の相対許容を持つ) */
+function boundsInsideWindow(bounds: ArrayLike<number>, window: StretchWindow): boolean {
+  const tolerance = (value: number): number => 1e-9 * Math.max(1, Math.abs(value));
+  return (
+    bounds[0] >= window.min.x - tolerance(window.min.x) &&
+    bounds[2] <= window.max.x + tolerance(window.max.x) &&
+    bounds[1] >= window.min.y - tolerance(window.min.y) &&
+    bounds[3] <= window.max.y + tolerance(window.max.y)
+  );
 }
 
 /** 窓の4隅(左下から反時計回り) */
@@ -98,10 +147,10 @@ export function stretchEntityGeometry(entity: CadEntity, window: StretchWindow, 
       return pointInWindow(entity.position, window) ? wholly() : { kind: "unchanged" };
     case "ARC":
     case "ELLIPSE": {
-      const bounds = computeAllEntityBounds([entity]);
+      // 楕円は、点列で近似した範囲(余裕つき)ではなく、厳密な範囲で判定する
+      const bounds = (entity.type === "ELLIPSE" ? ellipseExactBounds(entity) : null) ?? computeAllEntityBounds([entity]);
       if (!boundsTouchWindow(bounds, 0, window)) return { kind: "unchanged" };
-      const inside = bounds[0] >= window.min.x && bounds[2] <= window.max.x && bounds[1] >= window.min.y && bounds[3] <= window.max.y;
-      return inside ? wholly() : { kind: "partial-skipped" };
+      return boundsInsideWindow(bounds, window) ? wholly() : { kind: "partial-skipped" };
     }
   }
 }

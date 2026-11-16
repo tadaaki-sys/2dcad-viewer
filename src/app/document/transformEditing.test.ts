@@ -226,3 +226,47 @@ describe("a large stretch stays in one step", () => {
     session.document.entities.forEach((entity, i) => expect(entity).toBe(before[i]));
   });
 });
+
+describe("a sequence of edits keeps the geometry and the source record consistent through Undo and Redo (Codex review)", () => {
+  it("stretch, then move, then mirror-copy: three steps; Undo x3 returns to the identical start; Redo x3 returns to the identical end", () => {
+    const { session, editability } = setup();
+    const start = session.document.entities;
+    stretchEntities(session, editability, ["e0", "e1"], WINDOW, 10, 20, "ストレッチ");
+    const afterStretch = session.document.entities;
+    transformEntities(session, editability, ["e0"], translationMatrix(1, 1), "移動", "移動");
+    const afterMove = session.document.entities;
+    copyEntities(session, editability, ["e0"], [reflectionMatrix({ x: 0, y: 0 }, { x: 1, y: 1 })!], "鏡像コピー");
+    const end = session.document.entities;
+    expect(session.document.entities.length).toBe(7);
+
+    const same = (a: readonly CadEntity[], b: readonly CadEntity[]) => a.length === b.length && a.every((entity, i) => entity === b[i]);
+    session.undo();
+    expect(same(session.document.entities, afterMove)).toBe(true);
+    session.undo();
+    expect(same(session.document.entities, afterStretch)).toBe(true);
+    session.undo();
+    expect(same(session.document.entities, start)).toBe(true);
+    expect(session.canUndo).toBe(false);
+    session.redo();
+    session.redo();
+    session.redo();
+    expect(same(session.document.entities, end)).toBe(true);
+
+    // 元データとの対応: e0 は、頂点が動いた印と、あとの移動の行列。コピーは、その印を引き継ぐ
+    const e0 = get(session, "e0") as CadEntity;
+    expect(e0.sourceRecord).toEqual({ id: "e0", matrix: translationMatrix(1, 1), reshaped: true });
+    const copy = session.document.entities[6] as CadEntity;
+    expect(copy.sourceRecord?.id).toBe("e0");
+    expect(copy.sourceRecord?.reshaped).toBe(true);
+  });
+
+  it("an overflow in the LAST entity of several changes nothing at all (no partial result, no history entry)", () => {
+    const far = line("n0", 1e308, 0, 1e308, 10);
+    const { session, editability } = setup([far]);
+    const before = session.document;
+    const result = transformEntities(session, editability, ["e0", "e1", "e2", "n0"], scaleMatrix({ x: 0, y: 0 }, 10), "拡大縮小", "拡大縮小");
+    expect(result.ok).toBe(false);
+    expect(session.document).toBe(before);
+    expect(session.canUndo).toBe(false);
+  });
+});

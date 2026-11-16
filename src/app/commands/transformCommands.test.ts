@@ -330,3 +330,39 @@ describe("the preview limit for STRETCH", () => {
     expect(shapes[0]).toEqual({ kind: "polyline", points: [{ x: 10, y: 19 }, { x: 70, y: 19 }, { x: 70, y: 30 }, { x: 10, y: 30 }], closed: true });
   });
 });
+
+describe("Codex review fixes (Phase 10)", () => {
+  it("R: two reference points too far apart (the distance overflows) are refused and the step stays", () => {
+    const session = start(["e0"]);
+    session.submitText("scale");
+    session.submitPoint({ x: 0, y: 0 });
+    session.submitText("r");
+    session.submitPoint({ x: -1e308, y: 0 });
+    const far = session.submitPoint({ x: 1e308, y: 0 });
+    expect(far.messages[0]).toContain("離れすぎて");
+    expect(far.active?.prompt).toContain("2点目");
+    // 同じ段階で、ふつうの点を指示すれば、先へ進める
+    const ok = session.submitPoint({ x: 0, y: 0 }); // 距離 1e308(有限)
+    expect(ok.active?.prompt).toContain("新しい長さ");
+  });
+});
+
+describe("the preview budget by vertices (Codex review)", () => {
+  const huge = { ...base, id: "n0", type: "LWPOLYLINE", vertices: Array.from({ length: 30_000 }, (_, i) => ({ x: i, y: i % 7 })), closed: false } as unknown as CadEntity;
+
+  it("one huge polyline: the selection preview is only the bounding box, and so is the stretch preview", () => {
+    const selection = createSelectionPreview([huge])([[1, 0, 0, 1, 5, 5]]);
+    expect(selection).toHaveLength(1);
+    expect(selection[0]).toMatchObject({ kind: "polyline", closed: true });
+    const stretch = createStretchPreview([huge], { min: { x: 0, y: 0 }, max: { x: 100, y: 10 } })(5, 5);
+    expect(stretch).toHaveLength(1);
+    expect(stretch[0]).toMatchObject({ kind: "polyline", closed: true });
+  });
+
+  it("a polyline under the budget is still previewed as it is", () => {
+    const small = { ...huge, vertices: huge.type === "LWPOLYLINE" ? huge.vertices.slice(0, 100) : [] } as CadEntity;
+    const shapes = createSelectionPreview([small])([[1, 0, 0, 1, 5, 5]]);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].kind === "polyline" && shapes[0].points.length).toBe(100);
+  });
+});
