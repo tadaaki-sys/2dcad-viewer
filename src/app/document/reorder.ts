@@ -1,26 +1,26 @@
 // 選択中の図形の描画順を変える(TOFRONT・TOBACK)。React にも画面にも依存しない。
-// この Phase では、新しく描いた図形(ID が n<番号>)だけが対象。取り込んだ図形の順序変更は、編集してよい図形かの分類
-// (io の editable / readOnly)をアプリの層へ渡す仕組みと一緒に、後の Phase で行う。
+// 対象は、編集してよい図形(新しく描いた図形と、取り込んだ最上位の図形)。ブロックの中身・寸法などは、除く。
 import { moveToBackChangeSet, moveToFrontChangeSet } from "../../core/history";
-import { hasEntity, parseNewEntityCounter } from "../../core/model";
+import { hasEntity } from "../../core/model";
+import type { Editability } from "./editability";
+import { resolveEditTargets } from "./editability";
 import type { DocumentSession } from "./documentSession";
 
 export type ReorderDirection = "front" | "back";
 
-/** 選択中の新しい図形を、最前面(front)・最背面(back)へ移す。結果の説明(コマンドラインに出す文)を返す */
+/** 選択中の編集できる図形を、最前面(front)・最背面(back)へ移す。結果の説明(コマンドラインに出す文)を返す */
 export function reorderSelection(
   session: DocumentSession,
+  editability: Editability,
   selectedIds: Iterable<string>,
   direction: ReorderDirection,
 ): string {
-  const targets: string[] = [];
-  let ignored = 0;
-  for (const id of selectedIds) {
-    if (parseNewEntityCounter(id) !== null && hasEntity(session.document, id)) targets.push(id);
-    else ignored++;
-  }
+  const resolved = resolveEditTargets(editability, selectedIds);
+  const targets = resolved.editable.filter((id) => hasEntity(session.document, id));
   if (targets.length === 0) {
-    return "新しく描いた図形が選択されていません(取り込んだ図形の順序は、まだ変えられません)";
+    return resolved.skipped > 0
+      ? `編集できる図形が選択されていません(${resolved.reason ?? "対象がありません"})`
+      : "図形が選択されていません";
   }
 
   const where = direction === "front" ? "最前面" : "最背面";
@@ -38,6 +38,6 @@ export function reorderSelection(
 
   const outcome = session.apply(changeSet);
   if (!outcome.ok) return `順序を変えられませんでした: ${outcome.error}`;
-  const note = ignored > 0 ? `(取り込んだ図形 ${ignored} 個は対象外)` : "";
+  const note = resolved.skipped > 0 ? `(編集できない図形 ${resolved.skipped} 個は対象外)` : "";
   return `${targets.length}個の図形を${where}へ移動しました${note}`;
 }

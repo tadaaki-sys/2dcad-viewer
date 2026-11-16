@@ -3,7 +3,7 @@
 import type { Point2D } from "../../types/cad";
 import { parseCoordinateInput } from "./coordinateInput";
 import { normalizeCommandName } from "./registry";
-import type { CommandRegistry, CommandStep, ExpectedInput, PreviewShape, PromptStep } from "./registry";
+import type { CommandRegistry, CommandStep, ExpectedInput, NumberMeaning, PreviewShape, PromptStep } from "./registry";
 
 /** 実行中のコマンドの状態(画面の表示用) */
 export type ActiveCommand = {
@@ -22,6 +22,8 @@ export type ActiveCommand = {
   basePoint: Point2D | null;
   /** 点を待つ段階が、数値だけの入力(例: 半径)も受け取るか */
   acceptsDistance: boolean;
+  /** 数値だけの入力の意味(長さ・角度)。acceptsDistance が false のときは、長さ */
+  numberMeaning: NumberMeaning;
 };
 
 export type SessionResult<R> = {
@@ -72,10 +74,22 @@ export class CommandSession<R, C> {
     return this.advance(running.name, step.onInput({ kind: "point", point }));
   }
 
+  /**
+   * いまの選択を渡す(選択を待っている段階で、Enter が押されたとき)。選択を待っていないときは、何もしない。
+   * 空の選択を渡すと、段階が、案内を出して待ち続けるか、終わるかを決める。
+   */
+  submitSelection(ids: readonly string[]): SessionResult<R> {
+    const running = this.running;
+    if (running === null) return this.empty();
+    const step = running.step;
+    if (step.expect !== "selection") return this.empty();
+    return this.advance(running.name, step.onInput({ kind: "selection", ids }));
+  }
+
   /** キーワード(ショートカットからの "U" など)を渡す。実行中の段階が、そのキーワードを宣言していなければ、何もしない */
   submitKeyword(keyword: string): SessionResult<R> {
     const running = this.running;
-    if (running === null || running.step.expect === "text") return this.empty();
+    if (running === null || running.step.expect === "text" || running.step.expect === "selection") return this.empty();
     const normalized = normalizeCommandName(keyword);
     if (!running.step.keywords?.includes(normalized)) return this.empty();
     return this.advance(running.name, running.step.onInput({ kind: "keyword", keyword: normalized }));
@@ -136,6 +150,8 @@ export class CommandSession<R, C> {
   private feedText(running: Running<R>, text: string): SessionResult<R> {
     const step = running.step;
     if (step.expect === "text") return this.advance(running.name, step.onInput({ kind: "text", text }));
+    // 選択を待っているときは、文字は受け付けない(選択は、画面で行って、Enter で渡す。空の Enter は、画面が submitSelection で渡す)
+    if (step.expect === "selection") return this.reprompt(running, "図形を選択してから、Enter を押してください");
 
     // 点・距離を待っているとき。空のEnterは、段階が宣言していれば入力として渡し、なければ何もしない
     if (text.trim() === "") {
@@ -194,12 +210,13 @@ export class CommandSession<R, C> {
       name,
       prompt: step.prompt,
       expect: step.expect,
-      keywords: step.expect === "text" ? [] : (step.keywords ?? []),
-      acceptsEnter: step.expect === "text" ? false : step.acceptsEnter === true,
+      keywords: step.expect === "text" || step.expect === "selection" ? [] : (step.keywords ?? []),
+      acceptsEnter: step.expect === "text" || step.expect === "selection" ? false : step.acceptsEnter === true,
       hasPreview: step.expect === "point" && step.preview !== undefined,
       hasPendingChanges: step.pending === true,
       basePoint: step.basePoint ?? null,
       acceptsDistance: step.expect === "point" && step.acceptsDistance === true,
+      numberMeaning: step.expect === "point" && step.numberMeaning === "angle" ? "angle" : "length",
     };
   }
 

@@ -1,0 +1,124 @@
+// 図形の変換(移動・回転)の計算。画面にも図面データの保存にも依存しない純粋な処理。
+// 変換は、長さと形を変えないもの(剛体: 移動と回転)だけを扱う。拡大縮小・鏡像など、形が変わる変換は、別の Phase で足す。
+import type { Affine2D, CadEntity, Point2D } from "../../types/cad";
+import { normalizeAngle } from "./construct";
+
+export const IDENTITY_MATRIX: Affine2D = [1, 0, 0, 1, 0, 0];
+
+/** 剛体かの判定の許容(行列の各成分の誤差) */
+const RIGID_EPSILON = 1e-9;
+/** 回転角が 90° の倍数とみなす許容(ラジアン) */
+const QUARTER_TURN_EPSILON = 1e-12;
+/** 90° の倍数の判定を行う角度の上限(ラジアン)。これ以上では、浮動小数点の間隔(1e3 で約1e-13)が許容に近づく */
+const EXACT_ANGLE_LIMIT = 1e3;
+
+/** 平行移動(dx, dy) */
+export function translationMatrix(dx: number, dy: number): Affine2D {
+  return [1, 0, 0, 1, dx, dy];
+}
+
+/** 角度(ラジアン)の cos と sin。90° の倍数は、正確な値(0・±1)を返す(cos(90°) が 6e-17 になって、座標に誤差が入るのを防ぐ) */
+export function exactCosSin(angle: number): { cos: number; sin: number } {
+  const quarter = Math.PI / 2;
+  const turns = Math.round(angle / quarter);
+  // 角度が大きいと、浮動小数点の間隔が許容より広くなり、「90°の倍数」の判定が偶然に成立してしまうので、小さい角度だけに限る
+  if (Math.abs(angle) < EXACT_ANGLE_LIMIT && Number.isFinite(turns) && Math.abs(angle - turns * quarter) < QUARTER_TURN_EPSILON) {
+    const exact = [
+      { cos: 1, sin: 0 },
+      { cos: 0, sin: 1 },
+      { cos: -1, sin: 0 },
+      { cos: 0, sin: -1 },
+    ];
+    return exact[((turns % 4) + 4) % 4];
+  }
+  return { cos: Math.cos(angle), sin: Math.sin(angle) };
+}
+
+/** center を中心に、angle(ラジアン、反時計回りが正)だけ回転 */
+export function rotationMatrix(center: Point2D, angle: number): Affine2D {
+  const { cos, sin } = exactCosSin(angle);
+  return [cos, sin, -sin, cos, center.x - cos * center.x + sin * center.y, center.y - sin * center.x - cos * center.y];
+}
+
+/** 変換を続けて行う: まず first、次に second */
+export function composeAffine(first: Affine2D, second: Affine2D): Affine2D {
+  const [a1, b1, c1, d1, e1, f1] = first;
+  const [a2, b2, c2, d2, e2, f2] = second;
+  return [
+    a2 * a1 + c2 * b1,
+    b2 * a1 + d2 * b1,
+    a2 * c1 + c2 * d1,
+    b2 * c1 + d2 * d1,
+    a2 * e1 + c2 * f1 + e2,
+    b2 * e1 + d2 * f1 + f2,
+  ];
+}
+
+export function applyAffine(matrix: Affine2D, point: Point2D): Point2D {
+  const [a, b, c, d, e, f] = matrix;
+  return { x: a * point.x + c * point.y + e, y: b * point.x + d * point.y + f };
+}
+
+/** 長さと形を変えない変換(移動・回転だけ。向きも反転しない)か */
+export function isRigid(matrix: Affine2D): boolean {
+  const [a, b, c, d] = matrix;
+  return (
+    matrix.every(Number.isFinite) &&
+    Math.abs(a - d) < RIGID_EPSILON &&
+    Math.abs(b + c) < RIGID_EPSILON &&
+    Math.abs(a * a + b * b - 1) < RIGID_EPSILON
+  );
+}
+
+/** 変換が、何も動かさないか(単位行列) */
+export function isIdentity(matrix: Affine2D): boolean {
+  return matrix[0] === 1 && matrix[1] === 0 && matrix[2] === 0 && matrix[3] === 1 && matrix[4] === 0 && matrix[5] === 0;
+}
+
+/** 剛体の変換の、回転角(ラジアン) */
+export function rotationAngleOf(matrix: Affine2D): number {
+  return Math.atan2(matrix[1], matrix[0]);
+}
+
+/**
+ * 図形の形を、剛体の変換で動かした、新しい図形を返す(元の図形は変えない)。ID・レイヤー・色・線種など、形以外は、そのまま。
+ * 剛体でない変換は、エラー(形が変わるため、ここでは扱わない)。
+ * 純粋な平行移動(回転なし)のときは、角度の値には、触らない(角度の値が、わずかでも変わらないように)。
+ */
+export function transformEntityGeometry(entity: CadEntity, matrix: Affine2D): CadEntity {
+  if (!isRigid(matrix)) throw new Error("移動・回転以外の変換は、まだ扱えません");
+  const move = (p: Point2D): Point2D => {
+    const moved = applyAffine(matrix, p);
+    // 有限な座標が、変換で有限でなくなる(桁あふれ)ときは、図形を壊さないよう、変換そのものを拒否する。
+    // もともと有限でない座標(壊れたデータ)は、これまでどおり、そのまま扱う。
+    if (Number.isFinite(p.x) && Number.isFinite(p.y) && !(Number.isFinite(moved.x) && Number.isFinite(moved.y))) {
+      throw new Error("変換後の座標が大きすぎて、扱えません");
+    }
+    return moved;
+  };
+  const rotates = !(matrix[0] === 1 && matrix[1] === 0);
+  const angle = rotates ? rotationAngleOf(matrix) : 0;
+  const turn = (value: number): number => (rotates ? normalizeAngle(value + angle) : value);
+
+  switch (entity.type) {
+    case "LINE":
+      return { ...entity, start: move(entity.start), end: move(entity.end) };
+    case "LWPOLYLINE":
+    case "POLYLINE":
+      // bulge などの、頂点が持つほかの値は、そのまま残す
+      return { ...entity, vertices: entity.vertices.map((vertex) => ({ ...vertex, ...move(vertex) })) };
+    case "CIRCLE":
+      return { ...entity, center: move(entity.center) };
+    case "ARC":
+      return { ...entity, center: move(entity.center), startAngle: turn(entity.startAngle), endAngle: turn(entity.endAngle) };
+    case "ELLIPSE":
+      // startParam・endParam は、長軸からの角度なので、回転しても変わらない
+      return { ...entity, center: move(entity.center), rotation: turn(entity.rotation) };
+    case "SPLINE":
+      return { ...entity, points: entity.points.map(move) };
+    case "POINT":
+      return { ...entity, position: move(entity.position) };
+    case "TEXT":
+      return { ...entity, position: move(entity.position), rotation: turn(entity.rotation) };
+  }
+}

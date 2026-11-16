@@ -22,6 +22,7 @@ const active = (overrides: Partial<ActiveCommand> = {}): ActiveCommand => ({
   hasPendingChanges: false,
   basePoint: null,
   acceptsDistance: false,
+  numberMeaning: "length",
   ...overrides,
 });
 

@@ -42,6 +42,12 @@ import { loadTrackingSettings, saveTrackingSettings } from "./utils/trackingSett
 import { createAppCommands } from "./app/commands/builtinCommands";
 import { defaultLayerName, resolveDrawTarget } from "./app/drawing/drawTarget";
 import { reorderSelection } from "./app/document/reorder";
+import { createAppEditing } from "./app/document/appEditing";
+import { createEditability } from "./app/document/editability";
+import type { Editability, EditabilitySource } from "./app/document/editability";
+import { copyEntities, deleteEntities, transformEntities } from "./app/document/editing";
+import type { EditOutcome } from "./app/document/editing";
+import { NO_EDITING } from "./app/commands/types";
 import { addEntitiesChangeSet } from "./core/history";
 import type { AppRequest } from "./app/commands/builtinCommands";
 import { isTypingTarget } from "./utils/dom";
@@ -84,6 +90,19 @@ const SNAP_FUNCTION_KEYS: Record<string, SnapToggleSetting> = { F3: "objectSnap"
 
 /** F8=ORTHO、F10=POLAR、F11=OTRACK(AutoCAD と同じ。F11 は、ブラウザの全画面の切り替えと重なる環境がある) */
 const TRACKING_FUNCTION_KEYS: Record<string, TrackingToggleSetting> = { F8: "ortho", F10: "polar", F11: "objectTracking" };
+
+/**
+ * 取り込んだ図形の分類(元データ)を、編集可否の判断に使う形に直す(io/ の分類を、app/ の層へ渡す橋渡し)。
+ * 元データが無い、または元データとの対応づけに失敗した図面は、null(取り込んだ図形は、編集できない)。
+ */
+function editabilitySourceOf(model: CadModel | null, source: DxfSource | null): EditabilitySource | null {
+  if (model === null || source === null || source.recordOfParserEntity === null || source.classification === null) return null;
+  return {
+    importedIndexById: new Map(model.entities.map((entity, index) => [entity.id, index])),
+    nested: source.origin.nested,
+    parserIndex: source.origin.parserIndex,
+  };
+}
 
 /** コマンドラインに残すメッセージの最大行数 */
 const COMMAND_LOG_LIMIT = 100;
@@ -138,11 +157,18 @@ export default function App() {
     createAppCommands({
       isDocumentOpen,
       drawTarget: { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
+      editing: NO_EDITING,
       allocateEntityId: () => {
         throw new Error("図面の準備ができていません");
       },
     }),
   );
+  // 編集してよい図形の判断(取り込んだ図形の分類。元データが届いたときに作る)と、いまの選択(コマンドが、始まる時点の最新を読めるように)
+  const editabilityRef = useRef<Editability>(createEditability(null));
+  const selectedIdsRef = useRef<ReadonlySet<string>>(new Set());
+  useLayoutEffect(() => {
+    selectedIdsRef.current = selectedEntityIds;
+  });
   const commandSession = commands.session;
   // 新しい図形を描くレイヤー(現在のレイヤー)。図面を開くたびに、初期値(レイヤー0など)に戻す
   const [currentLayerName, setCurrentLayerName] = useState<string | null>(null);
@@ -171,6 +197,12 @@ export default function App() {
           : isDocumentEditable
             ? resolveDrawTarget(layers, currentLayerName)
             : { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
+      editing: createAppEditing({
+        ready: isDocumentEditable && loadingProgress === null,
+        getSession: () => documentSessionRef.current,
+        getEditability: () => editabilityRef.current,
+        getSelection: () => selectedIdsRef.current,
+      }),
       allocateEntityId: () => {
         const session = documentSessionRef.current;
         if (session === null) throw new Error("図面の準備ができていません");
@@ -274,6 +306,7 @@ export default function App() {
         setCadModel(message.cadModel);
         // 元データは、図面の表示を遅らせないよう、続けて届く(sourceメッセージ)。それまでは、前の図面の分を残さない
         sourceRef.current = null;
+        editabilityRef.current = createEditability(null);
         documentSessionRef.current = null;
         setIsDocumentEditable(false);
         setSessionState(NO_HISTORY_STATE);
@@ -292,6 +325,7 @@ export default function App() {
         // ワーカーは、元データを送り終えるまで止めない(sourceメッセージで止める)
       } else if (message.type === "source") {
         sourceRef.current = message.source;
+        editabilityRef.current = createEditability(editabilitySourceOf(pendingModel, message.source));
         if (pendingModel) {
           const session = new DocumentSession(documentFromCadModel(pendingModel));
           session.subscribe(handleDocumentChange);
@@ -347,6 +381,7 @@ export default function App() {
     setLayers([]);
     setCadModel(null);
     sourceRef.current = null;
+    editabilityRef.current = createEditability(null);
     documentSessionRef.current = null;
     setIsDocumentEditable(false);
     setSessionState(NO_HISTORY_STATE);
@@ -505,7 +540,7 @@ export default function App() {
         return;
       }
       try {
-        appendCommandLog([reorderSelection(session, selectedEntityIds, direction)]);
+        appendCommandLog([reorderSelection(session, editabilityRef.current, selectedEntityIds, direction)]);
       } catch (error) {
         console.error("[App] failed to update the view after reordering", error);
         appendCommandLog(["表示の更新に失敗しました。図面を開き直してください"]);
@@ -514,11 +549,35 @@ export default function App() {
     [appendCommandLog, selectedEntityIds],
   );
 
+  /** 編集(移動・回転・複写・削除)を、図面に適用して、結果の説明を表示する(Undo の1段階) */
+  const applyEdit = useCallback(
+    (run: (session: DocumentSession, editability: Editability) => EditOutcome) => {
+      const session = documentSessionRef.current;
+      if (session === null) {
+        appendCommandLog([DOCUMENT_NOT_READY_MESSAGE]);
+        return;
+      }
+      try {
+        appendCommandLog([run(session, editabilityRef.current).message]);
+      } catch (error) {
+        console.error("[App] failed to apply an edit", error);
+        appendCommandLog(["表示の更新に失敗しました。図面を開き直してください"]);
+      }
+    },
+    [appendCommandLog],
+  );
+
   const executeRequest = useCallback(
     (request: AppRequest) => {
       // 新しい図面を読み込んでいる間は、いまの図面を変更しない(読み込みが終わると、いまの図面と変更は置き換えられるため)
       const changesDocument =
-        request.type === "undo" || request.type === "redo" || request.type === "addEntities" || request.type === "reorder";
+        request.type === "undo" ||
+        request.type === "redo" ||
+        request.type === "addEntities" ||
+        request.type === "reorder" ||
+        request.type === "transformEntities" ||
+        request.type === "copyEntities" ||
+        request.type === "deleteEntities";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -551,6 +610,15 @@ export default function App() {
           appendCommandLog([toggled.message]);
           break;
         }
+        case "transformEntities":
+          applyEdit((session, editability) => transformEntities(session, editability, request.ids, request.matrix, request.label, request.noun));
+          break;
+        case "copyEntities":
+          applyEdit((session, editability) => copyEntities(session, editability, request.ids, request.matrices, request.label));
+          break;
+        case "deleteEntities":
+          applyEdit((session, editability) => deleteEntities(session, editability, request.ids, request.label));
+          break;
         case "undo":
           performHistoryStep("undo");
           break;
@@ -577,6 +645,7 @@ export default function App() {
       confirmDiscardChanges,
       loadingProgress,
       appendCommandLog,
+      applyEdit,
       snapSettings,
       trackingSettings,
     ],
@@ -620,9 +689,23 @@ export default function App() {
     else commandInputRef.current?.blur();
   }, []);
 
+  /**
+   * 選択を待っている編集コマンド(MOVE など)で、Enter が押された: いまの選択を、コマンドへ渡す。
+   * 選択を待っていなければ、false(何もしない)。続けて入力を待つなら、座標を打てるように入力欄へ。
+   */
+  const confirmSelectionStep = useCallback((): boolean => {
+    if (commandSession.active?.expect !== "selection") return false;
+    const result = commandSession.submitSelection([...selectedIdsRef.current]);
+    applyCommandResult(result);
+    focusCommandLineFor(result);
+    return true;
+  }, [applyCommandResult, commandSession, focusCommandLineFor]);
+
   const handleCommandSubmit = useCallback(
     (text: string) => {
       const trimmed = text.trim();
+      // 選択を待っている間の、空の Enter は、いまの選択を渡す(文字が入っているときは、コマンドの案内に任せる)
+      if (trimmed === "" && confirmSelectionStep()) return;
       // ダイナミック入力: 数値だけ(例: 長さ 1500)を打った、または、Tab で確定した値があるときは、点に直して指示する。
       // 座標(1000,500 など)・キーワード・コマンド名・空のEnter(確定した値が無いとき)は、これまでどおりコマンドへ渡す
       const dynamic = dynamicRef.current;
@@ -659,7 +742,7 @@ export default function App() {
       }
       applyCommandResult(commandSession.submitText(text), trimmed === "" ? undefined : trimmed);
     },
-    [applyCommandResult, appendCommandLog, commandSession, focusCommandLineFor],
+    [applyCommandResult, appendCommandLog, commandSession, focusCommandLineFor, confirmSelectionStep],
   );
 
   /** コマンドラインでの Tab: ダイナミック入力の、次(Shift+Tab なら前)の項目へ。打っていた値は、その項目の値として確定する */
@@ -766,6 +849,18 @@ export default function App() {
       } else if ((event.key === "Delete" || event.key === "Backspace") && selectedMeasurementId) {
         event.preventDefault();
         handleDeleteMeasurement(selectedMeasurementId);
+      } else if (
+        event.key === "Delete" &&
+        isDocumentOpen &&
+        !commandSession.active &&
+        selectedIdsRef.current.size > 0 &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        // 選択中の図形を削除する(DELETE コマンドと同じ。Undo で戻せる)。入力欄に文字を打っているときは、ここへ来ない
+        event.preventDefault();
+        runCommand("DELETE");
       } else if (event.key === "o" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         if (isDocumentOpen) runCommand("OPEN");
@@ -782,7 +877,10 @@ export default function App() {
         !event.altKey
       ) {
         event.preventDefault();
-        if (commandSession.active?.acceptsEnter) {
+        if (commandSession.active?.expect === "selection") {
+          // 選択を待っている編集コマンドのEnterは、いまの選択の確定
+          confirmSelectionStep();
+        } else if (commandSession.active?.acceptsEnter) {
           // 作図中(点の指示を待っていて、Enterで終われる)のEnterは、作図の終了
           applyCommandResult(commandSession.submitText(""));
         } else {
@@ -803,6 +901,7 @@ export default function App() {
     handleDeleteMeasurement,
     handleToggleSnap,
     handleToggleTracking,
+    confirmSelectionStep,
   ]);
 
   /** コマンドラインの入力欄でのCtrl+Z。作図中なら「1点戻す(U)」として受け取る。受け取れないときは false(入力欄の文字の取り消し) */

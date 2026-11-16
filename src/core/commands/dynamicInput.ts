@@ -4,13 +4,14 @@
 //   absolute  基準点が無い(1点目): X・Y を入力できる
 //   polar     基準点がある(2点目以降): 長さ・角度を入力できる(基準点からの極座標)
 //   distance  数値だけを待つ段階(円の半径・直径): 長さだけ
+//   angle     数値だけの入力が「角度」の意味の段階(ROTATE の回転角): 角度だけ
 // 打っていない項目は、カーソルの値を使う(例: 長さだけ打って Enter なら、角度はカーソルの向き)。
 // 角度は「度」で、+X方向を0、反時計回り。長さは mm。内部の値は丸めない(表示のときだけ小数1桁)。
 import type { Point2D } from "../../types/cad";
 import { parseCoordinateInput } from "./coordinateInput";
 import type { ActiveCommand } from "./session";
 
-export type DynamicMode = "absolute" | "polar" | "distance";
+export type DynamicMode = "absolute" | "polar" | "distance" | "angle";
 export type DynamicField = "x" | "y" | "length" | "angle";
 
 /** 打ち終えた(Tab で確定した)項目の値。長さは mm、角度は度 */
@@ -20,6 +21,7 @@ const FIELDS_OF_MODE: Record<DynamicMode, readonly DynamicField[]> = {
   absolute: ["x", "y"],
   polar: ["length", "angle"],
   distance: ["length"],
+  angle: ["angle"],
 };
 
 /** 実行中の段階が、ダイナミック入力の対象か。対象でなければ null */
@@ -28,7 +30,7 @@ export function dynamicModeOf(active: ActiveCommand | null): DynamicMode | null 
   if (active.expect === "distance") return "distance";
   if (active.expect !== "point") return null;
   // 点の指示でも数値でも答えられる段階(円の半径)は、長さだけ
-  if (active.acceptsDistance) return "distance";
+  if (active.acceptsDistance) return active.numberMeaning === "angle" ? "angle" : "distance";
   return active.basePoint === null ? "absolute" : "polar";
 }
 
@@ -99,6 +101,17 @@ export function resolveDynamicPoint(
     return finite({ x, y });
   }
   if (base === null) return { ok: false, error: "基準になる点がありません" };
+  if (mode === "angle") {
+    // 角度だけを打つ段階: 角度は、打った値(無ければカーソルの向き)。長さは、カーソルまでの距離(カーソルが無い・同じ点なら 1)
+    if (cursor === null && values.angle === undefined) {
+      return { ok: false, error: "カーソルを図面の上に置くか、角度を入力してください" };
+    }
+    const readout = cursor === null ? null : readoutAt(cursor, base);
+    const degrees = values.angle ?? readout!.angle!;
+    const length = readout !== null && readout.length! > 0 ? readout.length! : 1;
+    const radians = (degrees * Math.PI) / 180;
+    return finite({ x: base.x + length * Math.cos(radians), y: base.y + length * Math.sin(radians) });
+  }
   // polar / distance: 基準点からの極座標。distance は、角度をカーソルの向きにする
   if (cursor === null && (values.length === undefined || (mode === "polar" && values.angle === undefined))) {
     return { ok: false, error: "カーソルを図面の上に置くか、長さと角度の両方を入力してください" };

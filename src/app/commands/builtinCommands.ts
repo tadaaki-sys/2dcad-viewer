@@ -3,6 +3,7 @@
 import { CommandRegistry, CommandSession } from "../../core/commands";
 import { CIRCLE_ARC_COMMANDS } from "./circleArcCommands";
 import { DRAW_COMMANDS } from "./drawCommands";
+import { EDIT_COMMANDS } from "./editCommands";
 import { formatCoordinate } from "./format";
 import { NO_DOCUMENT_MESSAGE } from "./types";
 import type { AppCommandContext, AppCommandDefinition, AppCommandSession, AppRequest } from "./types";
@@ -14,7 +15,9 @@ export type {
   AppCommandDefinition,
   AppCommandSession,
   AppRequest,
+  AppEditing,
   DrawTarget,
+  EditTargetsInfo,
   SnapToggleSetting,
   TrackingToggleSetting,
 } from "./types";
@@ -47,6 +50,7 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
   documentCommand("REDO", [], "やり直し", { type: "redo" }),
   ...DRAW_COMMANDS,
   ...CIRCLE_ARC_COMMANDS,
+  ...EDIT_COMMANDS,
   documentCommand("TOFRONT", [], "選択中の新しい図形を最前面へ", { type: "reorder", direction: "front" }),
   documentCommand("TOBACK", [], "選択中の新しい図形を最背面へ", { type: "reorder", direction: "back" }),
   documentCommand("OSNAP", [], "図形への吸着(端点・中点など)のオン・オフ", { type: "toggleSnapSetting", setting: "objectSnap" }),

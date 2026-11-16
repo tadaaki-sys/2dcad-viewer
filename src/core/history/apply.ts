@@ -4,11 +4,13 @@ import type { CadDocument } from "../model/document";
 import { parseNewEntityCounter } from "../model/ids";
 import type { EntityId } from "../model/ids";
 import type { CadEntity } from "../../types/cad";
-import type { ChangeSet } from "./changeSet";
+import type { ChangeSet, EntityChange } from "./changeSet";
 
 export type ApplyResult = { ok: true; document: CadDocument } | { ok: false; error: string };
 
-function fail(error: string): ApplyResult {
+type Applied = { ok: true; entities: CadEntity[]; nextNewId: number } | { ok: false; error: string };
+
+function fail(error: string): { ok: false; error: string } {
   return { ok: false, error };
 }
 
@@ -19,18 +21,104 @@ function fail(error: string): ApplyResult {
  *  - 追加する図形のIDが、まだ使われていないこと、レイヤーが存在すること
  *  - 置き換えで、IDが変わらないこと
  * 触っていない図形は、同じオブジェクトのまま引き継ぐ。
+ *
+ * 削除だけ・追加だけの大きな変更(多数の図形の削除と、その Undo)は、1回の走査で適用する(applyBulk)。
+ * それ以外、または、その条件に合わない変更は、1件ずつ順に適用する(applySequentially。エラーの文言もこちらが出す)。
  */
 export function applyChangeSet(document: CadDocument, changeSet: ChangeSet): ApplyResult {
   if (changeSet.changes.length === 0) return fail("変更がありません");
+  const applied = applyBulk(document, changeSet.changes) ?? applySequentially(document, changeSet.changes);
+  return finish(document, applied);
+}
 
+/** 1件ずつ順に適用する方法だけで適用する(高速経路を通らない)。高速経路と結果が同じことを、テストで確かめるために使う */
+export function applyChangeSetSequentially(document: CadDocument, changeSet: ChangeSet): ApplyResult {
+  if (changeSet.changes.length === 0) return fail("変更がありません");
+  return finish(document, applySequentially(document, changeSet.changes));
+}
+
+function finish(document: CadDocument, applied: Applied): ApplyResult {
+  if (!applied.ok) return applied;
+  const { entities, nextNewId } = applied;
+  const indexById = new Map<EntityId, number>();
+  for (let i = 0; i < entities.length; i++) indexById.set(entities[i].id, i);
+  if (indexById.size !== entities.length) return fail("適用すると図形IDが重複します");
+  return { ok: true, document: { ...document, entities, indexById, nextNewId } };
+}
+
+/**
+ * 削除だけ(位置が大きい順)、または追加だけ(位置が小さい順)の変更を、1回の走査で適用する。
+ * 1件ごとに配列を詰め直す(splice)と、図形が散らばった大量の削除は「図形数 × 削除数」の時間になるため。
+ * 条件に合わない(順序が違う・位置や対象が合わない、など)ときは null を返し、1件ずつの適用に任せる。
+ * そうすれば、不正な変更のエラーの文言は、1件ずつの適用のものと同じになる。
+ */
+function applyBulk(document: CadDocument, changes: readonly EntityChange[]): Applied | null {
+  const first = changes[0];
+  if (first.kind === "remove") return applyBulkRemove(document, changes);
+  if (first.kind === "add") return applyBulkAdd(document, changes);
+  return null;
+}
+
+function applyBulkRemove(document: CadDocument, changes: readonly EntityChange[]): Applied | null {
+  const source = document.entities;
+  const removed = new Uint8Array(source.length);
+  let previous = source.length;
+  for (const change of changes) {
+    if (change.kind !== "remove") return null;
+    const index = change.index;
+    // 位置が大きい順に並んでいれば、先に消した図形が、後の位置をずらさない(元の位置のまま照合できる)
+    if (!Number.isInteger(index) || index < 0 || index >= previous) return null;
+    if (source[index] !== change.entity) return null;
+    removed[index] = 1;
+    previous = index;
+  }
+  const entities: CadEntity[] = [];
+  for (let i = 0; i < source.length; i++) if (removed[i] === 0) entities.push(source[i]);
+  return { ok: true, entities, nextNewId: document.nextNewId };
+}
+
+function applyBulkAdd(document: CadDocument, changes: readonly EntityChange[]): Applied | null {
+  const source = document.entities;
+  const total = source.length + changes.length;
+  // 位置が小さい順の追加は、後の追加が先の追加の位置をずらさない。だから、各 index が、そのまま最終的な位置になる
+  const added = new Map<number, CadEntity>();
+  const addedIds = new Set<EntityId>();
+  let previous = -1;
+  let nextNewId = document.nextNewId;
+  for (let step = 0; step < changes.length; step++) {
+    const change = changes[step];
+    if (change.kind !== "add") return null;
+    const index = change.index;
+    // その時点の配列の長さ(元の長さ + これまでの追加数)以下で、前の追加より後ろ
+    if (!Number.isInteger(index) || index <= previous || index > source.length + step) return null;
+    const id = change.entity.id;
+    if (document.indexById.has(id) || addedIds.has(id)) return null;
+    if (!document.layerIndexByName.has(change.entity.layer)) return null;
+    added.set(index, change.entity);
+    addedIds.add(id);
+    previous = index;
+    const counter = parseNewEntityCounter(id);
+    if (counter !== null && counter >= nextNewId) nextNewId = counter + 1;
+  }
+  const entities: CadEntity[] = new Array<CadEntity>(total);
+  let cursor = 0;
+  for (let i = 0; i < total; i++) {
+    const entity = added.get(i);
+    entities[i] = entity !== undefined ? entity : source[cursor++];
+  }
+  return { ok: true, entities, nextNewId };
+}
+
+/** 1件ずつ順に適用する。位置は、適用が進むごとに変わる(その時点の配列に対する位置) */
+function applySequentially(document: CadDocument, changes: readonly EntityChange[]): Applied {
   const entities: CadEntity[] = document.entities.slice();
   // 適用の途中でIDが存在するかを、元の索引との差分(追加でtrue、削除でfalse)で管理する(位置は変わるので、索引の位置は使わない)
   const presence = new Map<EntityId, boolean>();
   const isPresent = (id: EntityId) => presence.get(id) ?? document.indexById.has(id);
   let nextNewId = document.nextNewId;
 
-  for (let step = 0; step < changeSet.changes.length; step++) {
-    const change = changeSet.changes[step];
+  for (let step = 0; step < changes.length; step++) {
+    const change = changes[step];
     const where = `${step + 1}番目の変更(${change.kind})`;
     if (change.kind === "move") {
       const { from, to } = change;
@@ -76,10 +164,5 @@ export function applyChangeSet(document: CadDocument, changeSet: ChangeSet): App
       entities[index] = change.after;
     }
   }
-
-  const indexById = new Map<EntityId, number>();
-  for (let i = 0; i < entities.length; i++) indexById.set(entities[i].id, i);
-  if (indexById.size !== entities.length) return fail("適用すると図形IDが重複します");
-
-  return { ok: true, document: { ...document, entities, indexById, nextNewId } };
+  return { ok: true, entities, nextNewId };
 }

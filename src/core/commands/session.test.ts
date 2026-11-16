@@ -156,6 +156,7 @@ describe("CommandSession: point input", () => {
       hasPendingChanges: false,
       basePoint: null,
       acceptsDistance: false,
+      numberMeaning: "length",
     });
     expect(first.messages).toEqual(["TWO first?"]);
     const second = session.submitPoint({ x: 10, y: 20 });

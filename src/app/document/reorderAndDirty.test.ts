@@ -4,7 +4,12 @@ import { addEntitiesChangeSet } from "../../core/history";
 import type { CadLayer, CadLine } from "../../types/cad";
 import { DocumentSession } from "./documentSession";
 import type { DocumentChange } from "./documentSession";
-import { reorderSelection } from "./reorder";
+import { createEditability } from "./editability";
+import { reorderSelection as reorder } from "./reorder";
+
+/** 元データとの対応が無い図面(取り込んだ図形は、編集できない。新しく描いた図形だけ、編集できる) */
+const NO_SOURCE = createEditability(null);
+const reorderSelection = (session: DocumentSession, selected: string[], direction: "front" | "back") => reorder(session, NO_SOURCE, selected, direction);
 
 const LAYERS: CadLayer[] = [{ name: "0", color: "#ffffff", visible: true }];
 
@@ -42,7 +47,7 @@ describe("reorderSelection", () => {
   it("ignores imported entities in the selection and says how many", () => {
     const session = sessionWithNew();
     const message = reorderSelection(session, ["e0", "n0", "zzz"], "back");
-    expect(message).toBe("1個の図形を最背面へ移動しました(取り込んだ図形 2 個は対象外)");
+    expect(message).toContain("1個の図形を最背面へ移動しました(編集できない図形 2 個は対象外)");
     expect(ids(session)).toEqual(["n0", "e0", "e1", "n1", "n2"]);
   });
 
@@ -50,8 +55,8 @@ describe("reorderSelection", () => {
     const session = sessionWithNew();
     const before = ids(session);
     const undoCount = session.nextUndoLabel;
-    expect(reorderSelection(session, ["e0", "e1"], "front")).toContain("新しく描いた図形が選択されていません");
-    expect(reorderSelection(session, [], "front")).toContain("新しく描いた図形が選択されていません");
+    expect(reorderSelection(session, ["e0", "e1"], "front")).toContain("編集できる図形が選択されていません");
+    expect(reorderSelection(session, [], "front")).toBe("図形が選択されていません");
     expect(ids(session)).toEqual(before);
     expect(session.nextUndoLabel).toBe(undoCount);
   });
@@ -64,6 +69,35 @@ describe("reorderSelection", () => {
     const fresh = new DocumentSession(createDocument({ layers: LAYERS, entities: [] }));
     fresh.apply(addEntitiesChangeSet(fresh.document, [line("n0")], "追加"));
     expect(reorderSelection(fresh, ["n0"], "back")).toBe("選択中の図形は、すでに最背面にあります");
+  });
+});
+
+describe("reorderSelection with imported entities (Phase 9)", () => {
+  const withSource = createEditability({
+    importedIndexById: new Map([["e0", 0], ["e1", 1]]),
+    nested: Uint8Array.from([0, 1]), // e1 は、ブロックの中身(読み取り専用)
+    parserIndex: Int32Array.from([0, 1]),
+  });
+
+  it("an imported top-level entity can be moved to the front and back; a read-only one is left out", () => {
+    const session = sessionWithNew();
+    expect(reorder(session, withSource, ["e0"], "front")).toBe("1個の図形を最前面へ移動しました");
+    expect(ids(session)).toEqual(["e1", "n0", "n1", "n2", "e0"]);
+    const mixed = reorder(session, withSource, ["e1", "n0"], "back");
+    expect(mixed).toContain("1個の図形を最背面へ移動しました(編集できない図形 1 個は対象外)");
+    expect(ids(session)).toEqual(["n0", "e1", "n1", "n2", "e0"]);
+    // 1回のUndoで、元に戻る
+    session.undo();
+    session.undo();
+    expect(ids(session)).toEqual(["e0", "e1", "n0", "n1", "n2"]);
+  });
+
+  it("a read-only entity alone is refused with the reason", () => {
+    const session = sessionWithNew();
+    const message = reorder(session, withSource, ["e1"], "front");
+    expect(message).toContain("編集できる図形が選択されていません");
+    expect(message).toContain("読み取り専用");
+    expect(ids(session)).toEqual(["e0", "e1", "n0", "n1", "n2"]);
   });
 });
 

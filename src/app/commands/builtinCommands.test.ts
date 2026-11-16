@@ -16,7 +16,7 @@ function session(isDocumentOpen = true) {
 describe("built-in commands", () => {
   it("registers every command without name conflicts", () => {
     const registry = createAppCommandRegistry();
-    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TOFRONT", "TOBACK", "OSNAP", "SNAP", "GRID", "ORTHO", "POLAR", "OTRACK", "ID"]);
+    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "MOVE", "COPY", "ROTATE", "DELETE", "TOFRONT", "TOBACK", "OSNAP", "SNAP", "GRID", "ORTHO", "POLAR", "OTRACK", "ID"]);
     expect(BUILTIN_COMMANDS.every((d) => d.description.length > 0)).toBe(true);
   });
 
@@ -63,6 +63,7 @@ describe("built-in commands", () => {
       hasPendingChanges: false,
       basePoint: null,
       acceptsDistance: false,
+      numberMeaning: "length",
     });
     const done = s.submitPoint({ x: 1234.5678, y: -0.0001 });
     expect(done.messages).toEqual(["X = 1234.6, Y = 0.0"]);

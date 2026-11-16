@@ -306,14 +306,26 @@ test.describe("draw order (new entities only)", () => {
     expect(await entityOrder(page)).toEqual(withNew);
   });
 
-  test("an imported entity is not reordered (said clearly), and nothing is selected is said too", async ({ page }) => {
+  // Phase 4 では、取り込んだ図形の順序は変えられなかった。Phase 9 で、取り込んだ最上位の図形にも広げた(ブロックの中身は対象外。edit.e2e.ts)
+  test("an imported top-level entity is reordered too (one Undo step); nothing selected is said clearly", async ({ page }) => {
     const mapping = await openEditable(page);
     const before = await entityOrder(page);
+
+    await typeCommand(page, "tofront");
+    await expect(log(page)).toContainText("図形が選択されていません");
+    expect(await entityOrder(page)).toEqual(before);
+
     const circle = at(mapping, 400, 300);
     await click(page, circle);
     await expect(propertyPanel(page)).toContainText("CIRCLE");
     await typeCommand(page, "tofront");
-    await expect(log(page)).toContainText("新しく描いた図形が選択されていません");
+    await expect(log(page)).toContainText("1個の図形を最前面へ移動しました");
+    const after = await entityOrder(page);
+    expect(after).not.toEqual(before);
+    expect([...after].sort()).toEqual([...before].sort()); // 並びだけが変わり、図形の増減は無い
+
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Control+z");
     expect(await entityOrder(page)).toEqual(before);
   });
 });

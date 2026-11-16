@@ -27,7 +27,9 @@ export type {
   PointInput,
   PreviewShape,
   PromptStep,
+  SelectionInput,
   TextInput,
+  NumberMeaning,
 } from "./registry";
 export { CommandSession } from "./session";
 export type { ActiveCommand, SessionResult } from "./session";

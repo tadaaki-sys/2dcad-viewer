@@ -39,7 +39,7 @@ export function DynamicInput({ mode, cursor, screen, base, locked, field, typedT
   if (screen === null && typed === "" && Object.keys(locked).length === 0) return null;
 
   const readout = cursor !== null && showCursorValues ? readoutAt(cursor, base) : null;
-  const rows = mode === "distance" ? (["length"] as const) : ROW_ORDER;
+  const rows = mode === "distance" ? (["length"] as const) : mode === "angle" ? (["angle"] as const) : ROW_ORDER;
 
   const height = rows.length * ROW_HEIGHT_PX + 10;
   const anchor = screen ?? { x: 0, y: 0 };

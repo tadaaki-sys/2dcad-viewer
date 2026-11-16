@@ -1,7 +1,7 @@
 import "./Toolbar.css";
 
 /** ツールバーから動かす作図コマンド */
-export type DrawCommandName = "LINE" | "PLINE" | "RECT" | "CIRCLE" | "ARC";
+export type DrawCommandName = "LINE" | "PLINE" | "RECT" | "CIRCLE" | "ARC" | "MOVE" | "COPY" | "ROTATE" | "DELETE";
 
 type ToolbarProps = {
   isDocumentOpen: boolean;
@@ -28,6 +28,14 @@ const DRAW_BUTTONS: ReadonlyArray<{ name: DrawCommandName; label: string; title:
   { name: "RECT", label: "長方形", title: "長方形を描く(RECT)" },
   { name: "CIRCLE", label: "円", title: "円を描く(CIRCLE)" },
   { name: "ARC", label: "円弧", title: "円弧を描く(ARC)" },
+];
+
+/** 編集のコマンド。先に図形を選択してあれば、その選択を使う。無ければ、押したあとに選択して Enter */
+const EDIT_BUTTONS: ReadonlyArray<{ name: DrawCommandName; label: string; title: string }> = [
+  { name: "MOVE", label: "移動", title: "選択した図形を移動する(MOVE)" },
+  { name: "COPY", label: "コピー", title: "選択した図形を複写する(COPY)。繰り返せます" },
+  { name: "ROTATE", label: "回転", title: "選択した図形を回転する(ROTATE)" },
+  { name: "DELETE", label: "削除", title: "選択した図形を削除する(DELETE・Delete キー)。Ctrl+Z で戻せます" },
 ];
 
 export function Toolbar({
@@ -70,6 +78,19 @@ export function Toolbar({
       </button>
       <div className="toolbar__separator" />
       {DRAW_BUTTONS.map((button) => (
+        <button
+          key={button.name}
+          type="button"
+          className={`toolbar__button${activeCommandName === button.name ? " toolbar__button--active" : ""}`}
+          title={button.title}
+          onClick={() => onDraw(button.name)}
+          disabled={!isEditable}
+        >
+          {button.label}
+        </button>
+      ))}
+      <div className="toolbar__separator" />
+      {EDIT_BUTTONS.map((button) => (
         <button
           key={button.name}
           type="button"

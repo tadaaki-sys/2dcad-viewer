@@ -148,7 +148,29 @@ export type CadPointStyle = {
   size: number;
 };
 
-export type CadEntity = CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline | CadPoint;
+/**
+ * 2次元の変換行列 [a, b, c, d, e, f]。点 (x, y) を、(a·x + c·y + e, b·x + d·y + f) に移す(DXF・SVG・Canvas の行列と同じ並び)。
+ * 移動・回転は、a=d=cosθ、b=-c=sinθ、(e, f)=移動量 の形(長さと形を変えない)。
+ */
+export type Affine2D = readonly [number, number, number, number, number, number];
+
+/**
+ * 元データ(DXFの記録)との対応。「この図形は、取り込んだ図形 id の元の記録に、変換 matrix を施したもの」という意味。
+ * 取り込んだ図形を移動・回転・複写したときに付く。保存の Phase が、元の記録(円弧つきのポリラインやスプラインを含む)に、
+ * 同じ変換を直接適用して書くために持つ(折れ線に展開した点列から作り直すと、形が変わるため)。
+ * - 取り込んだ図形そのものを動かしたとき: id はその図形自身。複写では、複写もとの(取り込んだ)図形の id
+ * - matrix は、元の記録の座標から、いまの座標への変換(動かすたびに合成する)
+ * 新しく描いた図形(元データに記録が無いもの)には付かない。
+ */
+export type SourceRecord = {
+  id: string;
+  matrix: Affine2D;
+};
+
+/** すべての図形が持てる、任意の項目 */
+type EntityExtras = { sourceRecord?: SourceRecord };
+
+export type CadEntity = (CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline | CadPoint) & EntityExtras;
 
 export type CadBounds = {
   min: Point2D;

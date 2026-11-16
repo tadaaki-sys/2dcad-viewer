@@ -12,8 +12,11 @@ export type KeywordInput = { kind: "keyword"; keyword: string };
 /** 空のEnter。段階が acceptsEnter を宣言したときだけ受け取る */
 export type EnterInput = { kind: "enter" };
 
+/** 選択した図形(図形のIDの一覧)。選択を待つ段階が受け取る。画面が、いまの選択を渡す */
+export type SelectionInput = { kind: "selection"; ids: readonly string[] };
+
 /** コマンドの段階が受け取る入力 */
-export type CommandInput = PointInput | TextInput | DistanceInput | KeywordInput | EnterInput;
+export type CommandInput = PointInput | TextInput | DistanceInput | KeywordInput | EnterInput | SelectionInput;
 
 /** ゴム紐(描いている途中の仮の図形)。形式に依存しない折れ線で表す。図面のデータではなく、重ねて描くだけ */
 export type PreviewShape =
@@ -29,7 +32,10 @@ export type CommandOutput<R> = {
 };
 
 /** コマンドが待っている入力の種類 */
-export type ExpectedInput = "point" | "text" | "distance";
+export type ExpectedInput = "point" | "text" | "distance" | "selection";
+
+/** 数値だけの入力(acceptsDistance)の意味。長さ(mm)か、角度(度。反時計回りが正) */
+export type NumberMeaning = "length" | "angle";
 
 /** 入力を待つ段階の、共通の部分 */
 type PromptBase<R> = { type: "prompt" } & CommandOutput<R> & {
@@ -68,10 +74,20 @@ export type PromptStep<R> =
          * 指定しない段階は、数値だけの入力をエラーにする
          */
         acceptsDistance?: boolean;
+        /** 数値だけの入力(acceptsDistance)の意味。指定しなければ、長さ。"angle" なら、ダイナミック入力は、角度の欄を出す */
+        numberMeaning?: NumberMeaning;
         onInput: (input: PointInput | KeywordInput | EnterInput | DistanceInput) => CommandStep<R>;
         /** カーソル位置に応じたゴム紐を返す(図面を変更せず、重ねて描く) */
         preview?: (cursor: Point2D) => readonly PreviewShape[];
       })
+  | (PromptBase<R> & {
+      /**
+       * 図形の選択を待つ段階。選択の操作(クリック・窓・交差)は、ふだんどおり画面が行い、Enter で、いまの選択が渡される
+       * (点の指示としては、受け付けない)。Esc で取り消し。
+       */
+      expect: "selection";
+      onInput: (input: SelectionInput) => CommandStep<R>;
+    })
   | (PromptBase<R> & {
       expect: "text";
       onInput: (input: TextInput) => CommandStep<R>;
