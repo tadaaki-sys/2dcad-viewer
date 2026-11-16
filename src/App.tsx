@@ -34,8 +34,11 @@ import {
 import type { ActiveCommand, DynamicField, DynamicMode, DynamicValues, SessionResult } from "./core/commands";
 import { DynamicInput } from "./components/DynamicInput";
 import type { SnapSettings } from "./core/snap/snapSettings";
-import type { SnapToggleSetting } from "./app/commands/builtinCommands";
+import type { SnapToggleSetting, TrackingToggleSetting } from "./app/commands/builtinCommands";
 import { loadSnapSettings, saveSnapSettings } from "./utils/snapSettingsStorage";
+import { toggleTracking } from "./core/tracking/trackingSettings";
+import type { TrackingSettings } from "./core/tracking/trackingSettings";
+import { loadTrackingSettings, saveTrackingSettings } from "./utils/trackingSettingsStorage";
 import { createAppCommands } from "./app/commands/builtinCommands";
 import { defaultLayerName, resolveDrawTarget } from "./app/drawing/drawTarget";
 import { reorderSelection } from "./app/document/reorder";
@@ -78,6 +81,9 @@ const SNAP_SETTING_LABELS: Record<SnapToggleSetting, string> = {
 
 /** F3=OSNAP、F7=GRID、F9=SNAP(AutoCAD と同じ) */
 const SNAP_FUNCTION_KEYS: Record<string, SnapToggleSetting> = { F3: "objectSnap", F7: "gridDisplay", F9: "gridSnap" };
+
+/** F8=ORTHO、F10=POLAR、F11=OTRACK(AutoCAD と同じ。F11 は、ブラウザの全画面の切り替えと重なる環境がある) */
+const TRACKING_FUNCTION_KEYS: Record<string, TrackingToggleSetting> = { F8: "ortho", F10: "polar", F11: "objectTracking" };
 
 /** コマンドラインに残すメッセージの最大行数 */
 const COMMAND_LOG_LIMIT = 100;
@@ -151,6 +157,11 @@ export default function App() {
   useEffect(() => {
     saveSnapSettings(snapSettings);
   }, [snapSettings]);
+  // トラッキングの設定(ORTHO・POLAR・OTRACK、角度の刻み、間隔)。同じく、このブラウザに保存する
+  const [trackingSettings, setTrackingSettings] = useState<TrackingSettings>(loadTrackingSettings);
+  useEffect(() => {
+    saveTrackingSettings(trackingSettings);
+  }, [trackingSettings]);
   useEffect(() => {
     commands.setContext({
       isDocumentOpen,
@@ -534,6 +545,12 @@ export default function App() {
           appendCommandLog([`${SNAP_SETTING_LABELS[request.setting]}: ${next[request.setting] ? "オン" : "オフ"}`]);
           break;
         }
+        case "toggleTrackingSetting": {
+          const toggled = toggleTracking(trackingSettings, request.setting);
+          setTrackingSettings(toggled.settings);
+          appendCommandLog([toggled.message]);
+          break;
+        }
         case "undo":
           performHistoryStep("undo");
           break;
@@ -561,12 +578,19 @@ export default function App() {
       loadingProgress,
       appendCommandLog,
       snapSettings,
+      trackingSettings,
     ],
   );
 
   /** GRID・SNAP・OSNAP のオン・オフ(ステータスバーのボタンと F7・F9・F3)。実行中のコマンドは、終わらせずに続ける */
   const handleToggleSnap = useCallback(
     (setting: SnapToggleSetting) => executeRequest({ type: "toggleSnapSetting", setting }),
+    [executeRequest],
+  );
+
+  /** ORTHO・POLAR・OTRACK のオン・オフ(ステータスバーのボタンと F8・F10・F11)。実行中のコマンドは、終わらせずに続ける */
+  const handleToggleTracking = useCallback(
+    (setting: TrackingToggleSetting) => executeRequest({ type: "toggleTrackingSetting", setting }),
     [executeRequest],
   );
 
@@ -695,6 +719,12 @@ export default function App() {
         if (isDocumentOpen && !event.repeat) handleToggleSnap(snapSetting);
         return;
       }
+      const trackingSetting = TRACKING_FUNCTION_KEYS[event.key];
+      if (trackingSetting !== undefined && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        if (isDocumentOpen && !event.repeat) handleToggleTracking(trackingSetting);
+        return;
+      }
       // 入力欄に文字を打っているときは、ショートカットとして扱わない(コマンドラインへの「f」で全体表示しないように)
       if (isTypingTarget(event.target)) return;
       // コマンドが数値を待っているときの、数字・小数点・マイナスのキーは、コマンドラインへ移して打ち始める
@@ -772,6 +802,7 @@ export default function App() {
     runCommand,
     handleDeleteMeasurement,
     handleToggleSnap,
+    handleToggleTracking,
   ]);
 
   /** コマンドラインの入力欄でのCtrl+Z。作図中なら「1点戻す(U)」として受け取る。受け取れないときは false(入力欄の文字の取り消し) */
@@ -913,6 +944,8 @@ export default function App() {
             previewRevision={commandRevision + dynamicTick}
             snapSettings={snapSettings}
             snapFromPoint={activeCommand?.basePoint ?? null}
+            trackingSettings={trackingSettings}
+            trackingResetKey={commandRevision}
             onCursorMove={handleCursorMove}
           />
           {dynamicMode !== null && (
@@ -982,6 +1015,9 @@ export default function App() {
         snapSettings={snapSettings}
         onToggleSnap={handleToggleSnap}
         onChangeSnapSettings={setSnapSettings}
+        trackingSettings={trackingSettings}
+        onToggleTracking={handleToggleTracking}
+        onChangeTrackingSettings={setTrackingSettings}
       />
       {loadingProgress && loadStartedAt !== null && (
         <LoadingOverlay stage={loadingProgress.stage} entityCount={loadingProgress.entityCount} startedAt={loadStartedAt} />

@@ -16,6 +16,7 @@ export type {
   AppRequest,
   DrawTarget,
   SnapToggleSetting,
+  TrackingToggleSetting,
 } from "./types";
 
 /** 図面が開いているときだけ、依頼を返すコマンドを作る */
@@ -51,6 +52,9 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
   documentCommand("OSNAP", [], "図形への吸着(端点・中点など)のオン・オフ", { type: "toggleSnapSetting", setting: "objectSnap" }),
   documentCommand("SNAP", [], "格子点への吸着のオン・オフ", { type: "toggleSnapSetting", setting: "gridSnap" }),
   documentCommand("GRID", [], "格子点の表示のオン・オフ", { type: "toggleSnapSetting", setting: "gridDisplay" }),
+  documentCommand("ORTHO", [], "直交(水平・垂直)のオン・オフ", { type: "toggleTrackingSetting", setting: "ortho" }),
+  documentCommand("POLAR", [], "極トラッキングのオン・オフ", { type: "toggleTrackingSetting", setting: "polar" }),
+  documentCommand("OTRACK", [], "オブジェクトスナップトラッキングのオン・オフ", { type: "toggleTrackingSetting", setting: "objectTracking" }),
   {
     // 点の指示(図面のクリックと座標の入力)の動作確認用のコマンド。図面は変更しない
     name: "ID",

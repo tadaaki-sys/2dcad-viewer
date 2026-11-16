@@ -3,18 +3,38 @@ import type { KeyboardEvent } from "react";
 import { DEFAULT_SNAP_SETTINGS, parseGridSpacing } from "../core/snap/snapSettings";
 import type { ObjectSnapType, SnapSettings } from "../core/snap/snapSettings";
 import { OBJECT_SNAP_TYPES, SNAP_TYPE_LABELS } from "../core/snap/snapTypes";
+import { DEFAULT_TRACKING_SETTINGS, parseDistanceIncrement, POLAR_ANGLE_INCREMENTS } from "../core/tracking/trackingSettings";
+import type { TrackingSettings } from "../core/tracking/trackingSettings";
 import "./SnapSettingsPanel.css";
 
 type SnapSettingsPanelProps = {
   settings: SnapSettings;
   onChange: (settings: SnapSettings) => void;
+  /** トラッキングの設定(角度の刻み、間隔) */
+  tracking: TrackingSettings;
+  onChangeTracking: (settings: TrackingSettings) => void;
   onClose: () => void;
 };
 
-/** Snap の詳細設定: 種類ごとのオン・オフと、グリッドの間隔(OSNAP・SNAP・GRID のオン・オフは、ステータスバーのボタン) */
-export function SnapSettingsPanel({ settings, onChange, onClose }: SnapSettingsPanelProps) {
+/**
+ * Snap・トラッキングの詳細設定: Snap の種類ごとのオン・オフ、グリッドの間隔、極トラッキングの角度の刻み、トラッキング間隔
+ * (OSNAP・SNAP・GRID・ORTHO・POLAR・OTRACK のオン・オフは、ステータスバーのボタン)
+ */
+export function SnapSettingsPanel({ settings, onChange, tracking, onChangeTracking, onClose }: SnapSettingsPanelProps) {
   const [spacingText, setSpacingText] = useState(String(settings.gridSpacing));
   const [spacingError, setSpacingError] = useState<string | null>(null);
+  const [distanceText, setDistanceText] = useState(String(tracking.distanceIncrement));
+  const [distanceError, setDistanceError] = useState<string | null>(null);
+
+  function commitDistance(): void {
+    const parsed = parseDistanceIncrement(distanceText);
+    if (!parsed.ok) {
+      setDistanceError(parsed.error);
+      return;
+    }
+    setDistanceError(null);
+    if (parsed.value !== tracking.distanceIncrement) onChangeTracking({ ...tracking, distanceIncrement: parsed.value });
+  }
 
   function commitSpacing(): void {
     const parsed = parseGridSpacing(spacingText);
@@ -73,6 +93,45 @@ export function SnapSettingsPanel({ settings, onChange, onClose }: SnapSettingsP
           {spacingError}
         </div>
       )}
+      <div className="snap-settings__title">トラッキング</div>
+      <label className="snap-settings__row snap-settings__row--spacing">
+        <span>角度の刻み(度)</span>
+        <select
+          className="snap-settings__input"
+          data-testid="tracking-angle-increment"
+          value={tracking.polarAngleIncrement}
+          onChange={(event) => onChangeTracking({ ...tracking, polarAngleIncrement: Number(event.target.value) })}
+        >
+          {POLAR_ANGLE_INCREMENTS.map((angle) => (
+            <option key={angle} value={angle}>
+              {angle}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="snap-settings__row snap-settings__row--spacing">
+        <span>間隔(mm、0=なし)</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          className="snap-settings__input"
+          data-testid="tracking-distance-increment"
+          value={distanceText}
+          onChange={(event) => setDistanceText(event.target.value)}
+          onBlur={commitDistance}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitDistance();
+            }
+          }}
+        />
+      </label>
+      {distanceError !== null && (
+        <div className="snap-settings__error" data-testid="tracking-distance-error" role="alert">
+          {distanceError}
+        </div>
+      )}
       <div className="snap-settings__actions">
         <button
           type="button"
@@ -80,6 +139,14 @@ export function SnapSettingsPanel({ settings, onChange, onClose }: SnapSettingsP
             onChange({ ...DEFAULT_SNAP_SETTINGS, types: { ...DEFAULT_SNAP_SETTINGS.types } });
             setSpacingText(String(DEFAULT_SNAP_SETTINGS.gridSpacing));
             setSpacingError(null);
+            // トラッキングは、オン・オフを変えずに、刻みと間隔だけ初期値に戻す
+            onChangeTracking({
+              ...tracking,
+              polarAngleIncrement: DEFAULT_TRACKING_SETTINGS.polarAngleIncrement,
+              distanceIncrement: DEFAULT_TRACKING_SETTINGS.distanceIncrement,
+            });
+            setDistanceText(String(DEFAULT_TRACKING_SETTINGS.distanceIncrement));
+            setDistanceError(null);
           }}
         >
           初期値に戻す

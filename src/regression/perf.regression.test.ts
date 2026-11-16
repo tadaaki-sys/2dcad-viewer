@@ -8,6 +8,8 @@ import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Sele
 import { findSnapPoint } from "../core/snap/SnapEngine";
 import type { SnapType } from "../core/snap/SnapEngine";
 import { DEFAULT_SNAP_SETTINGS, enabledSnapTypes } from "../core/snap/snapSettings";
+import { resolveCursor } from "../core/tracking/resolveCursor";
+import { DEFAULT_TRACKING_SETTINGS } from "../core/tracking/trackingSettings";
 import type { CadModel } from "../types/cad";
 import { REAL_ENABLED, REGRESSION_DIR, UPDATE_BASELINE, loadDrawing, readManifest } from "./loadDrawing";
 import { cameraAt, installRecordingPath2D, renderModel } from "./recordingContext";
@@ -90,6 +92,25 @@ function measure(model: CadModel, base: { dwgConvertMs: number; parseMs: number;
         findSnapPoint(model.entities, visible, p, tolerance, index, { enabledTypes: new Set<SnapType>(["extension"]), extensionAcquireWorld: tolerance * 15 });
       }
     }) / points.length;
+  // トラッキング(ORTHO を除く極トラッキング + OTRACK。取得した点が3つ)をオンにして、カーソルの点を決める全体(Phase 8)
+  const trackingAll = { ...DEFAULT_TRACKING_SETTINGS, polar: true, objectTracking: true, polarAngleIncrement: 5, distanceIncrement: 10 };
+  const acquiredThree = [points[1], points[2], points[3]];
+  const resolveWithTrackingMs =
+    timeIt(() => {
+      for (const p of points) {
+        resolveCursor({
+          entities: model.entities,
+          visibleLayerNames: visible,
+          worldPoint: p,
+          toleranceWorld: tolerance,
+          index,
+          snapOptions: { enabledTypes: enabledSnapTypes(DEFAULT_SNAP_SETTINGS), nearestToleranceWorld: 5 },
+          base: points[0],
+          tracking: trackingAll,
+          acquired: acquiredThree,
+        });
+      }
+    }) / points.length;
   // 図面を変更したあとの、最初の Snap(円弧・楕円の中心の索引を作る時間を含む)。索引は、変更のたびに作り直される
   const freshIndex = buildSpatialIndex(model);
   const snapFirstAfterEditMs = timeIt(() => {
@@ -99,7 +120,7 @@ function measure(model: CadModel, base: { dwgConvertMs: number; parseMs: number;
     findEntitiesInBox(model.entities, visible, { min: points[0], max: { x: points[0].x + width / 10, y: points[0].y + height / 10 } }, "crossing", index);
   });
 
-  return { ...base, indexMs, fullRenderMs, zoomRenderMs, selectionMs, snapMs, snapDefaultSettingsMs, snapExtensionOnlyMs, snapAllTypesMs, snapFirstAfterEditMs, boxSelectMs, entityCount: model.entities.length };
+  return { ...base, indexMs, fullRenderMs, zoomRenderMs, selectionMs, snapMs, snapDefaultSettingsMs, snapExtensionOnlyMs, snapAllTypesMs, snapFirstAfterEditMs, resolveWithTrackingMs, boxSelectMs, entityCount: model.entities.length };
 }
 
 describe.skipIf(!REAL_ENABLED || manifest.length === 0)("performance baseline (warn only)", () => {

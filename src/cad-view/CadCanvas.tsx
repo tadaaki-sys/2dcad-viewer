@@ -4,8 +4,12 @@ import { Camera } from "../core/view/Camera";
 import { CanvasRenderer } from "./renderer/CanvasRenderer";
 import type { DragSelectionBox, Renderer } from "./renderer/Renderer";
 import { findEntitiesInBox, findEntitiesNearPoint } from "../core/selection/Selection";
-import { findSnapPoint } from "../core/snap/SnapEngine";
 import type { SnapCandidate } from "../core/snap/SnapEngine";
+import { resolveCursor } from "../core/tracking/resolveCursor";
+import type { CursorResolution } from "../core/tracking/resolveCursor";
+import type { TrackingGuide } from "../core/tracking/trackingGeometry";
+import type { TrackingSettings } from "../core/tracking/trackingSettings";
+import type { TrackingLabel } from "./renderer/trackingRender";
 import { enabledSnapTypes } from "../core/snap/snapSettings";
 import type { SnapSettings } from "../core/snap/snapSettings";
 import type { SnapMarker } from "./renderer/snapMarker";
@@ -26,6 +30,10 @@ const SNAP_TOLERANCE_PX = 10;
 const NEAREST_SNAP_DISTANCE_WORLD = 5;
 // 延長の Snap の対象にする、端点とカーソルの最大距離(画面上のpx)
 const EXTENSION_ACQUIRE_PX = 150;
+// OTRACK: 吸着点の上にカーソルをこの時間(ミリ秒)とどめると、その点を取得する
+const OBJECT_TRACKING_DWELL_MS = 300;
+// OTRACK で同時に取得しておける点の数(多いと、取得した古い点が消える)
+const MAX_ACQUIRED_POINTS = 3;
 
 type OverlapCycleState = {
   screenPoint: Point2D;
@@ -76,8 +84,12 @@ type CadCanvasProps = {
   previewRevision?: number;
   /** Snap の設定(OSNAP・種類ごとのオン・オフ・グリッド) */
   snapSettings: SnapSettings;
-  /** 垂線・接線の基準の点(作図中の直前の点など)。無ければ null */
+  /** 垂線・接線・ORTHO・極トラッキングの基準の点(作図中の直前の点など)。無ければ null */
   snapFromPoint?: Point2D | null;
+  /** トラッキングの設定(ORTHO・POLAR・OTRACK、角度の刻み、間隔) */
+  trackingSettings: TrackingSettings;
+  /** 値が変わったら、OTRACK で取得した点を捨てる(コマンドの状態が進んだとき: 点の指示・コマンドの終了など) */
+  trackingResetKey?: number;
   /** カーソルの位置(図面上の点は吸着後)。screenPoint は、キャンバスの左上からのピクセル位置(カーソル付近の表示用) */
   onCursorMove?: (worldPoint: Point2D | null, screenPoint: Point2D | null) => void;
 };
@@ -121,6 +133,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     previewRevision,
     snapSettings,
     snapFromPoint = null,
+    trackingSettings,
+    trackingResetKey = 0,
     onCursorMove,
   },
   ref,
@@ -139,6 +153,11 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   // マウスの、画面上の最後の位置(キャンバスの上にあるとき)。Snap の設定が変わったときに、同じ位置で作り直すため
   const lastClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const refreshAtPointerRef = useRef<(() => void) | null>(null);
+  // トラッキング: 一時補助線、説明、OTRACK で取得した点、取得のためのとどめ時間の計測
+  const trackingGuidesRef = useRef<readonly TrackingGuide[]>([]);
+  const trackingLabelRef = useRef<TrackingLabel | null>(null);
+  const acquiredRef = useRef<Point2D[]>([]);
+  const dwellRef = useRef<{ candidate: Point2D | null; timer: number | null }>({ candidate: null, timer: null });
   const perfRef = useRef<CadCanvasPerformanceStats & { lastDrawAt: number }>({
     renderMs: 0,
     fps: null,
@@ -175,6 +194,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     getPreview,
     snapSettings,
     snapFromPoint,
+    trackingSettings,
     onCursorMove,
   });
   stateRef.current = {
@@ -195,6 +215,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     getPreview,
     snapSettings,
     snapFromPoint,
+    trackingSettings,
     onCursorMove,
   };
 
@@ -233,6 +254,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       pendingMeasurementPoint: pendingMeasurementPointRef.current,
       snapMarker: snapMarkerRef.current,
       gridSpacing: stateRef.current.snapSettings.gridDisplay ? stateRef.current.snapSettings.gridSpacing : null,
+      trackingGuides: trackingGuidesRef.current,
+      acquiredPoints: acquiredRef.current,
+      trackingLabel: trackingLabelRef.current,
       previewShapes: previewRef.current,
       spatialIndex: currentSpatialIndex,
     });
@@ -339,6 +363,90 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleLayerNames]);
 
+  // ---- トラッキング(OTRACK の取得点、一時補助線) ----
+
+  /** 取得のためのとどめ時間の計測をやめる */
+  function clearDwell() {
+    const dwell = dwellRef.current;
+    if (dwell.timer !== null) window.clearTimeout(dwell.timer);
+    dwell.timer = null;
+    dwell.candidate = null;
+  }
+
+  /** 取得した点を、すべて捨てる */
+  function clearAcquired() {
+    clearDwell();
+    if (acquiredRef.current.length > 0) {
+      acquiredRef.current = [];
+      requestDraw();
+    }
+  }
+
+  /** 一時補助線と説明を、いまの結果に合わせる(トラッキングで揃えていなければ、消す) */
+  function setTrackingVisuals(resolution: CursorResolution | null) {
+    const guides = resolution?.tracking?.guides ?? [];
+    const text = resolution?.tracking?.label ?? null;
+    const label = resolution !== null && text !== null ? { point: resolution.point, text } : null;
+    const changed =
+      guides.length > 0 || trackingGuidesRef.current.length > 0 || label !== null || trackingLabelRef.current !== null;
+    trackingGuidesRef.current = guides;
+    trackingLabelRef.current = label;
+    if (changed) requestDraw();
+  }
+
+  /**
+   * OTRACK: 吸着点の上に、カーソルを OBJECT_TRACKING_DWELL_MS とどめると、その点を取得する(取得済みの点なら、取得を解除する)。
+   * 同じ点の上にいる間は、1回だけ。カーソルが吸着点を離れたら、やり直し。
+   */
+  function updateAcquisition(acquirable: SnapCandidate | null) {
+    if (!stateRef.current.trackingSettings.objectTracking || acquirable === null) {
+      clearDwell();
+      return;
+    }
+    const dwell = dwellRef.current;
+    const same = dwell.candidate !== null && dwell.candidate.x === acquirable.point.x && dwell.candidate.y === acquirable.point.y;
+    if (same) return;
+    clearDwell();
+    const target = acquirable.point;
+    dwell.candidate = target;
+    dwell.timer = window.setTimeout(() => {
+      dwell.timer = null; // 候補は残す(同じ点の上にいる間に、また取得しないため)
+      const acquired = acquiredRef.current;
+      const existing = acquired.findIndex((p) => p.x === target.x && p.y === target.y);
+      if (existing >= 0) acquired.splice(existing, 1);
+      else {
+        acquired.push(target);
+        if (acquired.length > MAX_ACQUIRED_POINTS) acquired.shift();
+      }
+      acquiredRef.current = [...acquired];
+      requestDraw();
+      refreshAtPointerRef.current?.();
+    }, OBJECT_TRACKING_DWELL_MS);
+  }
+
+  // コマンドの状態が進んだとき(点の指示・コマンドの終了など)は、取得した点を捨てる
+  useEffect(() => {
+    clearAcquired();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackingResetKey]);
+
+  // 点の指示も測定もしていないときは、取得した点・補助線を捨てる
+  useEffect(() => {
+    if (!pointPickEnabled && !measurementModeEnabled) {
+      clearAcquired();
+      setTrackingVisuals(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointPickEnabled, measurementModeEnabled]);
+
+  // トラッキングの設定が変わったら、(OTRACK がオフなら)取得した点を捨てて、いまのカーソル位置で作り直す
+  useEffect(() => {
+    if (!trackingSettings.objectTracking) clearAcquired();
+    refreshAtPointerRef.current?.();
+    requestDraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackingSettings]);
+
   // Snap の設定が変わったら、古い目印を捨てて、いまのカーソル位置で吸着・ゴム紐・座標表示を作り直し、格子の表示も更新する
   useEffect(() => {
     snapMarkerRef.current = null;
@@ -424,7 +532,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       updatePanCursor();
     }
 
-    function findSnapAt(clientX: number, clientY: number): { worldPoint: Point2D; snap: SnapCandidate | null } {
+    /** マウスの位置から、決まった点(吸着・トラッキング・近接・グリッド)を求める */
+    function findSnapAt(clientX: number, clientY: number): { worldPoint: Point2D } & CursorResolution {
       const screenPoint = getCanvasRelativePoint(canvas!, clientX, clientY);
       const worldPoint = cameraRef.current.screenToWorld(screenPoint);
       const {
@@ -434,32 +543,36 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         pointPickEnabled: currentPointPickEnabled,
       } = stateRef.current;
       // 吸着は、測定中と、コマンドが点の指示を待っている間だけ
-      if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel) return { worldPoint, snap: null };
+      if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel) {
+        return { worldPoint, point: worldPoint, snap: null, tracking: null, acquirable: null };
+      }
 
       const scale = cameraRef.current.scale;
       const { snapSettings: settings, snapEnabledTypes: enabledTypes } = stateRef.current;
-      const snap = findSnapPoint(
-        currentModel.entities,
-        currentVisible,
+      // 垂線・接線・ORTHO・極トラッキングの基準: 測定中は、1点目。作図中は、コマンドの段階が持つ基準点
+      const base = currentMeasurementModeEnabled ? pendingMeasurementPointRef.current : stateRef.current.snapFromPoint;
+      const resolution = resolveCursor({
+        entities: currentModel.entities,
+        visibleLayerNames: currentVisible,
         worldPoint,
-        SNAP_TOLERANCE_PX / scale,
-        stateRef.current.spatialIndex,
-        {
+        toleranceWorld: SNAP_TOLERANCE_PX / scale,
+        index: stateRef.current.spatialIndex,
+        snapOptions: {
           // 線の近く(図面上5mm以内、または画面上の吸着距離以内のどちらか広い方)なら、線の上の最も近い点へ吸い付く
           nearestToleranceWorld: Math.max(NEAREST_SNAP_DISTANCE_WORLD, SNAP_TOLERANCE_PX / scale),
           enabledTypes,
-          // 垂線・接線の基準: 測定中は、1点目。作図中は、コマンドの段階が持つ基準点
-          fromPoint: currentMeasurementModeEnabled ? pendingMeasurementPointRef.current : stateRef.current.snapFromPoint,
           gridSpacing: settings.gridSpacing,
           extensionAcquireWorld: EXTENSION_ACQUIRE_PX / scale,
         },
-      );
-      return { worldPoint, snap };
+        base,
+        tracking: stateRef.current.trackingSettings,
+        acquired: acquiredRef.current,
+      });
+      return { worldPoint, ...resolution };
     }
 
     function computeWorldPointWithSnap(clientX: number, clientY: number): Point2D {
-      const { worldPoint, snap } = findSnapAt(clientX, clientY);
-      return snap ? snap.point : worldPoint;
+      return findSnapAt(clientX, clientY).point;
     }
 
     function handleMeasurementClick(event: MouseEvent) {
@@ -680,21 +793,25 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     function applyPointer(clientX: number, clientY: number) {
       if (!stateRef.current.measurementModeEnabled && !stateRef.current.pointPickEnabled) {
         updateSnapMarker(null);
+        setTrackingVisuals(null);
+        clearDwell();
         if (!stateRef.current.onCursorMove) return;
         scheduleCursorUpdate(computeWorldPointWithSnap(clientX, clientY), getCanvasRelativePoint(canvas!, clientX, clientY));
         return;
       }
-      const { worldPoint, snap } = findSnapAt(clientX, clientY);
-      updateSnapMarker(isPanning ? null : snap);
+      const resolution = findSnapAt(clientX, clientY);
+      updateSnapMarker(isPanning ? null : resolution.snap);
+      setTrackingVisuals(isPanning ? null : resolution);
+      updateAcquisition(isPanning ? null : resolution.acquirable);
       if (stateRef.current.pointPickEnabled) {
-        // 作図中: カーソルの位置(吸着後)に応じて、ゴム紐を作る(図面のデータは変えず、重ねて描くだけ)
-        const cursor = snap ? snap.point : worldPoint;
+        // 作図中: カーソルの位置(吸着・トラッキング後)に応じて、ゴム紐を作る(図面のデータは変えず、重ねて描くだけ)
+        const cursor = resolution.point;
         lastPointerWorldRef.current = cursor;
         previewRef.current = stateRef.current.getPreview?.(cursor) ?? [];
         requestDraw();
       }
       if (stateRef.current.onCursorMove) {
-        scheduleCursorUpdate(snap ? snap.point : worldPoint, getCanvasRelativePoint(canvas!, clientX, clientY));
+        scheduleCursorUpdate(resolution.point, getCanvasRelativePoint(canvas!, clientX, clientY));
       }
     }
 
@@ -712,6 +829,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     function handleMouseLeave() {
       lastClientPointRef.current = null;
       updateSnapMarker(null);
+      setTrackingVisuals(null);
+      clearDwell();
       if (previewRef.current.length > 0) {
         previewRef.current = [];
         requestDraw();

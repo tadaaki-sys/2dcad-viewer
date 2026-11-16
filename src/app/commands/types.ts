@@ -17,7 +17,12 @@ export type AppRequest =
   /** 選択中の図形(新しく描いたもの)の描画順を変える */
   | { type: "reorder"; direction: "front" | "back" }
   /** Snap の設定のオン・オフ(OSNAP=図形への吸着、SNAP=格子点への吸着、GRID=格子点の表示) */
-  | { type: "toggleSnapSetting"; setting: SnapToggleSetting };
+  | { type: "toggleSnapSetting"; setting: SnapToggleSetting }
+  /** トラッキングのオン・オフ(ORTHO=直交、POLAR=極トラッキング、OTRACK=オブジェクトスナップトラッキング)。ORTHO と POLAR は同時にオンにならない */
+  | { type: "toggleTrackingSetting"; setting: TrackingToggleSetting };
+
+/** オン・オフを切り替えられるトラッキングの設定 */
+export type TrackingToggleSetting = "ortho" | "polar" | "objectTracking";
 
 /** オン・オフを切り替えられる Snap の設定 */
 export type SnapToggleSetting = "objectSnap" | "gridSnap" | "gridDisplay";

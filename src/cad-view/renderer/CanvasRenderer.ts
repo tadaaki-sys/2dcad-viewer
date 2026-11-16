@@ -7,6 +7,7 @@ import type { Camera } from "../../core/view/Camera";
 import type { PreviewShape } from "../../core/commands";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 import { drawGrid, drawSnapMarker } from "./snapMarker";
+import { drawTracking } from "./trackingRender";
 import { TEXT_LINE_HEIGHT_FACTOR } from "../../core/geometry/entityGeometry";
 import { BOUNDS_STRIDE } from "../../core/spatial/entityBounds";
 
@@ -393,6 +394,9 @@ export class CanvasRenderer implements Renderer {
     pendingMeasurementPoint,
     snapMarker,
     gridSpacing,
+    trackingGuides,
+    acquiredPoints,
+    trackingLabel,
     previewShapes,
     spatialIndex,
   }: RenderParams): void {
@@ -547,6 +551,9 @@ export class CanvasRenderer implements Renderer {
       drawMeasurementMarker(ctx, camera.worldToScreen(pendingMeasurementPoint));
       ctx.restore();
     }
+
+    // トラッキングの補助線(ゴム紐より下)
+    drawTracking(ctx, camera, viewportWidth, viewportHeight, trackingGuides ?? [], acquiredPoints ?? [], trackingLabel ?? null);
 
     if (previewShapes && previewShapes.length > 0) {
       drawPreviewShapes(ctx, camera, previewShapes);

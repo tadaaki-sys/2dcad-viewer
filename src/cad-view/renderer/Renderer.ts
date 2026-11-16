@@ -3,6 +3,8 @@ import type { Camera } from "../../core/view/Camera";
 import type { SpatialIndex } from "../../core/spatial/SpatialIndex";
 import type { PreviewShape } from "../../core/commands";
 import type { SnapMarker } from "./snapMarker";
+import type { TrackingGuide } from "../../core/tracking/trackingGeometry";
+import type { TrackingLabel } from "./trackingRender";
 
 export type DragSelectionBox = {
   screenMin: Point2D;
@@ -26,6 +28,10 @@ export type RenderParams = {
   snapMarker?: SnapMarker | null;
   /** 格子点の表示(GRID)。間隔(mm)。表示しないときは null(省略可) */
   gridSpacing?: number | null;
+  /** トラッキングの一時補助線、OTRACK で取得した点、説明(角度など)(省略可) */
+  trackingGuides?: readonly TrackingGuide[];
+  acquiredPoints?: readonly Point2D[];
+  trackingLabel?: TrackingLabel | null;
   /** 作図中のゴム紐(描いている途中の仮の図形)。図面のデータではなく、重ねて描くだけ。無ければ省略 */
   previewShapes?: readonly PreviewShape[];
   /** 画面外の図形を描画対象から外すための空間索引。無ければ全図形を走査する */

@@ -326,6 +326,37 @@ describe("intersections with circles and arcs are exact", () => {
   });
 });
 
+describe("an approximation vertex is not an intersection (found while testing ORTHO/OTRACK)", () => {
+  const ellipse: CadEntity = { ...base, id: "e", type: "ELLIPSE", center: { x: 500, y: 150 }, majorRadius: 80, minorRadius: 40, rotation: 0, startParam: 0, endParam: Math.PI * 2 };
+  const opts = only("intersection");
+
+  it("the corner points of the polyline that approximates an ellipse or a spline are not snapped to as intersections", () => {
+    // 48 分割の頂点 (563.468..., 174.350...) の近く
+    expect(snap([ellipse], { x: 557, y: 170 }, 12.5, opts)).toBeNull();
+    const spline: CadEntity = { ...base, id: "s", type: "SPLINE", points: [{ x: 0, y: 0 }, { x: 10, y: 8 }, { x: 20, y: 0 }, { x: 30, y: 8 }], closed: false };
+    expect(snap([spline], { x: 10.2, y: 8.1 }, 3, opts)).toBeNull();
+  });
+
+  it("a real crossing with another entity on the ellipse is still found", () => {
+    // 楕円 (500,150) 長軸 80 短軸 40 と、x 軸に平行な線 y=150 の交点 (580,150)・(420,150)
+    const crossing = snap([ellipse, line("l", 300, 150, 700, 150)], { x: 580.4, y: 150.3 }, 3, opts);
+    expect(crossing?.type).toBe("intersection");
+    expect(crossing?.point.x).toBeCloseTo(580, 3);
+    expect(crossing?.point.y).toBeCloseTo(150, 9);
+  });
+
+  it("a polyline that crosses itself still has its intersection; its ordinary corners are endpoints, not intersections", () => {
+    const figureEight: CadEntity = { ...base, id: "p", type: "LWPOLYLINE", vertices: [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 0 }, { x: 0, y: 10 }], closed: false };
+    const cross = snap([figureEight], { x: 5.2, y: 5.1 }, 2, opts);
+    expect(cross?.type).toBe("intersection");
+    expect(cross?.point.x).toBeCloseTo(5, 9);
+    expect(cross?.point.y).toBeCloseTo(5, 9);
+    // 角 (10,10) は、端点としては吸着できる
+    expect(snap([figureEight], { x: 10.1, y: 10.1 }, 1, opts)).toBeNull();
+    expect(snap([figureEight], { x: 10.1, y: 10.1 }, 1, only("endpoint"))?.point).toEqual({ x: 10, y: 10 });
+  });
+});
+
 describe("priority and options", () => {
   it("the candidate nearest to the cursor wins across types; at the same distance the older types win", () => {
     // 円の右の四半円点 (10,0) と、同じ点にある線の端点: 距離が同じなら、端点(従来の種類)が選ばれる
