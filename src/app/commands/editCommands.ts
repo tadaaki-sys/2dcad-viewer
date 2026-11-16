@@ -12,24 +12,25 @@ import { formatCoordinate } from "./format";
 import { NO_DOCUMENT_MESSAGE } from "./types";
 import type { AppCommandContext, AppCommandDefinition, AppRequest } from "./types";
 
-type Step = PromptStep<AppRequest>;
-type Output = CommandOutput<AppRequest>;
-type Targets = readonly string[];
-type Preview = (matrices: readonly Affine2D[]) => readonly PreviewShape[];
+// 変換系のコマンド(MIRROR・SCALE・STRETCH。transformCommands.ts)と共有する
+export type Step = PromptStep<AppRequest>;
+export type Output = CommandOutput<AppRequest>;
+export type Targets = readonly string[];
+export type Preview = (matrices: readonly Affine2D[]) => readonly PreviewShape[];
 
-const NOT_READY_MESSAGE = "図面の準備中、または読み込み中です。少し待ってからお試しください";
+export const NOT_READY_MESSAGE = "図面の準備中、または読み込み中です。少し待ってからお試しください";
 const SELECT_PROMPT = "対象の図形を選択して、Enter を押してください";
 
-function endedMessage(name: string, detail = "図形は変更されませんでした"): string {
+export function endedMessage(name: string, detail = "図形は変更されませんでした"): string {
   return `${name} を終了しました(${detail})`;
 }
 
-function countLabel(count: number, action: string): string {
+export function countLabel(count: number, action: string): string {
   return count === 1 ? `図形を${action}` : `${count}個の図形を${action}`;
 }
 
 /** 基点から、カーソルへの案内線(仮表示) */
-function guideLine(from: Point2D, to: Point2D): PreviewShape {
+export function guideLine(from: Point2D, to: Point2D): PreviewShape {
   return { kind: "polyline", points: [from, to], closed: false };
 }
 
@@ -37,7 +38,7 @@ function guideLine(from: Point2D, to: Point2D): PreviewShape {
  * コマンドの最初の段階。選択済みなら、それを対象にして next へ。選択が無ければ、選択を待つ。
  * next は、編集できる図形(ID)を受け取って、最初の入力を待つ段階を返す。
  */
-function startWithTargets(name: string, context: AppCommandContext, next: (targets: Targets, notice: readonly string[]) => Step | { type: "done"; requests: readonly AppRequest[]; messages?: readonly string[] }) {
+export function startWithTargets(name: string, context: AppCommandContext, next: (targets: Targets, notice: readonly string[]) => Step | { type: "done"; requests: readonly AppRequest[]; messages?: readonly string[] }) {
   const { editing } = context;
   if (!context.isDocumentOpen) return { type: "done" as const, messages: [NO_DOCUMENT_MESSAGE] };
   if (!editing.ready) return { type: "done" as const, messages: [NOT_READY_MESSAGE] };
@@ -202,7 +203,7 @@ function rotateAngleStep(targets: Targets, base: Point2D, preview: Preview, noti
 }
 
 /** 基点を指示する段階(MOVE・COPY・ROTATE 共通) */
-function baseStep(name: string, targets: Targets, notice: readonly string[], next: (base: Point2D, preview: Preview) => Step, context: AppCommandContext): Step {
+export function baseStep(name: string, targets: Targets, notice: readonly string[], next: (base: Point2D, preview: Preview) => Step, context: AppCommandContext): Step {
   const preview = context.editing.createPreview(targets);
   return {
     type: "prompt",

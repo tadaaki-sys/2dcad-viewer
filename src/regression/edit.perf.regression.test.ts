@@ -6,10 +6,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DocumentSession } from "../app/document/documentSession";
-import { copyEntities, deleteEntities, transformEntities } from "../app/document/editing";
+import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "../app/document/editing";
 import type { Editability } from "../app/document/editability";
 import { createSelectionPreview } from "../core/commands/entityPreview";
-import { rotationMatrix, translationMatrix } from "../core/geometry/transform";
+import { windowFromCorners } from "../core/geometry/stretch";
+import { reflectionMatrix, rotationMatrix, scaleMatrix, translationMatrix } from "../core/geometry/transform";
+import { computeAllEntityBounds } from "../core/spatial/entityBounds";
 import { documentFromCadModel } from "../core/model";
 import { REAL_ENABLED, REGRESSION_DIR, loadDrawing, readManifest } from "./loadDrawing";
 
@@ -91,6 +93,40 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
         session.undo();
         expect(sameAsOriginal()).toBe(true);
 
+        // 拡大縮小(Phase 10)
+        const scaled = time(() => transformEntities(session, ALL_EDITABLE, ids, scaleMatrix({ x: 0, y: 0 }, 1.5), "拡大縮小", "拡大縮小"));
+        expect(scaled.value.ok).toBe(true);
+        session.undo();
+        expect(sameAsOriginal()).toBe(true);
+
+        // 鏡像(複写。元の図形は残る)と、鏡像(元の図形を置き換え)
+        const mirrored = time(() => copyEntities(session, ALL_EDITABLE, ids, [reflectionMatrix({ x: 0, y: 0 }, { x: 3, y: 4 })!], "鏡像コピー"));
+        expect(mirrored.value.ok).toBe(true);
+        expect(session.document.entities.length).toBe(count + ids.length);
+        session.undo();
+        expect(sameAsOriginal()).toBe(true);
+        const mirroredInPlace = time(() => transformEntities(session, ALL_EDITABLE, ids, reflectionMatrix({ x: 0, y: 0 }, { x: 3, y: 4 })!, "鏡像化", "鏡像化"));
+        expect(mirroredInPlace.value.ok).toBe(true);
+        session.undo();
+        expect(sameAsOriginal()).toBe(true);
+
+        // ストレッチ(図面の左半分を窓にする。窓にかかる図形の候補は、選んだ図形)
+        // 窓にかかる図形の検索(STRETCH の2点目を指示したとき、全図形の範囲を1回計算する)
+        const boundsTimed = time(() => computeAllEntityBounds(original));
+        const bounds = boundsTimed.value;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (let i = 0; i + 3 < bounds.length; i += 4) {
+          if (!Number.isFinite(bounds[i]) || !Number.isFinite(bounds[i + 2]) || !Number.isFinite(bounds[i + 1]) || !Number.isFinite(bounds[i + 3])) continue;
+          minX = Math.min(minX, bounds[i]); minY = Math.min(minY, bounds[i + 1]); maxX = Math.max(maxX, bounds[i + 2]); maxY = Math.max(maxY, bounds[i + 3]);
+        }
+        const window = windowFromCorners({ x: minX, y: minY }, { x: (minX + maxX) / 2, y: maxY });
+        const stretched = time(() => stretchEntities(session, ALL_EDITABLE, ids, window, 10, 10, "ストレッチ"));
+        if (stretched.value.ok) {
+          expect(session.document.entities.length).toBe(count);
+          session.undo();
+        }
+        expect(sameAsOriginal()).toBe(true); // 窓に動かせるものが無い図面では、何も変わらない
+
         // ゴム紐(選択した図形のプレビュー)の作成。上限 300 個
         const entities = ids.map((id) => original[session.document.indexById.get(id) ?? -1]).filter((e) => e !== undefined);
         const preview = time(() => createSelectionPreview(entities)([translationMatrix(10, 10)]));
@@ -100,6 +136,11 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
         results[`${tag}.redoMoveMs`] = round(redoMove.ms);
         results[`${tag}.rotateMs`] = round(rotate.ms);
         results[`${tag}.copyMs`] = round(copy.ms);
+        results[`${tag}.scaleMs`] = round(scaled.ms);
+        results[`${tag}.mirrorCopyMs`] = round(mirrored.ms);
+        results[`${tag}.mirrorInPlaceMs`] = round(mirroredInPlace.ms);
+        results[`${tag}.stretchMs`] = round(stretched.ms);
+        results[`${tag}.windowSearchMs`] = round(boundsTimed.ms);
         results[`${tag}.deleteMs`] = round(del.ms);
         results[`${tag}.previewMs`] = round(preview.ms);
         results[`${tag}.previewShapes`] = preview.value.length;

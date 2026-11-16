@@ -1,6 +1,8 @@
 // 編集コマンド(MOVE・COPY・ROTATE)の、動かした形の仮表示(ゴム紐)を作る。図面のデータは変えない。画面にも依存しない。
 import type { Affine2D, CadEntity, Point2D } from "../../types/cad";
 import { getEntityPoints, getTextBoundingBoxCorners } from "../geometry/entityGeometry";
+import { stretchEntityGeometry, windowCorners } from "../geometry/stretch";
+import type { StretchWindow } from "../geometry/stretch";
 import { applyAffine, transformEntityGeometry } from "../geometry/transform";
 import { computeAllEntityBounds } from "../spatial/entityBounds";
 import type { PreviewShape } from "./registry";
@@ -17,6 +19,11 @@ export function entityPreviewShapes(entity: CadEntity, matrix: Affine2D): Previe
     // 桁あふれなどで動かせない図形は、仮表示を出さない(確定のときに、理由つきで拒否される)
     return [];
   }
+  return shapesOf(moved);
+}
+
+/** 図形そのものの形の仮表示。点(POINT)は、表示する形が無いので、空 */
+function shapesOf(moved: CadEntity): PreviewShape[] {
   switch (moved.type) {
     case "LINE":
       return [{ kind: "polyline", points: [moved.start, moved.end], closed: false }];
@@ -74,4 +81,24 @@ export function createSelectionPreview(entities: readonly CadEntity[], limit: nu
     return (matrices) => matrices.map((matrix) => ({ kind: "polyline" as const, points: corners.map((corner) => applyAffine(matrix, corner)), closed: true }));
   }
   return (matrices) => matrices.flatMap((matrix) => entities.flatMap((entity) => entityPreviewShapes(entity, matrix)));
+}
+
+/**
+ * ストレッチ(STRETCH)の仮表示を作る関数を返す。返した関数に移動量(dx, dy)を渡すと、窓の中の頂点を動かした形を返す。
+ * 図形が limit を超えるときは、移動した窓の枠だけを返す(カーソルを動かすたびの計算を、軽く保つため)。
+ */
+export function createStretchPreview(entities: readonly CadEntity[], window: StretchWindow, limit: number = PREVIEW_ENTITY_LIMIT): (dx: number, dy: number) => readonly PreviewShape[] {
+  if (entities.length > limit) {
+    const corners = windowCorners(window);
+    return (dx, dy) => [{ kind: "polyline", points: corners.map((corner) => ({ x: corner.x + dx, y: corner.y + dy })), closed: true }];
+  }
+  return (dx, dy) =>
+    entities.flatMap((entity) => {
+      try {
+        const outcome = stretchEntityGeometry(entity, window, dx, dy);
+        return outcome.kind === "moved" || outcome.kind === "reshaped" ? shapesOf(outcome.entity) : [];
+      } catch {
+        return [];
+      }
+    });
 }

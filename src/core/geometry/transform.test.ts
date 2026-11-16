@@ -195,9 +195,11 @@ describe("transformEntityGeometry", () => {
     expect(moved.vertices[0]).toEqual({ x: 5, y: 5, bulge: 0.5 });
   });
 
-  it("refuses a transform that is not a move or a rotation", () => {
-    expect(() => transformEntityGeometry(SAMPLES[0], [2, 0, 0, 2, 0, 0])).toThrow();
-    expect(() => transformEntityGeometry(SAMPLES[0], [1, 0, 0, -1, 0, 0])).toThrow();
+  it("refuses a transform that is not a similarity (non-uniform scaling, shearing, collapsing, non-finite)", () => {
+    expect(() => transformEntityGeometry(SAMPLES[0], [2, 0, 0, 1, 0, 0])).toThrow(); // 非一様な拡大縮小
+    expect(() => transformEntityGeometry(SAMPLES[0], [1, 0, 0.5, 1, 0, 0])).toThrow(); // せん断
+    expect(() => transformEntityGeometry(SAMPLES[0], [0, 0, 0, 0, 0, 0])).toThrow(); // つぶれる
+    expect(() => transformEntityGeometry(SAMPLES[0], [Number.NaN, 0, 0, 1, 0, 0])).toThrow();
   });
 });
 

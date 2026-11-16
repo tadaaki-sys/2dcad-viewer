@@ -4,7 +4,9 @@
 import { addEntitiesChangeSet, removeEntitiesChangeSet, replaceEntitiesChangeSet } from "../../core/history";
 import { getEntity, indexOfEntity } from "../../core/model";
 import type { EntityId } from "../../core/model";
-import { composeAffine, IDENTITY_MATRIX, isIdentity, isRigid, transformEntityGeometry } from "../../core/geometry/transform";
+import { stretchEntityGeometry } from "../../core/geometry/stretch";
+import type { StretchWindow } from "../../core/geometry/stretch";
+import { composeAffine, IDENTITY_MATRIX, isIdentity, isSimilarity, transformEntityGeometry } from "../../core/geometry/transform";
 import type { Affine2D, CadEntity, SourceRecord } from "../../types/cad";
 import { isNewEntityId, resolveEditTargets } from "./editability";
 import type { Editability } from "./editability";
@@ -35,7 +37,8 @@ function nextSourceRecord(entity: CadEntity, matrix: Affine2D): SourceRecord | u
   if (entity.sourceRecord !== undefined) {
     const composed = composeAffine(entity.sourceRecord.matrix, matrix);
     if (!composed.every(Number.isFinite)) throw new Error("変換の合成結果が大きすぎて、扱えません");
-    return { id: entity.sourceRecord.id, matrix: composed };
+    // reshaped(頂点が個別に動いた印)は、そのまま引き継ぐ
+    return { ...entity.sourceRecord, matrix: composed };
   }
   if (!isNewEntityId(entity.id)) return { id: entity.id, matrix };
   return undefined;
@@ -49,7 +52,14 @@ export function movedEntity(entity: CadEntity, matrix: Affine2D): CadEntity {
   return { ...moved, sourceRecord };
 }
 
-/** 選んだ図形を、移動・回転する。編集できない図形は、除く。結果の説明を返す */
+/** 変換が何も動かさないときの、断りの文(操作の名前ごと) */
+function noChangeMessage(noun: string): string {
+  if (noun === "回転") return "回転角が0度です";
+  if (noun === "拡大縮小") return "倍率が1です";
+  return `${noun}量が0です`;
+}
+
+/** 選んだ図形を、移動・回転・拡大縮小・鏡像(相似変換)で動かす。編集できない図形は、除く。結果の説明を返す */
 export function transformEntities(
   session: DocumentSession,
   editability: Editability,
@@ -59,8 +69,8 @@ export function transformEntities(
   /** 操作の名前(「移動」「回転」)。メッセージに使う */
   noun: string,
 ): EditOutcome {
-  if (!isRigid(matrix)) return { ok: false, message: `${noun}できませんでした: 移動・回転以外の変換は、まだ扱えません` };
-  if (isIdentity(matrix)) return { ok: false, message: noun === "回転" ? "回転角が0度です" : `${noun}量が0です` };
+  if (!isSimilarity(matrix)) return { ok: false, message: `${noun}できませんでした: 移動・回転・拡大縮小・鏡像以外の変換は、扱えません` };
+  if (isIdentity(matrix)) return { ok: false, message: noChangeMessage(noun) };
   const targets = resolveEditTargets(editability, ids);
   const entities = inDrawingOrder(session, targets.editable);
   if (entities.length === 0) {
@@ -90,7 +100,7 @@ export function copyEntities(
   label: string,
 ): EditOutcome {
   if (matrices.length === 0) return { ok: false, message: "複写の位置が指示されていません" };
-  if (!matrices.every((matrix) => isRigid(matrix) && !isIdentity(matrix))) return { ok: false, message: "複写できませんでした: 移動量が0、または移動・回転以外の変換です" };
+  if (!matrices.every((matrix) => isSimilarity(matrix) && !isIdentity(matrix))) return { ok: false, message: "複写できませんでした: 何も動かさない、または、移動・回転・拡大縮小・鏡像以外の変換です" };
   const targets = resolveEditTargets(editability, ids);
   const sources = inDrawingOrder(session, targets.editable);
   if (sources.length === 0) return { ok: false, message: `複写できる図形がありません${skippedNote(targets.skipped, targets.reason)}` };
@@ -131,4 +141,65 @@ export function deleteEntities(session: DocumentSession, editability: Editabilit
   const outcome = session.apply(changeSet);
   if (!outcome.ok) return { ok: false, message: `削除できませんでした: ${outcome.error}` };
   return { ok: true, message: `${entities.length}個の図形を削除しました${skippedNote(targets.skipped, targets.reason)}` };
+}
+
+/** ストレッチで形が変わった図形の、元データとの対応(reshaped の印を付ける)。新しく描いた図形には付かない */
+function reshapedSourceRecord(entity: CadEntity): SourceRecord | undefined {
+  const root: SourceRecord | undefined = entity.sourceRecord ?? (isNewEntityId(entity.id) ? undefined : { id: entity.id, matrix: IDENTITY_MATRIX });
+  return root === undefined ? undefined : { ...root, reshaped: true };
+}
+
+/**
+ * 交差窓の中の頂点・端点を、(dx, dy)だけ動かして、図形の形を変える(STRETCH)。ids は、窓にかかる図形の候補。
+ * 図形ごとの扱いは、core/geometry/stretch.ts。1つの依頼が、Undoの1段階。
+ * 円弧・楕円で、一部だけが窓に入っているものは、対象外(数を知らせる)。
+ */
+export function stretchEntities(
+  session: DocumentSession,
+  editability: Editability,
+  ids: readonly EntityId[],
+  window: StretchWindow,
+  dx: number,
+  dy: number,
+  label: string,
+): EditOutcome {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return { ok: false, message: "ストレッチできませんでした: 移動量が正しくありません" };
+  if (dx === 0 && dy === 0) return { ok: false, message: "移動量が0です" };
+  const targets = resolveEditTargets(editability, ids);
+  const entities = inDrawingOrder(session, targets.editable);
+
+  const replacements: CadEntity[] = [];
+  let moved = 0;
+  let reshaped = 0;
+  let partial = 0;
+  try {
+    for (const entity of entities) {
+      const outcome = stretchEntityGeometry(entity, window, dx, dy);
+      if (outcome.kind === "moved") {
+        const sourceRecord = nextSourceRecord(entity, outcome.matrix);
+        replacements.push(sourceRecord === undefined ? outcome.entity : { ...outcome.entity, sourceRecord });
+        moved++;
+      } else if (outcome.kind === "reshaped") {
+        const sourceRecord = reshapedSourceRecord(entity);
+        replacements.push(sourceRecord === undefined ? outcome.entity : { ...outcome.entity, sourceRecord });
+        reshaped++;
+      } else if (outcome.kind === "partial-skipped") {
+        partial++;
+      }
+    }
+  } catch (error) {
+    return { ok: false, message: `ストレッチできませんでした: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const notes = `${partial > 0 ? `(円弧・楕円 ${partial} 個は、一部だけが窓に入っているため、対象外)` : ""}${skippedNote(targets.skipped, targets.reason)}`;
+  if (replacements.length === 0) return { ok: false, message: `窓の中に、動かせる頂点や図形がありません${notes}` };
+
+  let changeSet;
+  try {
+    changeSet = replaceEntitiesChangeSet(session.document, replacements, label);
+  } catch (error) {
+    return { ok: false, message: `ストレッチできませんでした: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const outcome = session.apply(changeSet);
+  if (!outcome.ok) return { ok: false, message: `ストレッチできませんでした: ${outcome.error}` };
+  return { ok: true, message: `${replacements.length}個の図形をストレッチしました(形が変わった ${reshaped} 個、図形ごと移動 ${moved} 個)${notes}` };
 }

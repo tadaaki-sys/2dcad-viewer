@@ -151,6 +151,8 @@ export type CadPointStyle = {
 /**
  * 2次元の変換行列 [a, b, c, d, e, f]。点 (x, y) を、(a·x + c·y + e, b·x + d·y + f) に移す(DXF・SVG・Canvas の行列と同じ並び)。
  * 移動・回転は、a=d=cosθ、b=-c=sinθ、(e, f)=移動量 の形(長さと形を変えない)。
+ * 一様な拡大縮小は、これに倍率 s を掛けた形(a=d=s·cosθ、b=-c=s·sinθ)。鏡像は、向きを反転する形(a=-d、b=c)。
+ * 非一様な拡大縮小・せん断は扱わない。
  */
 export type Affine2D = readonly [number, number, number, number, number, number];
 
@@ -165,6 +167,12 @@ export type Affine2D = readonly [number, number, number, number, number, number]
 export type SourceRecord = {
   id: string;
   matrix: Affine2D;
+  /**
+   * true なら、頂点などが個別に動いて(STRETCH)、形が matrix だけでは表せないことを表す(Phase 10)。
+   * 保存では、matrix を元の記録に適用するのではなく、いまの形で、元の記録を置き換えて書く。
+   * (取り込んだ折れ線は、円弧の膨らみが展開済みの点列なので、頂点を動かした結果は、元の記録の頂点と対応しない)
+   */
+  reshaped?: boolean;
 };
 
 /** すべての図形が持てる、任意の項目 */

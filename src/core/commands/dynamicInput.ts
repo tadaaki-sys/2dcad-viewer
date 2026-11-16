@@ -30,7 +30,11 @@ export function dynamicModeOf(active: ActiveCommand | null): DynamicMode | null 
   if (active.expect === "distance") return "distance";
   if (active.expect !== "point") return null;
   // 点の指示でも数値でも答えられる段階(円の半径)は、長さだけ
-  if (active.acceptsDistance) return active.numberMeaning === "angle" ? "angle" : "distance";
+  if (active.acceptsDistance) {
+    // 単なる数値(倍率・参照の長さ)の段階は、カーソルの位置と関係が無いので、ダイナミック入力は出さない(コマンドラインで入力する)
+    if (active.numberMeaning === "plain") return null;
+    return active.numberMeaning === "angle" ? "angle" : "distance";
+  }
   return active.basePoint === null ? "absolute" : "polar";
 }
 

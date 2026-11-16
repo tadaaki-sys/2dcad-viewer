@@ -45,7 +45,7 @@ import { reorderSelection } from "./app/document/reorder";
 import { createAppEditing } from "./app/document/appEditing";
 import { createEditability } from "./app/document/editability";
 import type { Editability, EditabilitySource } from "./app/document/editability";
-import { copyEntities, deleteEntities, transformEntities } from "./app/document/editing";
+import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "./app/document/editing";
 import type { EditOutcome } from "./app/document/editing";
 import { NO_EDITING } from "./app/commands/types";
 import { addEntitiesChangeSet } from "./core/history";
@@ -549,7 +549,7 @@ export default function App() {
     [appendCommandLog, selectedEntityIds],
   );
 
-  /** 編集(移動・回転・複写・削除)を、図面に適用して、結果の説明を表示する(Undo の1段階) */
+  /** 編集(移動・回転・複写・削除・鏡像・拡大縮小・ストレッチ)を、図面に適用して、結果の説明を表示する(Undo の1段階) */
   const applyEdit = useCallback(
     (run: (session: DocumentSession, editability: Editability) => EditOutcome) => {
       const session = documentSessionRef.current;
@@ -577,7 +577,8 @@ export default function App() {
         request.type === "reorder" ||
         request.type === "transformEntities" ||
         request.type === "copyEntities" ||
-        request.type === "deleteEntities";
+        request.type === "deleteEntities" ||
+        request.type === "stretchEntities";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -618,6 +619,9 @@ export default function App() {
           break;
         case "deleteEntities":
           applyEdit((session, editability) => deleteEntities(session, editability, request.ids, request.label));
+          break;
+        case "stretchEntities":
+          applyEdit((session, editability) => stretchEntities(session, editability, request.ids, request.window, request.dx, request.dy, request.label));
           break;
         case "undo":
           performHistoryStep("undo");

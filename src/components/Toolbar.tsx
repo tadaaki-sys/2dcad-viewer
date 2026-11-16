@@ -1,7 +1,19 @@
 import "./Toolbar.css";
 
 /** ツールバーから動かす作図コマンド */
-export type DrawCommandName = "LINE" | "PLINE" | "RECT" | "CIRCLE" | "ARC" | "MOVE" | "COPY" | "ROTATE" | "DELETE";
+export type DrawCommandName =
+  | "LINE"
+  | "PLINE"
+  | "RECT"
+  | "CIRCLE"
+  | "ARC"
+  | "MOVE"
+  | "COPY"
+  | "ROTATE"
+  | "DELETE"
+  | "MIRROR"
+  | "SCALE"
+  | "STRETCH";
 
 type ToolbarProps = {
   isDocumentOpen: boolean;
@@ -35,6 +47,9 @@ const EDIT_BUTTONS: ReadonlyArray<{ name: DrawCommandName; label: string; title:
   { name: "MOVE", label: "移動", title: "選択した図形を移動する(MOVE)" },
   { name: "COPY", label: "コピー", title: "選択した図形を複写する(COPY)。繰り返せます" },
   { name: "ROTATE", label: "回転", title: "選択した図形を回転する(ROTATE)" },
+  { name: "MIRROR", label: "鏡像", title: "選択した図形を鏡像にする(MIRROR)。元の図形を残すか削除するかを選べます" },
+  { name: "SCALE", label: "拡大縮小", title: "選択した図形を拡大・縮小する(SCALE)。倍率、または参照の長さで指定します" },
+  { name: "STRETCH", label: "ストレッチ", title: "交差窓で囲んだ頂点を動かして、図形の形を変える(STRETCH)" },
   { name: "DELETE", label: "削除", title: "選択した図形を削除する(DELETE・Delete キー)。Ctrl+Z で戻せます" },
 ];
 

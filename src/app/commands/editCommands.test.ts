@@ -4,6 +4,7 @@ import type { CadEntity } from "../../types/cad";
 import { createEditability, resolveEditTargets } from "../document/editability";
 import { createAppCommandSession } from "./builtinCommands";
 import { makeContext } from "./testHelpers";
+import { NO_EDITING } from "./types";
 import type { AppEditing, AppRequest } from "./types";
 
 const base = { layer: "0", color: "#ffffff" };
@@ -25,6 +26,8 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
     getSelection: () => current,
     resolveTargets: (ids) => resolveEditTargets(editability, ids),
     createPreview: (ids) => createSelectionPreview(ENTITIES.filter((entity) => ids.includes(entity.id))),
+    findInWindow: NO_EDITING.findInWindow,
+    createStretchPreview: NO_EDITING.createStretchPreview,
     ...overrides,
   };
   const context = makeContext({ editing });
@@ -316,6 +319,8 @@ describe("a large selection", () => {
       getSelection: () => many.map((entity) => entity.id),
       resolveTargets: (ids) => resolveEditTargets(manyEditability, ids),
       createPreview: (ids) => createSelectionPreview(many.filter((entity) => ids.includes(entity.id))),
+      findInWindow: NO_EDITING.findInWindow,
+      createStretchPreview: NO_EDITING.createStretchPreview,
     };
     const session = createAppCommandSession(() => makeContext({ editing }));
     session.submitText("move");

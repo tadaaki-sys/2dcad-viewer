@@ -34,8 +34,11 @@ export type CommandOutput<R> = {
 /** コマンドが待っている入力の種類 */
 export type ExpectedInput = "point" | "text" | "distance" | "selection";
 
-/** 数値だけの入力(acceptsDistance)の意味。長さ(mm)か、角度(度。反時計回りが正) */
-export type NumberMeaning = "length" | "angle";
+/**
+ * 数値だけの入力(acceptsDistance)の意味。長さ(mm)か、角度(度。反時計回りが正)か、
+ * 単なる数値(倍率・参照の長さなど。ダイナミック入力は出さず、コマンドラインで入力する)
+ */
+export type NumberMeaning = "length" | "angle" | "plain";
 
 /** 入力を待つ段階の、共通の部分 */
 type PromptBase<R> = { type: "prompt" } & CommandOutput<R> & {
@@ -74,7 +77,7 @@ export type PromptStep<R> =
          * 指定しない段階は、数値だけの入力をエラーにする
          */
         acceptsDistance?: boolean;
-        /** 数値だけの入力(acceptsDistance)の意味。指定しなければ、長さ。"angle" なら、ダイナミック入力は、角度の欄を出す */
+        /** 数値だけの入力(acceptsDistance)の意味。指定しなければ、長さ。"angle" なら、ダイナミック入力は、角度の欄を出す。"plain" なら、ダイナミック入力は出さない */
         numberMeaning?: NumberMeaning;
         onInput: (input: PointInput | KeywordInput | EnterInput | DistanceInput) => CommandStep<R>;
         /** カーソル位置に応じたゴム紐を返す(図面を変更せず、重ねて描く) */

@@ -115,7 +115,8 @@ describe("transformEntities", () => {
     const before = session.document.entities;
     expect(transformEntities(session, editability, ["e0"], IDENTITY_MATRIX, "移動", "移動")).toEqual({ ok: false, message: "移動量が0です" });
     expect(transformEntities(session, editability, ["e0"], rotationMatrix({ x: 0, y: 0 }, 0), "回転", "回転")).toEqual({ ok: false, message: "回転角が0度です" });
-    expect(transformEntities(session, editability, ["e0"], [2, 0, 0, 2, 0, 0], "拡大", "移動").ok).toBe(false);
+    expect(transformEntities(session, editability, ["e0"], [2, 0, 0, 1, 0, 0], "非一様な拡大", "拡大縮小").ok).toBe(false); // 非一様な拡大縮小は扱わない
+    expect(transformEntities(session, editability, ["e0"], IDENTITY_MATRIX, "拡大縮小", "拡大縮小")).toEqual({ ok: false, message: "倍率が1です" });
     expect(transformEntities(session, editability, ["e404"], translationMatrix(1, 1), "移動", "移動").ok).toBe(false);
     expect(session.document.entities).toBe(before);
     expect(session.canUndo).toBe(false);

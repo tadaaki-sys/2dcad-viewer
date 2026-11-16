@@ -22,7 +22,7 @@ export type ActiveCommand = {
   basePoint: Point2D | null;
   /** 点を待つ段階が、数値だけの入力(例: 半径)も受け取るか */
   acceptsDistance: boolean;
-  /** 数値だけの入力の意味(長さ・角度)。acceptsDistance が false のときは、長さ */
+  /** 数値だけの入力の意味(長さ・角度・単なる数値)。acceptsDistance が false のときは、長さ */
   numberMeaning: NumberMeaning;
 };
 
@@ -216,7 +216,7 @@ export class CommandSession<R, C> {
       hasPendingChanges: step.pending === true,
       basePoint: step.basePoint ?? null,
       acceptsDistance: step.expect === "point" && step.acceptsDistance === true,
-      numberMeaning: step.expect === "point" && step.numberMeaning === "angle" ? "angle" : "length",
+      numberMeaning: step.expect === "point" && step.numberMeaning !== undefined ? step.numberMeaning : "length",
     };
   }
 

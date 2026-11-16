@@ -52,6 +52,13 @@ describe("dynamicModeOf", () => {
     expect(dynamicModeOf(active({ basePoint: { x: 0, y: 0 }, acceptsDistance: true }))).toBe("distance");
     expect(dynamicModeOf(active({ expect: "distance", basePoint: { x: 0, y: 0 } }))).toBe("distance");
   });
+
+  it("a plain number (SCALE's factor, a reference length) shows no dynamic input, with or without a base point", () => {
+    expect(dynamicModeOf(active({ acceptsDistance: true, numberMeaning: "plain" }))).toBeNull();
+    expect(dynamicModeOf(active({ basePoint: { x: 0, y: 0 }, acceptsDistance: true, numberMeaning: "plain" }))).toBeNull();
+    // 角度の段階は、これまでどおり
+    expect(dynamicModeOf(active({ basePoint: { x: 0, y: 0 }, acceptsDistance: true, numberMeaning: "angle" }))).toBe("angle");
+  });
 });
 
 describe("fields", () => {

@@ -1,6 +1,7 @@
 // アプリのコマンドの型(コマンドの定義と、依頼を実行する画面の側とで共有する)。React にも画面にも依存しない。
 import type { CommandDefinition, CommandSession, PreviewShape } from "../../core/commands";
 import type { EntityId } from "../../core/model";
+import type { StretchWindow } from "../../core/geometry/stretch";
 import type { Affine2D, CadEntity } from "../../types/cad";
 
 /** コマンドが、アプリに頼むこと */
@@ -25,7 +26,9 @@ export type AppRequest =
   /** 図形を複写する。matrices の1つごとに、全図形の複写を作る。1つの依頼が、Undoの1段階 */
   | { type: "copyEntities"; ids: readonly EntityId[]; matrices: readonly Affine2D[]; label: string }
   /** 図形を削除する。1つの依頼が、Undoの1段階 */
-  | { type: "deleteEntities"; ids: readonly EntityId[]; label: string };
+  | { type: "deleteEntities"; ids: readonly EntityId[]; label: string }
+  /** 交差窓の中の頂点・端点を動かして、図形の形を変える(STRETCH)。ids は、窓にかかる図形の候補。1つの依頼が、Undoの1段階 */
+  | { type: "stretchEntities"; ids: readonly EntityId[]; window: StretchWindow; dx: number; dy: number; label: string };
 
 /** オン・オフを切り替えられるトラッキングの設定 */
 export type TrackingToggleSetting = "ortho" | "polar" | "objectTracking";
@@ -39,7 +42,7 @@ export type DrawTarget = { ok: true; layer: string; color: string } | { ok: fals
 /** 選択から、編集できる図形だけを取り出した結果 */
 export type EditTargetsInfo = { editable: readonly EntityId[]; skipped: number; reason: string | null };
 
-/** 編集コマンド(MOVE・COPY・ROTATE・DELETE)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
+/** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
 export type AppEditing = {
   /** 図面の準備ができていて(読み込み中でなく)、編集できるか */
   ready: boolean;
@@ -49,6 +52,10 @@ export type AppEditing = {
   resolveTargets: (ids: readonly EntityId[]) => EditTargetsInfo;
   /** 選んだ図形の仮表示を作る関数を返す(変換の一覧を渡すと、動かした形を返す) */
   createPreview: (ids: readonly EntityId[]) => (matrices: readonly Affine2D[]) => readonly PreviewShape[];
+  /** 窓(交差窓)にかかる、編集できる図形の候補(ID)。除いた数と理由も返す(STRETCH 用) */
+  findInWindow: (window: StretchWindow) => EditTargetsInfo;
+  /** ストレッチの仮表示を作る関数を返す(移動量を渡すと、窓の中の頂点を動かした形を返す) */
+  createStretchPreview: (ids: readonly EntityId[], window: StretchWindow) => (dx: number, dy: number) => readonly PreviewShape[];
 };
 
 /** 編集できない状態(図面が無い・準備中)。初期値と、テストで使う */
@@ -57,6 +64,8 @@ export const NO_EDITING: AppEditing = {
   getSelection: () => [],
   resolveTargets: () => ({ editable: [], skipped: 0, reason: null }),
   createPreview: () => () => [],
+  findInWindow: () => ({ editable: [], skipped: 0, reason: null }),
+  createStretchPreview: () => () => [],
 };
 
 /** コマンドを始める時点のアプリの状態 */
