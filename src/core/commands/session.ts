@@ -24,6 +24,8 @@ export type ActiveCommand = {
   acceptsDistance: boolean;
   /** 数値だけの入力の意味(長さ・角度・単なる数値)。acceptsDistance が false のときは、長さ */
   numberMeaning: NumberMeaning;
+  /** クリックを、吸着せず、そのままの位置で渡す段階か(図形を指す操作) */
+  rawPoints: boolean;
 };
 
 export type SessionResult<R> = {
@@ -217,6 +219,7 @@ export class CommandSession<R, C> {
       basePoint: step.basePoint ?? null,
       acceptsDistance: step.expect === "point" && step.acceptsDistance === true,
       numberMeaning: step.expect === "point" && step.numberMeaning !== undefined ? step.numberMeaning : "length",
+      rawPoints: step.expect === "point" && step.rawPoints === true,
     };
   }
 

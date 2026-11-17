@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DocumentSession } from "../app/document/documentSession";
+import { trimOrExtendAt } from "../app/document/trimming";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "../app/document/editing";
 import type { Editability } from "../app/document/editability";
 import { createSelectionPreview } from "../core/commands/entityPreview";
@@ -150,5 +151,51 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.edit.json`), JSON.stringify(results, null, 2) + "\n", "utf8");
       console.log(`[edit perf] ${entry.name}`, JSON.stringify(results));
     }, 900_000);
-  }
+
+    it(`${entry.name}: trim and extend clicks on real lines, then Undo (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model));
+      const original = session.document.entities;
+      const count = original.length;
+      if (count === 0) return;
+      const visible = new Set(session.document.layers.map((layer) => layer.name));
+      const lines = original.filter((entity) => entity.type === "LINE");
+      const step = Math.max(1, Math.floor(lines.length / 20));
+      const samples = lines.filter((_, i) => i % step === 0).slice(0, 20);
+
+      let tried = 0;
+      let changed = 0;
+      let totalMs = 0;
+      let maxMs = 0;
+      for (const entity of samples) {
+        if (entity.type !== "LINE") continue;
+        const middle = { x: (entity.start.x + entity.end.x) / 2, y: (entity.start.y + entity.end.y) / 2 };
+        for (const mode of ["trim", "extend"] as const) {
+          const run = time(() => trimOrExtendAt(session, ALL_EDITABLE, mode, middle, 0.01, null, visible));
+          tried++;
+          totalMs += run.ms;
+          maxMs = Math.max(maxMs, run.ms);
+          if (run.value.ok) {
+            changed++;
+            // 1クリック = Undo 1段階。戻すと、元と同じ図形・同じ順
+            expect(session.undo().type).toBe("done");
+          }
+          expect(session.canUndo).toBe(false);
+          const now = session.document.entities;
+          expect(now.length).toBe(count);
+          let same = true;
+          for (let i = 0; i < count; i++) {
+            if (now[i] !== original[i]) {
+              same = false;
+              break;
+            }
+          }
+          expect(same).toBe(true);
+        }
+      }
+      const result = { entityCount: count, tried, changed, averageMs: round(tried > 0 ? totalMs / tried : 0), maxMs: round(maxMs) };
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.trim.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[trim perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);  }
 });

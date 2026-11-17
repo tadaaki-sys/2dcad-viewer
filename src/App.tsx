@@ -46,6 +46,7 @@ import { createAppEditing } from "./app/document/appEditing";
 import { createEditability } from "./app/document/editability";
 import type { Editability, EditabilitySource } from "./app/document/editability";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "./app/document/editing";
+import { trimOrExtendAt } from "./app/document/trimming";
 import type { EditOutcome } from "./app/document/editing";
 import { NO_EDITING } from "./app/commands/types";
 import { addEntitiesChangeSet } from "./core/history";
@@ -117,6 +118,10 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMeasurementMode, setIsMeasurementMode] = useState(false);
   const [layers, setLayers] = useState<CadLayer[]>([]);
+  // 表示中のレイヤー(TRIM・EXTEND で、非表示のレイヤーの図形を、対象にも境界にもしないため)
+  const visibleLayerNames = useMemo(() => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)), [layers]);
+  // 図面のクリックの、図形を指す許容距離(図面上の長さ。クリックのたびに、画面の拡大率から受け取る)
+  const pickToleranceRef = useRef(1);
   const [cadModel, setCadModel] = useState<CadModel | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point2D | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<string>>(new Set());
@@ -578,7 +583,8 @@ export default function App() {
         request.type === "transformEntities" ||
         request.type === "copyEntities" ||
         request.type === "deleteEntities" ||
-        request.type === "stretchEntities";
+        request.type === "stretchEntities" ||
+        request.type === "trimAt";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -623,6 +629,11 @@ export default function App() {
         case "stretchEntities":
           applyEdit((session, editability) => stretchEntities(session, editability, request.ids, request.window, request.dx, request.dy, request.label));
           break;
+        case "trimAt":
+          applyEdit((session, editability) =>
+            trimOrExtendAt(session, editability, request.mode, request.point, pickToleranceRef.current, request.edgeIds, visibleLayerNames),
+          );
+          break;
         case "undo":
           performHistoryStep("undo");
           break;
@@ -650,6 +661,7 @@ export default function App() {
       loadingProgress,
       appendCommandLog,
       applyEdit,
+      visibleLayerNames,
       snapSettings,
       trackingSettings,
     ],
@@ -785,7 +797,8 @@ export default function App() {
 
   /** 図面のクリックで点が指示された */
   const handlePointPick = useCallback(
-    (worldPoint: Point2D) => {
+    (worldPoint: Point2D, pickToleranceWorld: number) => {
+      pickToleranceRef.current = pickToleranceWorld;
       // 打っている値・確定した値があるときは、ゴム紐に見えているとおりの点を指示する(クリックは、向きなどを決める)
       const d = dynamicRef.current;
       const point = applyTypedValues(d.mode, d.base, worldPoint, d.locked, d.field, d.text) ?? worldPoint;
@@ -1037,6 +1050,7 @@ export default function App() {
             selectionEnabled={!isMeasurementMode}
             measurementModeEnabled={isMeasurementMode}
             pointPickEnabled={activeCommand?.expect === "point"}
+            pointPickRaw={activeCommand?.rawPoints === true}
             measurements={measurements}
             selectedMeasurementId={selectedMeasurementId}
             onSelectionChange={handleSelectionChange}

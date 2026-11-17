@@ -29,6 +29,8 @@ export function dynamicModeOf(active: ActiveCommand | null): DynamicMode | null 
   if (active === null) return null;
   if (active.expect === "distance") return "distance";
   if (active.expect !== "point") return null;
+  // 図形を指す操作(クリックをそのままの位置で渡す段階)は、座標を入力する段階ではないので、ダイナミック入力は出さない
+  if (active.rawPoints) return null;
   // 点の指示でも数値でも答えられる段階(円の半径)は、長さだけ
   if (active.acceptsDistance) {
     // 単なる数値(倍率・参照の長さ)の段階は、カーソルの位置と関係が無いので、ダイナミック入力は出さない(コマンドラインで入力する)

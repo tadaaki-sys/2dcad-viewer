@@ -13,7 +13,9 @@ export type DrawCommandName =
   | "DELETE"
   | "MIRROR"
   | "SCALE"
-  | "STRETCH";
+  | "STRETCH"
+  | "TRIM"
+  | "EXTEND";
 
 type ToolbarProps = {
   isDocumentOpen: boolean;
@@ -50,6 +52,8 @@ const EDIT_BUTTONS: ReadonlyArray<{ name: DrawCommandName; label: string; title:
   { name: "MIRROR", label: "鏡像", title: "選択した図形を鏡像にする(MIRROR)。元の図形を残すか削除するかを選べます" },
   { name: "SCALE", label: "拡大縮小", title: "選択した図形を拡大・縮小する(SCALE)。倍率、または参照の長さで指定します" },
   { name: "STRETCH", label: "ストレッチ", title: "交差窓で囲んだ頂点を動かして、図形の形を変える(STRETCH)" },
+  { name: "TRIM", label: "トリム", title: "境界で図形を切り取る(TRIM)。境界を選んで Enter(何も選ばずに Enter = すべて)、切り取る部分をクリック" },
+  { name: "EXTEND", label: "延長", title: "境界まで図形を延ばす(EXTEND)。境界を選んで Enter(何も選ばずに Enter = すべて)、延ばす図形の端に近い所をクリック" },
   { name: "DELETE", label: "削除", title: "選択した図形を削除する(DELETE・Delete キー)。Ctrl+Z で戻せます" },
 ];
 

@@ -2,7 +2,7 @@
 import type { CommandDefinition, CommandSession, PreviewShape } from "../../core/commands";
 import type { EntityId } from "../../core/model";
 import type { StretchWindow } from "../../core/geometry/stretch";
-import type { Affine2D, CadEntity } from "../../types/cad";
+import type { Affine2D, CadEntity, Point2D } from "../../types/cad";
 
 /** コマンドが、アプリに頼むこと */
 export type AppRequest =
@@ -28,7 +28,9 @@ export type AppRequest =
   /** 図形を削除する。1つの依頼が、Undoの1段階 */
   | { type: "deleteEntities"; ids: readonly EntityId[]; label: string }
   /** 交差窓の中の頂点・端点を動かして、図形の形を変える(STRETCH)。ids は、窓にかかる図形の候補。1つの依頼が、Undoの1段階 */
-  | { type: "stretchEntities"; ids: readonly EntityId[]; window: StretchWindow; dx: number; dy: number; label: string };
+  | { type: "stretchEntities"; ids: readonly EntityId[]; window: StretchWindow; dx: number; dy: number; label: string }
+  /** クリックした位置で、トリム(切り取り)・延長する。edgeIds は境界にする図形(null なら、表示中のすべての図形)。1回のクリックが、Undoの1段階 */
+  | { type: "trimAt"; mode: "trim" | "extend"; point: Point2D; edgeIds: readonly EntityId[] | null };
 
 /** オン・オフを切り替えられるトラッキングの設定 */
 export type TrackingToggleSetting = "ortho" | "polar" | "objectTracking";

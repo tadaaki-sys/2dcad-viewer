@@ -79,6 +79,11 @@ export type PromptStep<R> =
         acceptsDistance?: boolean;
         /** 数値だけの入力(acceptsDistance)の意味。指定しなければ、長さ。"angle" なら、ダイナミック入力は、角度の欄を出す。"plain" なら、ダイナミック入力は出さない */
         numberMeaning?: NumberMeaning;
+        /**
+         * true なら、図面のクリックを、吸着・トラッキングせず、そのままの位置で渡す。ダイナミック入力も出さない。
+         * 図形を指す操作(TRIM・EXTEND のクリック)用: 吸着すると、境界との交点に吸い寄せられて、切り取る側が決まらないため
+         */
+        rawPoints?: boolean;
         onInput: (input: PointInput | KeywordInput | EnterInput | DistanceInput) => CommandStep<R>;
         /** カーソル位置に応じたゴム紐を返す(図面を変更せず、重ねて描く) */
         preview?: (cursor: Point2D) => readonly PreviewShape[];

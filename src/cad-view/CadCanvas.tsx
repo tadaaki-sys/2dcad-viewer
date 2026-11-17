@@ -69,12 +69,15 @@ type CadCanvasProps = {
   measurementModeEnabled: boolean;
   /** コマンドが点の指示を待っている間 true。クリックは選択・測定より先に、コマンドへ渡す(測定と同じ吸着を使う) */
   pointPickEnabled: boolean;
+  /** true なら、点の指示のクリックを、吸着・トラッキングせず、そのままの位置で渡す(TRIM・EXTEND のように、図形を指す操作用) */
+  pointPickRaw?: boolean;
   measurements: readonly Measurement[];
   selectedMeasurementId: string | null;
   onSelectionChange: (entityIds: ReadonlySet<string>) => void;
   onMeasurementComplete: (measurement: Measurement) => void;
   onMeasurementSelect: (measurementId: string | null) => void;
-  onPointPick: (worldPoint: Point2D) => void;
+  /** 点が指示された。pickToleranceWorld は、図形を指すときの許容距離(図面上の長さ。画面の拡大率による) */
+  onPointPick: (worldPoint: Point2D, pickToleranceWorld: number) => void;
   /** 点の指示を待っているコマンドの、ゴム紐(カーソル位置に応じた仮の図形)を返す。無ければ出さない */
   getPreview?: (worldPoint: Point2D) => readonly PreviewShape[];
   /** コマンドの状態が変わるたびに増える番号。変わったら、いまのカーソル位置でゴム紐を作り直す */
@@ -120,6 +123,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectionEnabled,
     measurementModeEnabled,
     pointPickEnabled,
+    pointPickRaw,
     measurements,
     selectedMeasurementId,
     onSelectionChange,
@@ -191,6 +195,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectionEnabled,
     measurementModeEnabled,
     pointPickEnabled,
+    pointPickRaw,
     measurements,
     selectedMeasurementId,
     onSelectionChange,
@@ -212,6 +217,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     selectionEnabled,
     measurementModeEnabled,
     pointPickEnabled,
+    pointPickRaw,
     measurements,
     selectedMeasurementId,
     onSelectionChange,
@@ -504,8 +510,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         measurementModeEnabled: currentMeasurementModeEnabled,
         pointPickEnabled: currentPointPickEnabled,
       } = stateRef.current;
-      // 吸着は、測定中と、コマンドが点の指示を待っている間だけ
-      if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel) {
+      // 吸着は、測定中と、コマンドが点の指示を待っている間だけ(図形を指す操作=pointPickRaw の間は、吸着しない)
+      if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel || (stateRef.current.pointPickRaw === true && !currentMeasurementModeEnabled)) {
         return { worldPoint, point: worldPoint, snap: null, tracking: null, acquirable: null };
       }
 
@@ -666,7 +672,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       // コマンドが点の指示を待っているときは、クリックをコマンドへ渡す(測定・選択より優先)
       if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.pointPickEnabled) {
         event.preventDefault();
-        stateRef.current.onPointPick(computeWorldPointWithSnap(event.clientX, event.clientY));
+        stateRef.current.onPointPick(computeWorldPointWithSnap(event.clientX, event.clientY), SELECTION_TOLERANCE_PX / cameraRef.current.scale);
         return;
       }
       if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.measurementModeEnabled) {

@@ -144,7 +144,7 @@ export function deleteEntities(session: DocumentSession, editability: Editabilit
 }
 
 /** ストレッチで形が変わった図形の、元データとの対応(reshaped の印を付ける)。新しく描いた図形には付かない */
-function reshapedSourceRecord(entity: CadEntity): SourceRecord | undefined {
+export function reshapedSourceRecord(entity: CadEntity): SourceRecord | undefined {
   const root: SourceRecord | undefined = entity.sourceRecord ?? (isNewEntityId(entity.id) ? undefined : { id: entity.id, matrix: IDENTITY_MATRIX });
   return root === undefined ? undefined : { ...root, reshaped: true };
 }
