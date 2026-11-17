@@ -13,8 +13,15 @@ import { isAngleInArcSweep } from "./curves";
 import { normalizeArcSpan } from "./geometry";
 
 const TWO_PI = Math.PI * 2;
-/** 位置 s の比較の許容(同じ交点とみなす) */
-const PARAM_EPSILON = 1e-9;
+/**
+ * 位置 s(線分の連なりの割合・円弧の角度)の比較の許容(同じ交点とみなす)。割合の許容は、線が長いほど、実際の長さでは大きくなる
+ * (1e-9 だと、長さ 1e12 の線で 1000 に相当し、残すべき区間を消してしまう)ので、割合の丸め誤差(1e-16 程度)より十分大きい、小さな値にする。
+ */
+const PARAM_EPSILON = 1e-12;
+/** 座標(mm)の許容。境界の線分の端の上の交点が、丸め誤差で外れないようにする(線の長さによらない、絶対の長さ) */
+const COORD_EPSILON = 1e-9;
+/** 角度(ラジアン)の許容 */
+const ANGLE_EPSILON = 1e-9;
 
 // ---- 境界の図形(境界として使う形) ----
 
@@ -62,7 +69,7 @@ export function lineIntersections(a: Point2D, b: Point2D, edge: EdgePrimitive): 
     const u = (fx * dy - fy * dx) / denominator; // 境界の線分上の位置
     if (!Number.isFinite(t) || !Number.isFinite(u)) return [];
     // 境界の線分の端の上は、丸め誤差で外れないよう、少しだけ許す
-    const slack = PARAM_EPSILON / Math.hypot(ex, ey);
+    const slack = COORD_EPSILON / Math.hypot(ex, ey);
     if (!(u >= -slack && u <= 1 + slack)) return [];
     const clamped = Math.min(1, Math.max(0, u));
     // 境界が垂直・水平なら、その座標(edge.a の x または y)がぴったりの値
@@ -105,7 +112,7 @@ export function circleIntersectionAngles(center: Point2D, radius: number, edge: 
     // 線分の上にある交点(線と円の交点を、直線の t から求め、線分の範囲に絞る)
     const probe: EdgePrimitive = { kind: "circle", center, radius };
     for (const t of lineIntersectionParams(edge.a, edge.b, probe)) {
-      const slack = PARAM_EPSILON / length;
+      const slack = COORD_EPSILON / length;
       if (t < -slack || t > 1 + slack) continue;
       const clamped = Math.min(1, Math.max(0, t));
       points.push({ x: edge.a.x + (edge.b.x - edge.a.x) * clamped, y: edge.a.y + (edge.b.y - edge.a.y) * clamped });
@@ -242,6 +249,29 @@ function nearestChainPosition(chain: Chain, point: Point2D): number {
   return bestS;
 }
 
+/** 線分 i の長さ */
+function segmentLength(chain: Chain, i: number): number {
+  const [a, b] = segmentAt(chain, i);
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+/** 線分の連なりの、全体の長さ */
+function chainLength(chain: Chain): number {
+  let total = 0;
+  for (let i = 0; i < segmentCount(chain); i++) total += segmentLength(chain, i);
+  return total;
+}
+
+/** 位置 s までの、道に沿った長さ */
+function lengthAlongChain(chain: Chain, s: number): number {
+  const count = segmentCount(chain);
+  const whole = Math.min(count, Math.max(0, Math.floor(s)));
+  let total = 0;
+  for (let i = 0; i < whole; i++) total += segmentLength(chain, i);
+  if (whole < count) total += segmentLength(chain, whole) * (s - whole);
+  return total;
+}
+
 /** 位置 s の点 */
 function chainPointAt(chain: Chain, s: number): Point2D {
   const count = segmentCount(chain);
@@ -332,8 +362,8 @@ export function trimEntity(target: CadEntity, click: Point2D, edges: readonly Ed
       if (target.type === "LINE") {
         pieces.push({ ...target, start: points[0], end: points[points.length - 1] });
       } else {
-        // 残る頂点は、元の頂点の値(bulge など)をそのまま、新しい端点は、座標だけ
-        pieces.push({ ...target, vertices: points.map((p) => keepVertex(target, p)), closed: false });
+        // 残る頂点は、元の頂点の図形をそのまま(値を含めて)、新しい端点は、座標だけ(chainSlice が、そう返す)
+        pieces.push({ ...target, vertices: points, closed: false });
       }
     }
     return { ok: true, pieces };
@@ -348,9 +378,9 @@ export function trimEntity(target: CadEntity, click: Point2D, edges: readonly Ed
       for (const angle of circleIntersectionAngles(circle.center, circle.radius, edge)) {
         let s = ((angle - start) % TWO_PI + TWO_PI) % TWO_PI;
         // 始点のわずかに手前(丸め誤差)は、始点
-        if (s > TWO_PI - PARAM_EPSILON) s = 0;
+        if (s > TWO_PI - ANGLE_EPSILON) s = 0;
         // 円弧は、範囲の中にあるものだけ。円は、全周
-        if (target.type === "ARC" && s > span + PARAM_EPSILON) continue;
+        if (target.type === "ARC" && s > span + ANGLE_EPSILON) continue;
         intersections.push(Math.min(s, span));
       }
     }
@@ -364,7 +394,7 @@ export function trimEntity(target: CadEntity, click: Point2D, edges: readonly Ed
     if (keep === null) return { ok: false, reason: target.type === "CIRCLE" && intersections.length > 0 ? "円は、交点が2つ以上ないと切り取れません" : NO_INTERSECTION_REASON };
     const pieces: CadEntity[] = [];
     for (const [from, to] of keep) {
-      if (to - from <= PARAM_EPSILON) continue;
+      if (to - from <= ANGLE_EPSILON) continue;
       pieces.push({ ...sameStyle(target), type: "ARC", startAngle: normalizeAngleValue(start + from), endAngle: normalizeAngleValue(start + to) } as CadArc);
     }
     return { ok: true, pieces };
@@ -378,12 +408,6 @@ function normalizeAngleValue(angle: number): number {
   return wrapped;
 }
 
-/** 折れ線の残す頂点: 座標が元の頂点と同じなら、元の頂点(bulge などの値を含む)を、新しい端点なら、座標だけ */
-function keepVertex(target: CadPolyline, point: Point2D): Point2D {
-  const found = target.vertices.find((v) => v.x === point.x && v.y === point.y);
-  return found ?? { x: point.x, y: point.y };
-}
-
 // ---- 延長 ----
 
 /**
@@ -395,9 +419,8 @@ export function extendEntity(target: CadEntity, click: Point2D, edges: readonly 
     const chain = chainOf(target);
     const n = chain.vertices.length;
     if (n < 2) return { ok: false, reason: "線分がありません" };
-    // どちらの端か: クリックに近い方
-    const s = nearestChainPosition(chain, click);
-    const atEnd = s >= (n - 1) / 2;
+    // どちらの端か: クリックに近い方(道に沿った長さで、真ん中より終点側なら終点。線分の数ではなく、長さで見る)
+    const atEnd = lengthAlongChain(chain, nearestChainPosition(chain, click)) >= chainLength(chain) / 2;
     const tip = atEnd ? chain.vertices[n - 1] : chain.vertices[0];
     const neighbor = atEnd ? chain.vertices[n - 2] : chain.vertices[1];
     // 端の線分を、端の方向へ延ばした直線: neighbor → tip の向き。tip の位置は t = 1
@@ -415,16 +438,16 @@ export function extendEntity(target: CadEntity, click: Point2D, edges: readonly 
     const span = normalizeArcSpan(target.startAngle, target.endAngle);
     const gap = TWO_PI - span; // 円弧の外側の角度
     const clickAngle = Math.atan2(click.y - target.center.y, click.x - target.center.x);
-    const fromStart = ((target.startAngle - clickAngle) % TWO_PI + TWO_PI) % TWO_PI;
-    const fromEnd = ((clickAngle - target.endAngle) % TWO_PI + TWO_PI) % TWO_PI;
-    const atEnd = fromEnd <= fromStart;
+    // クリックの、始点からの角度。円弧の中なら、真ん中より終点側=終点。円弧の外(反対側)なら、近い方の端(終点の先へ・始点の手前へ測った角度の小さい方)
+    const relative = (((clickAngle - target.startAngle) % TWO_PI) + TWO_PI) % TWO_PI;
+    const atEnd = relative <= span ? relative >= span / 2 : relative - span <= TWO_PI - relative;
     let best = Infinity;
     for (const edge of edges) {
       for (const angle of circleIntersectionAngles(target.center, target.radius, edge)) {
         // 端から、延ばす向きに測った角度(終点は反時計回り、始点は時計回り)
         const delta = atEnd ? (((angle - target.endAngle) % TWO_PI) + TWO_PI) % TWO_PI : (((target.startAngle - angle) % TWO_PI) + TWO_PI) % TWO_PI;
         // 円弧の中にある交点(延ばす先ではない)と、端そのものは、除く
-        if (delta > PARAM_EPSILON && delta < gap - PARAM_EPSILON && delta < best) best = delta;
+        if (delta > ANGLE_EPSILON && delta < gap - ANGLE_EPSILON && delta < best) best = delta;
       }
     }
     if (!Number.isFinite(best)) return { ok: false, reason: "延ばした先に、境界がありません" };
@@ -446,7 +469,7 @@ export function extendEntity(target: CadEntity, click: Point2D, edges: readonly 
 function nearestForward(from: Point2D, to: Point2D, edges: readonly EdgePrimitive[]): Point2D | null {
   const length = Math.hypot(to.x - from.x, to.y - from.y);
   if (!(length > 0)) return null;
-  const minimum = 1 + PARAM_EPSILON / length;
+  const minimum = 1 + COORD_EPSILON / length;
   let best: LineHit | null = null;
   for (const edge of edges) {
     for (const hit of lineIntersections(from, to, edge)) {

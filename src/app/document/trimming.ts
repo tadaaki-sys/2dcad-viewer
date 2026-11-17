@@ -56,12 +56,20 @@ function lineHitsBox(a: Point2D, b: Point2D, box: Box): boolean {
 }
 
 /** 対象の図形から見て、境界になりうる図形の範囲(トリム=図形自身の範囲。延長=延ばした先まで含む領域の判定) */
-function candidateTest(target: CadEntity, targetBox: Box, mode: TrimMode): (bounds: ArrayLike<number>, offset: number) => boolean {
+/** 範囲の判定の余裕(mm)。core の交点の判定は、境界の線分の端から 1e-9 mm 外れた交点も認める。丸め誤差でわずかに離れた境界(T字の接点)を、前段で捨てないための、それより大きな余裕 */
+const BOX_MARGIN = 1e-6;
+
+function grow(box: Box): Box {
+  return { minX: box.minX - BOX_MARGIN, minY: box.minY - BOX_MARGIN, maxX: box.maxX + BOX_MARGIN, maxY: box.maxY + BOX_MARGIN };
+}
+
+function candidateTest(target: CadEntity, rawTargetBox: Box, mode: TrimMode): (bounds: ArrayLike<number>, offset: number) => boolean {
+  const targetBox = grow(rawTargetBox);
   if (mode === "trim") return (bounds, o) => bounds[o] <= targetBox.maxX && bounds[o + 2] >= targetBox.minX && bounds[o + 1] <= targetBox.maxY && bounds[o + 3] >= targetBox.minY;
   if (target.type === "ARC") {
     // 円弧は、円に沿って延びる: 円全体の範囲
     const circle: Box = { minX: target.center.x - target.radius, minY: target.center.y - target.radius, maxX: target.center.x + target.radius, maxY: target.center.y + target.radius };
-    return (bounds, o) => boxesOverlap({ minX: bounds[o], minY: bounds[o + 1], maxX: bounds[o + 2], maxY: bounds[o + 3] }, circle);
+    return (bounds, o) => boxesOverlap({ minX: bounds[o], minY: bounds[o + 1], maxX: bounds[o + 2], maxY: bounds[o + 3] }, grow(circle));
   }
   // 線・折れ線は、端の線分を、向きのままに延ばす: その直線が通る範囲
   const vertices = target.type === "LINE" ? [target.start, target.end] : target.type === "LWPOLYLINE" || target.type === "POLYLINE" ? target.vertices : [];
@@ -70,7 +78,7 @@ function candidateTest(target: CadEntity, targetBox: Box, mode: TrimMode): (boun
   const first: [Point2D, Point2D] = [vertices[1], vertices[0]];
   const last: [Point2D, Point2D] = [vertices[n - 2], vertices[n - 1]];
   return (bounds, o) => {
-    const box = { minX: bounds[o], minY: bounds[o + 1], maxX: bounds[o + 2], maxY: bounds[o + 3] };
+    const box = grow({ minX: bounds[o], minY: bounds[o + 1], maxX: bounds[o + 2], maxY: bounds[o + 3] });
     return lineHitsBox(first[0], first[1], box) || lineHitsBox(last[0], last[1], box);
   };
 }

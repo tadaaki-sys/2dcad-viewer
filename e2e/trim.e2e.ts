@@ -108,6 +108,24 @@ test.describe("TRIM", () => {
     expect(await readPoint(page, "End")).toEqual({ x: 500, y: 100 });
   });
 
+  test("while the measurement mode is on, the click is still not snapped (the command takes the click first)", async ({ page }) => {
+    const mapping = await openEditable(page);
+    await drawVertical(page, 200);
+    await drawVertical(page, 400);
+    await toolbarButton(page, "測定").click();
+    await typeCommand(page, "tr");
+    await typeCommand(page, "");
+    const click = at(mapping, 195, 100);
+    await page.mouse.click(click.x, click.y);
+    await expect(log(page)).toContainText("図形をトリムしました");
+    await page.keyboard.press("Escape");
+    await toolbarButton(page, "測定").click(); // 測定をやめて、選べるようにする
+    await select(page, MACHINE_LINE(mapping, 300), "LINE");
+    // 吸着されていたら、x=200 の交点になって、右側が切れる。吸着しないので、左側(200 より手前)が切れる
+    expect(await readPoint(page, "Start")).toEqual({ x: 200, y: 100 });
+    expect(await readPoint(page, "End")).toEqual({ x: 500, y: 100 });
+  });
+
   test("a selected figure is the only boundary", async ({ page }) => {
     const mapping = await openEditable(page);
     await drawVertical(page, 200);

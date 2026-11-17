@@ -96,7 +96,7 @@ describe("trimKeepIntervals", () => {
   });
 
   it("open path: an intersection exactly at the click belongs to the lower side; duplicates are merged", () => {
-    expect(trimKeepIntervals([4, 4, 4 + 1e-12, 8], 10, false, 4)).toEqual([[0, 4], [8, 10]]);
+    expect(trimKeepIntervals([4, 4, 4 + 1e-14, 8], 10, false, 4)).toEqual([[0, 4], [8, 10]]);
   });
 
   it("closed path: needs two intersections; one remaining piece, wrapped around", () => {
@@ -403,5 +403,64 @@ describe("extending an arc: only boundaries in the extension zone count", () => 
   it("with both a crossing inside the arc and a boundary beyond the end, the one beyond is used", () => {
     const result = extendEntity(arc, pt(0, 10), [seg(0, 0, 20, 20), seg(-6, 0, -6, 20)]);
     expect(result.ok && (result.pieces[0] as unknown as { endAngle: number }).endAngle).toBeCloseTo(Math.atan2(8, -6), 12);
+  });
+});
+
+describe("Codex review fixes (Phase 11)", () => {
+  const arc: CadEntity = { ...base, id: "a", type: "ARC", center: pt(0, 0), radius: 10, startAngle: 0, endAngle: Math.PI / 2 };
+  const angleOf = (entity: CadEntity | undefined, key: "startAngle" | "endAngle") => (entity as unknown as Record<string, number>)[key];
+
+  it("an arc is extended at the end NEAR the click, also when the click is inside the arc", () => {
+    // 境界: 180度 (-10,0) と 270度 (0,-10) で円と交わる2本の線分
+    const edges = [seg(-20, 0, -5, 0), seg(0, -20, 0, -5)];
+    // 10度(始点に近い)をクリック: 始点を、時計回りに 270度 へ
+    const nearStart = extendEntity(arc, pt(10 * Math.cos(Math.PI / 18), 10 * Math.sin(Math.PI / 18)), edges);
+    expect(nearStart.ok && angleOf(nearStart.pieces[0], "startAngle")).toBeCloseTo((3 * Math.PI) / 2, 12);
+    expect(nearStart.ok && angleOf(nearStart.pieces[0], "endAngle")).toBeCloseTo(Math.PI / 2, 12);
+    // 80度(終点に近い)をクリック: 終点を、反時計回りに 180度 へ
+    const nearEnd = extendEntity(arc, pt(10 * Math.cos((4 * Math.PI) / 9), 10 * Math.sin((4 * Math.PI) / 9)), edges);
+    expect(nearEnd.ok && angleOf(nearEnd.pieces[0], "endAngle")).toBeCloseTo(Math.PI, 12);
+    expect(nearEnd.ok && angleOf(nearEnd.pieces[0], "startAngle")).toBe(0);
+    // 円弧の外(反対側。270度)をクリック: 始点に近い(90度)ので、始点を延ばす
+    const outside = extendEntity(arc, pt(0, -10), edges);
+    expect(outside.ok && angleOf(outside.pieces[0], "startAngle")).toBeCloseTo((3 * Math.PI) / 2, 12);
+  });
+
+  it("a polyline end is chosen by the length along the path, not by the number of segments", () => {
+    const entity = poly([pt(0, 0), pt(1000, 0), pt(1001, 0)]);
+    // 終点までの長さが 101、始点まで 900 の位置 (900,0): 終点側(右)が近い
+    const result = extendEntity(entity, pt(900, 0), [seg(-50, -5, -50, 5), seg(1100, -5, 1100, 5)]);
+    expect(result.ok && (result.pieces[0] as unknown as { vertices: Point2D[] }).vertices).toEqual([pt(0, 0), pt(1000, 0), pt(1100, 0)]);
+    const nearStart = extendEntity(entity, pt(100, 0), [seg(-50, -5, -50, 5), seg(1100, -5, 1100, 5)]);
+    expect(nearStart.ok && (nearStart.pieces[0] as unknown as { vertices: Point2D[] }).vertices[0]).toEqual(pt(-50, 0));
+  });
+
+  it("an end that already touches a boundary is extended to the NEXT boundary beyond it (the one it touches is skipped)", () => {
+    const result = extendEntity(line(0, 0, 10, 0), pt(9, 0), [seg(10, -5, 10, 5), seg(20, -5, 20, 5)]);
+    expect(result.ok && result.pieces.map(lineEnds)).toEqual([[0, 0, 20, 0]]);
+    // 先に境界が無ければ、延長できない
+    expect(extendEntity(line(0, 0, 10, 0), pt(9, 0), [seg(10, -5, 10, 5)]).ok).toBe(false);
+  });
+
+  it("a very long line keeps the short piece (the tolerance is not proportional to the line length)", () => {
+    const result = pieces(trimEntity(line(0, 0, 1e12, 0), pt(1e6, 0), [seg(500, -1, 500, 1)]));
+    expect(result.map(lineEnds)).toEqual([[0, 0, 500, 0]]);
+    // 長さ 1e12 の線で、始点から 500 の所の交点は、始点の上ではない
+    const both = pieces(trimEntity(line(0, 0, 1e12, 0), pt(250, 0), [seg(500, -1, 500, 1)]));
+    expect(both.map(lineEnds)).toEqual([[500, 0, 1e12, 0]]);
+  });
+
+  it("trimming a long polyline is linear: a 100,000-vertex polyline is cut in well under a second", () => {
+    const vertices = Array.from({ length: 100_000 }, (_, i) => pt(i, i % 2 === 0 ? 0 : 1));
+    const entity = poly(vertices);
+    const started = performance.now();
+    const result = pieces(trimEntity(entity, pt(15_000, 0.5), [seg(10_000.5, -5, 10_000.5, 5), seg(20_000.5, -5, 20_000.5, 5)]));
+    const elapsed = performance.now() - started;
+    expect(result).toHaveLength(2);
+    expect((result[0] as unknown as { vertices: Point2D[] }).vertices).toHaveLength(10_002);
+    expect((result[1] as unknown as { vertices: Point2D[] }).vertices.length).toBeGreaterThan(79_000);
+    expect(elapsed).toBeLessThan(1000);
+    // 残った頂点は、元の頂点の図形そのまま(値も同じ)
+    expect((result[0] as unknown as { vertices: Point2D[] }).vertices[5]).toBe(vertices[5]);
   });
 });

@@ -510,8 +510,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         measurementModeEnabled: currentMeasurementModeEnabled,
         pointPickEnabled: currentPointPickEnabled,
       } = stateRef.current;
-      // 吸着は、測定中と、コマンドが点の指示を待っている間だけ(図形を指す操作=pointPickRaw の間は、吸着しない)
-      if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel || (stateRef.current.pointPickRaw === true && !currentMeasurementModeEnabled)) {
+      // 吸着は、測定中と、コマンドが点の指示を待っている間だけ。図形を指す操作(pointPickRaw)の間は、測定中でも、吸着しない
+      // (点の指示は、測定より先に、クリックをコマンドが受け取るため)
+      if (!(currentMeasurementModeEnabled || currentPointPickEnabled) || !currentModel || (stateRef.current.pointPickRaw === true && currentPointPickEnabled)) {
         return { worldPoint, point: worldPoint, snap: null, tracking: null, acquirable: null };
       }
 

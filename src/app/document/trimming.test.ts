@@ -206,3 +206,20 @@ describe("a large drawing", () => {
     expect(elapsed).toBeLessThan(5000); // 速いPCでは、数十ミリ秒
   });
 });
+
+describe("Codex review fixes (Phase 11)", () => {
+  it("a boundary that stops a hair short of the target (within the intersection tolerance) is still found by the pre-filter", () => {
+    // 境界の端 (50, 5e-10) は、対象の線 y=0 から、0.0000000005 mm だけ離れている。core の許容(1e-9 mm)では、交点
+    const { session, editability } = setup([line("n0", 50, 5e-10, 50, 10)]);
+    const result = trimOrExtendAt(session, editability, "trim", pt(80, 0), TOLERANCE, ["n0"], VISIBLE);
+    expect(result.ok).toBe(true);
+    expect(ends(get(session, "e0"))).toEqual([0, 0, 50, 0]);
+  });
+
+  it("extending also finds a boundary whose end is a hair away from the extended line", () => {
+    const { session, editability } = setup([line("n0", 150, 5e-10, 150, 50)]);
+    const result = trimOrExtendAt(session, editability, "extend", pt(95, 0), TOLERANCE, ["n0"], VISIBLE);
+    expect(result.ok).toBe(true);
+    expect(ends(get(session, "e0"))).toEqual([0, 0, 150, 0]);
+  });
+});
