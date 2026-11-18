@@ -28,6 +28,9 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
     createPreview: (ids) => createSelectionPreview(ENTITIES.filter((entity) => ids.includes(entity.id))),
     findInWindow: NO_EDITING.findInWindow,
     createStretchPreview: NO_EDITING.createStretchPreview,
+    pickEntity: NO_EDITING.pickEntity,
+    createOffsetPreview: NO_EDITING.createOffsetPreview,
+    createBreakPreview: NO_EDITING.createBreakPreview,
     ...overrides,
   };
   const context = makeContext({ editing });
@@ -321,6 +324,9 @@ describe("a large selection", () => {
       createPreview: (ids) => createSelectionPreview(many.filter((entity) => ids.includes(entity.id))),
       findInWindow: NO_EDITING.findInWindow,
       createStretchPreview: NO_EDITING.createStretchPreview,
+      pickEntity: NO_EDITING.pickEntity,
+      createOffsetPreview: NO_EDITING.createOffsetPreview,
+      createBreakPreview: NO_EDITING.createBreakPreview,
     };
     const session = createAppCommandSession(() => makeContext({ editing }));
     session.submitText("move");

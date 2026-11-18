@@ -6,6 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DocumentSession } from "../app/document/documentSession";
+import { breakAt } from "../app/document/breaking";
+import { offsetAt } from "../app/document/offsetting";
 import { trimOrExtendAt } from "../app/document/trimming";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "../app/document/editing";
 import type { Editability } from "../app/document/editability";
@@ -197,5 +199,89 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.trim.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[trim perf] ${entry.name}`, JSON.stringify(result));
-    }, 900_000);  }
+    }, 900_000);
+
+    it(`${entry.name}: offset and break on real figures, then Undo (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model));
+      const original = session.document.entities;
+      const count = original.length;
+      if (count === 0) return;
+      // 線・円弧・円・折れ線から、図形の種類ごとに、均等に最大20個ずつ。折れ線は、頂点が多いものも2つ(重い場合の時間を見る)
+      const sampleOf = (types: string[], max = 20) => {
+        const all = original.filter((entity) => types.includes(entity.type));
+        const step = Math.max(1, Math.floor(all.length / max));
+        return all.filter((_, i) => i % step === 0).slice(0, max);
+      };
+      const polylines = original.filter((entity) => entity.type === "LWPOLYLINE" || entity.type === "POLYLINE");
+      const heaviest = [...polylines].sort((a, b) => ((b as { vertices: unknown[] }).vertices.length) - ((a as { vertices: unknown[] }).vertices.length)).slice(0, 2);
+      const samples = [...sampleOf(["LINE"]), ...sampleOf(["ARC", "CIRCLE"]), ...sampleOf(["LWPOLYLINE", "POLYLINE"]), ...heaviest];
+
+      const pointOn = (entity: (typeof original)[number], fraction: number) => {
+        if (entity.type === "LINE") return { x: entity.start.x + (entity.end.x - entity.start.x) * fraction, y: entity.start.y + (entity.end.y - entity.start.y) * fraction };
+        if (entity.type === "CIRCLE" || entity.type === "ARC") {
+          const angle = entity.type === "CIRCLE" ? Math.PI * 2 * fraction : entity.startAngle + (((entity.endAngle - entity.startAngle) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) * fraction;
+          return { x: entity.center.x + entity.radius * Math.cos(angle), y: entity.center.y + entity.radius * Math.sin(angle) };
+        }
+        if (entity.type === "LWPOLYLINE" || entity.type === "POLYLINE") {
+          const v = entity.vertices;
+          return v[Math.min(v.length - 1, Math.floor((v.length - 1) * fraction))];
+        }
+        return { x: 0, y: 0 };
+      };
+
+      const stats = { offsetTried: 0, offsetOk: 0, breakTried: 0, breakOk: 0, offsetMs: 0, offsetMaxMs: 0, breakMs: 0, breakMaxMs: 0 };
+      const expectRestored = () => {
+        expect(session.canUndo).toBe(false);
+        const now = session.document.entities;
+        expect(now.length).toBe(count);
+        for (let i = 0; i < count; i++) {
+          if (now[i] !== original[i]) throw new Error(`Undo で元に戻りません(${i} 番目)`);
+        }
+      };
+      for (const entity of samples) {
+        // 距離は、図形の大きさに合わせず、ふつうの値(5)と、大きい値(1000)で試す。写せないときは、理由つきで断られ、図面は変わらない
+        for (const distance of [5, 1000]) {
+          for (const sign of [1, -1]) {
+            // 側は、図形の1点から、法線方向へずらした点で指す(どちらの側かは、図形ごとに違うので、結果の成否だけを見る)
+            const p = pointOn(entity, 0.5);
+            const run = time(() => offsetAt(session, ALL_EDITABLE, entity.id, distance, { x: p.x + sign * 0.5, y: p.y + sign * 0.25 }));
+            stats.offsetTried++;
+            stats.offsetMs += run.ms;
+            stats.offsetMaxMs = Math.max(stats.offsetMaxMs, run.ms);
+            if (run.value.ok) {
+              stats.offsetOk++;
+              expect(session.document.entities.length).toBe(count + 1);
+              expect(session.undo().type).toBe("done");
+            }
+            expectRestored();
+          }
+        }
+        // 切断: 図形の 1/3 の点から 2/3 の点まで
+        const first = pointOn(entity, 1 / 3);
+        const second = pointOn(entity, 2 / 3);
+        const run = time(() => breakAt(session, ALL_EDITABLE, entity.id, first, second));
+        stats.breakTried++;
+        stats.breakMs += run.ms;
+        stats.breakMaxMs = Math.max(stats.breakMaxMs, run.ms);
+        if (run.value.ok) {
+          stats.breakOk++;
+          expect(session.undo().type).toBe("done");
+        }
+        expectRestored();
+      }
+      const result = {
+        entityCount: count,
+        samples: samples.length,
+        ...stats,
+        offsetAverageMs: round(stats.offsetTried > 0 ? stats.offsetMs / stats.offsetTried : 0),
+        offsetMaxMs: round(stats.offsetMaxMs),
+        breakAverageMs: round(stats.breakTried > 0 ? stats.breakMs / stats.breakTried : 0),
+        breakMaxMs: round(stats.breakMaxMs),
+      };
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.offset.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[offset perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);
+  }
 });

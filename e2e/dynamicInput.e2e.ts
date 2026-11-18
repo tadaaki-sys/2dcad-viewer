@@ -234,6 +234,7 @@ test.describe("keyboard", () => {
 
   test("clicking a point while a length is locked gives the point the rubber band shows (the click decides the direction); the values are then dropped", async ({ page }) => {
     const mapping = await openEditable(page);
+    const before = await entityCount(page);
     await typeCommand(page, "line");
     await typeCommand(page, "550,50");
     await moveTo(page, at(mapping, 650, 90)); // 始点から約108mm、約22度の向き
@@ -246,6 +247,9 @@ test.describe("keyboard", () => {
     await expect(row(page, "length")).toHaveClass(/dynamic-input__row--active/);
     await expect(input(page)).toHaveValue("");
     await page.keyboard.press("Escape");
+    // 線が図面に反映されてから選ぶ(反映より先にクリックが届くと、何も選べず、たまに失敗していた)
+    await expect(log(page)).toContainText("1本の線を追加しました");
+    await expect.poll(() => entityCount(page)).toBe(before + 1);
     // 描かれた線の長さは、確定した 70(クリックした点までの約108ではない)。中点は (582,63) 付近
     await selectAt(page, at(mapping, 582.5, 63));
     await expect(propertyPanel(page)).toContainText("70.0 mm");

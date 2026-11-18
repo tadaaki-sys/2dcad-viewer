@@ -1,6 +1,6 @@
 // 編集コマンドが使う情報(AppEditing)を作る。画面の側が、いまの図面・編集可否の判断・選択を、関数で渡す。
 // 関数で渡すので、コマンドは、始まる時点の(最新の)状態を読める。React にも画面にも依存しない。
-import { createSelectionPreview, createStretchPreview } from "../../core/commands/entityPreview";
+import { createBreakPreview, createOffsetPreview, createSelectionPreview, createStretchPreview } from "../../core/commands/entityPreview";
 import { boundsTouchWindow } from "../../core/geometry/stretch";
 import { BOUNDS_STRIDE, computeAllEntityBounds } from "../../core/spatial/entityBounds";
 import { getEntity } from "../../core/model";
@@ -8,6 +8,7 @@ import type { EntityId } from "../../core/model";
 import type { CadEntity } from "../../types/cad";
 import type { AppEditing } from "../commands/types";
 import { resolveEditTargets } from "./editability";
+import { CURVE_TYPES, pickEntityAt } from "./picking";
 import type { Editability } from "./editability";
 import type { DocumentSession } from "./documentSession";
 
@@ -17,7 +18,11 @@ export type AppEditingSources = {
   getSession: () => DocumentSession | null;
   getEditability: () => Editability;
   getSelection: () => Iterable<EntityId>;
-};
+  /** 表示中のレイヤーの名前(非表示のレイヤーの図形は、クリックで指せない) */
+  getVisibleLayerNames: () => ReadonlySet<string>;
+  /** 最後に図面をクリックしたときの、図形を指す許容距離(図面上の長さ) */
+  getPickTolerance: () => number;
+}
 
 export function createAppEditing(sources: AppEditingSources): AppEditing {
   return {
@@ -57,6 +62,20 @@ export function createAppEditing(sources: AppEditingSources): AppEditing {
         }
       }
       return createStretchPreview(entities, window);
+    },
+    pickEntity: (point, name) => {
+      const session = sources.getSession();
+      if (session === null) return { ok: false, message: "図面の準備中です" };
+      const picked = pickEntityAt(session, sources.getEditability(), point, sources.getPickTolerance(), sources.getVisibleLayerNames(), CURVE_TYPES, name);
+      return picked.ok ? { ok: true, id: picked.entity.id } : picked;
+    },
+    createOffsetPreview: (id) => {
+      const entity = sources.getSession() === null ? undefined : getEntity(sources.getSession()!.document, id);
+      return entity === undefined ? () => [] : createOffsetPreview(entity);
+    },
+    createBreakPreview: (id, first) => {
+      const entity = sources.getSession() === null ? undefined : getEntity(sources.getSession()!.document, id);
+      return entity === undefined ? () => [] : createBreakPreview(entity, first);
     },
   };
 }

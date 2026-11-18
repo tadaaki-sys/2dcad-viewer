@@ -30,7 +30,11 @@ export type AppRequest =
   /** 交差窓の中の頂点・端点を動かして、図形の形を変える(STRETCH)。ids は、窓にかかる図形の候補。1つの依頼が、Undoの1段階 */
   | { type: "stretchEntities"; ids: readonly EntityId[]; window: StretchWindow; dx: number; dy: number; label: string }
   /** クリックした位置で、トリム(切り取り)・延長する。edgeIds は境界にする図形(null なら、表示中のすべての図形)。1回のクリックが、Undoの1段階 */
-  | { type: "trimAt"; mode: "trim" | "extend"; point: Point2D; edgeIds: readonly EntityId[] | null };
+  | { type: "trimAt"; mode: "trim" | "extend"; point: Point2D; edgeIds: readonly EntityId[] | null }
+  /** 図形を、距離だけ、点のある側へ写す(OFFSET)。distance が null なら、点を通るように写す(通過点)。元の図形は変えず、新しい図形を追加する。1つの依頼が、Undoの1段階 */
+  | { type: "offsetEntity"; id: EntityId; distance: number | null; point: Point2D }
+  /** 図形を、2点の間で切断する(BREAK)。1つの依頼が、Undoの1段階 */
+  | { type: "breakEntity"; id: EntityId; first: Point2D; second: Point2D };
 
 /** オン・オフを切り替えられるトラッキングの設定 */
 export type TrackingToggleSetting = "ortho" | "polar" | "objectTracking";
@@ -44,7 +48,10 @@ export type DrawTarget = { ok: true; layer: string; color: string } | { ok: fals
 /** 選択から、編集できる図形だけを取り出した結果 */
 export type EditTargetsInfo = { editable: readonly EntityId[]; skipped: number; reason: string | null };
 
-/** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
+/** クリックした位置の図形を探した結果(OFFSET・BREAK 用) */
+export type PickResult = { ok: true; id: EntityId } | { ok: false; message: string };
+
+/** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH・OFFSET・BREAK)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
 export type AppEditing = {
   /** 図面の準備ができていて(読み込み中でなく)、編集できるか */
   ready: boolean;
@@ -58,6 +65,15 @@ export type AppEditing = {
   findInWindow: (window: StretchWindow) => EditTargetsInfo;
   /** ストレッチの仮表示を作る関数を返す(移動量を渡すと、窓の中の頂点を動かした形を返す) */
   createStretchPreview: (ids: readonly EntityId[], window: StretchWindow) => (dx: number, dy: number) => readonly PreviewShape[];
+  /**
+   * 最後に図面をクリックした位置(許容距離は、そのときの拡大率から決まる)にある、編集できる線・円弧・円・折れ線を探す。
+   * name は操作の名前(「オフセット」など)で、断りの文に使う。クリックの直後(コマンドの onInput の中)で呼ぶこと
+   */
+  pickEntity: (point: Point2D, name: string) => PickResult;
+  /** OFFSET の仮表示を作る関数を返す(距離[null = 通過点]とカーソルの位置を渡すと、写した形を返す) */
+  createOffsetPreview: (id: EntityId) => (distance: number | null, cursor: Point2D) => readonly PreviewShape[];
+  /** BREAK の仮表示を作る関数を返す(第2点を渡すと、切断したあとに残る形を返す) */
+  createBreakPreview: (id: EntityId, first: Point2D) => (cursor: Point2D) => readonly PreviewShape[];
 };
 
 /** 編集できない状態(図面が無い・準備中)。初期値と、テストで使う */
@@ -68,6 +84,9 @@ export const NO_EDITING: AppEditing = {
   createPreview: () => () => [],
   findInWindow: () => ({ editable: [], skipped: 0, reason: null }),
   createStretchPreview: () => () => [],
+  pickEntity: () => ({ ok: false, message: "図面の準備中です" }),
+  createOffsetPreview: () => () => [],
+  createBreakPreview: () => () => [],
 };
 
 /** コマンドを始める時点のアプリの状態 */

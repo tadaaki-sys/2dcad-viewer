@@ -17,11 +17,11 @@ const TWO_PI = Math.PI * 2;
  * 位置 s(線分の連なりの割合・円弧の角度)の比較の許容(同じ交点とみなす)。割合の許容は、線が長いほど、実際の長さでは大きくなる
  * (1e-9 だと、長さ 1e12 の線で 1000 に相当し、残すべき区間を消してしまう)ので、割合の丸め誤差(1e-16 程度)より十分大きい、小さな値にする。
  */
-const PARAM_EPSILON = 1e-12;
+export const PARAM_EPSILON = 1e-12;
 /** 座標(mm)の許容。境界の線分の端の上の交点が、丸め誤差で外れないようにする(線の長さによらない、絶対の長さ) */
 const COORD_EPSILON = 1e-9;
 /** 角度(ラジアン)の許容 */
-const ANGLE_EPSILON = 1e-9;
+export const ANGLE_EPSILON = 1e-9;
 
 // ---- 境界の図形(境界として使う形) ----
 
@@ -211,21 +211,21 @@ export function trimKeepIntervals(intersections: readonly number[], length: numb
 // ---- 図形ごとの道 ----
 
 /** 線分の連なり(線・折れ線)の道 */
-type Chain = { vertices: Point2D[]; closed: boolean };
+export type Chain = { vertices: Point2D[]; closed: boolean };
 
-function chainOf(entity: CadLine | CadPolyline): Chain {
+export function chainOf(entity: CadLine | CadPolyline): Chain {
   if (entity.type === "LINE") return { vertices: [entity.start, entity.end], closed: false };
   return { vertices: entity.vertices, closed: entity.closed };
 }
 
 /** 線分の連なりの、線分の数 */
-function segmentCount(chain: Chain): number {
+export function segmentCount(chain: Chain): number {
   const n = chain.vertices.length;
   return chain.closed ? n : n - 1;
 }
 
 /** 線分 i の両端(閉じた連なりでは、最後の線分は、最後の頂点から最初の頂点) */
-function segmentAt(chain: Chain, i: number): [Point2D, Point2D] {
+export function segmentAt(chain: Chain, i: number): [Point2D, Point2D] {
   const n = chain.vertices.length;
   return [chain.vertices[i], chain.vertices[(i + 1) % n]];
 }
@@ -273,7 +273,7 @@ function lengthAlongChain(chain: Chain, s: number): number {
 }
 
 /** 位置 s の点 */
-function chainPointAt(chain: Chain, s: number): Point2D {
+export function chainPointAt(chain: Chain, s: number): Point2D {
   const count = segmentCount(chain);
   const i = Math.min(count - 1, Math.max(0, Math.floor(s)));
   const [a, b] = segmentAt(chain, i);
@@ -288,7 +288,7 @@ function chainPointAt(chain: Chain, s: number): Point2D {
  * 位置 from〜to(to ≧ from。閉じた連なりでは、巻き込んで、length を超えてよい)の、頂点の並び。
  * startPoint・endPoint は、両端の座標(交点の座標をそのまま使うため)。無ければ、位置から求める。
  */
-function chainSlice(chain: Chain, from: number, to: number, startPoint: Point2D | null = null, endPoint: Point2D | null = null): Point2D[] {
+export function chainSlice(chain: Chain, from: number, to: number, startPoint: Point2D | null = null, endPoint: Point2D | null = null): Point2D[] {
   const n = chain.vertices.length;
   const points: Point2D[] = [];
   points.push(startPoint ?? chainPointAt(chain, ((from % segmentCount(chain)) + segmentCount(chain)) % segmentCount(chain)));
@@ -313,7 +313,7 @@ export type TrimResult =
 
 export const NO_INTERSECTION_REASON = "クリックした図形と交わる境界がありません";
 
-const sameStyle = <T extends CadEntity>(entity: T): Omit<T, "type"> => {
+export const sameStyle = <T extends CadEntity>(entity: T): Omit<T, "type"> => {
   const { type: _type, ...rest } = entity;
   void _type;
   return rest as Omit<T, "type">;
@@ -403,7 +403,7 @@ export function trimEntity(target: CadEntity, click: Point2D, edges: readonly Ed
   return { ok: false, reason: `${target.type} は、トリムできません(線・円弧・円・折れ線が対象です)` };
 }
 
-function normalizeAngleValue(angle: number): number {
+export function normalizeAngleValue(angle: number): number {
   const wrapped = ((angle % TWO_PI) + TWO_PI) % TWO_PI;
   return wrapped;
 }

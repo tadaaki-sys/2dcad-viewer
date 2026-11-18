@@ -46,6 +46,8 @@ import { createAppEditing } from "./app/document/appEditing";
 import { createEditability } from "./app/document/editability";
 import type { Editability, EditabilitySource } from "./app/document/editability";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "./app/document/editing";
+import { breakAt } from "./app/document/breaking";
+import { offsetAt } from "./app/document/offsetting";
 import { trimOrExtendAt } from "./app/document/trimming";
 import type { EditOutcome } from "./app/document/editing";
 import { NO_EDITING } from "./app/commands/types";
@@ -122,6 +124,11 @@ export default function App() {
   const visibleLayerNames = useMemo(() => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)), [layers]);
   // 図面のクリックの、図形を指す許容距離(図面上の長さ。クリックのたびに、画面の拡大率から受け取る)
   const pickToleranceRef = useRef(1);
+  // コマンドが、クリックの位置の図形を探すときに使う(表示中のレイヤー)。最新の値を、再描画なしで読めるように入れ物に入れる
+  const visibleLayerNamesRef = useRef<ReadonlySet<string>>(visibleLayerNames);
+  useLayoutEffect(() => {
+    visibleLayerNamesRef.current = visibleLayerNames;
+  });
   const [cadModel, setCadModel] = useState<CadModel | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point2D | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<string>>(new Set());
@@ -207,6 +214,8 @@ export default function App() {
         getSession: () => documentSessionRef.current,
         getEditability: () => editabilityRef.current,
         getSelection: () => selectedIdsRef.current,
+        getVisibleLayerNames: () => visibleLayerNamesRef.current,
+        getPickTolerance: () => pickToleranceRef.current,
       }),
       allocateEntityId: () => {
         const session = documentSessionRef.current;
@@ -584,7 +593,9 @@ export default function App() {
         request.type === "copyEntities" ||
         request.type === "deleteEntities" ||
         request.type === "stretchEntities" ||
-        request.type === "trimAt";
+        request.type === "trimAt" ||
+        request.type === "offsetEntity" ||
+        request.type === "breakEntity";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -633,6 +644,12 @@ export default function App() {
           applyEdit((session, editability) =>
             trimOrExtendAt(session, editability, request.mode, request.point, pickToleranceRef.current, request.edgeIds, visibleLayerNames),
           );
+          break;
+        case "offsetEntity":
+          applyEdit((session, editability) => offsetAt(session, editability, request.id, request.distance, request.point));
+          break;
+        case "breakEntity":
+          applyEdit((session, editability) => breakAt(session, editability, request.id, request.first, request.second));
           break;
         case "undo":
           performHistoryStep("undo");

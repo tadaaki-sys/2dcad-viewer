@@ -6,25 +6,23 @@
 //       (3) core/geometry/trim.ts で、切り取り・延長の結果を求める
 //       (4) 結果を適用する: 1つ残る=置き換え、2つに分かれる=置き換え + 追加(2つ目は、新しい図形)、無くなる=削除
 // 元データとの対応は、形が変わったので reshaped の印を付ける(分かれた2つ目も、同じ元の記録を指す。コピーと同じ規則)。
-import { removeEntitiesChangeSet, replaceEntitiesChangeSet } from "../../core/history";
-import type { ChangeSet } from "../../core/history";
 import { indexOfEntity } from "../../core/model";
 import type { EntityId } from "../../core/model";
-import { findEntitiesNearPoint } from "../../core/selection/Selection";
 import { edgePrimitivesOf, extendEntity, NO_INTERSECTION_REASON, trimEntity } from "../../core/geometry/trim";
 import type { EdgePrimitive, TrimResult } from "../../core/geometry/trim";
 import { BOUNDS_STRIDE, computeAllEntityBounds } from "../../core/spatial/entityBounds";
 import type { CadEntity, Point2D } from "../../types/cad";
 import type { Editability } from "./editability";
 import type { DocumentSession } from "./documentSession";
-import { reshapedSourceRecord } from "./editing";
+import { applyPieces } from "./pieces";
+import { CURVE_TYPES, pickEntityAt } from "./picking";
 import type { EditOutcome } from "./editing";
 
 export type TrimMode = "trim" | "extend";
 
 const MODE_NAME: Record<TrimMode, string> = { trim: "トリム", extend: "延長" };
 /** 対象にできる図形の種類(ほかは、理由つきで断る) */
-const SUPPORTED_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["LINE", "ARC", "CIRCLE", "LWPOLYLINE", "POLYLINE"]);
+const SUPPORTED_TYPES = CURVE_TYPES;
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number };
 
@@ -99,36 +97,14 @@ export function trimOrExtendAt(
   visibleLayerNames: ReadonlySet<string>,
 ): EditOutcome {
   const name = MODE_NAME[mode];
-  if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !(toleranceWorld > 0) || !Number.isFinite(toleranceWorld)) {
-    return { ok: false, message: `${name}できませんでした: クリックの位置が正しくありません` };
-  }
   const document = session.document;
   const entities = document.entities;
   const bounds = computeAllEntityBounds(entities);
 
-  // (1) クリックの位置の図形。範囲が点の近くにあるものだけを、距離で調べる(全図形の距離を計算しない)
-  const near: CadEntity[] = [];
-  for (let i = 0, o = 0; i < entities.length; i++, o += BOUNDS_STRIDE) {
-    if (point.x >= bounds[o] - toleranceWorld && point.x <= bounds[o + 2] + toleranceWorld && point.y >= bounds[o + 1] - toleranceWorld && point.y <= bounds[o + 3] + toleranceWorld) near.push(entities[i]);
-  }
-  const hits = findEntitiesNearPoint(near, visibleLayerNames, point, toleranceWorld);
-  if (hits.length === 0) return { ok: false, message: `${name}: クリックした所に図形がありません(図形の線の上をクリックしてください)` };
-  let target: CadEntity | null = null;
-  let firstReason: string | null = null;
-  for (const hit of hits) {
-    const why = editability.reasonFor(hit.id);
-    if (why !== null) {
-      firstReason ??= why;
-      continue;
-    }
-    if (!SUPPORTED_TYPES.has(hit.type)) {
-      firstReason ??= `${hit.type} は、${name}できません(線・円弧・円・折れ線が対象です)`;
-      continue;
-    }
-    target = hit;
-    break;
-  }
-  if (target === null) return { ok: false, message: `${name}できません: ${firstReason ?? "対象にできる図形がありません"}` };
+  // (1) クリックの位置の図形(いちばん近い、編集できる、対象の種類のもの)
+  const picked = pickEntityAt(session, editability, point, toleranceWorld, visibleLayerNames, SUPPORTED_TYPES, name, bounds);
+  if (!picked.ok) return picked;
+  const target = picked.entity;
 
   // (2) 境界(対象の図形自身は除く)。範囲が、対象に関わらないものは、調べない
   const targetIndex = indexOfEntity(document, target.id);
@@ -154,49 +130,10 @@ export function trimOrExtendAt(
     return { ok: false, message: `${name}できませんでした: ${error instanceof Error ? error.message : String(error)}` };
   }
   if (!result.ok) return { ok: false, message: `${name}できません: ${result.reason}` };
-  if (result.pieces.some((piece) => !isFinitePiece(piece))) return { ok: false, message: `${name}できませんでした: 結果の座標が正しくありません` };
 
-  // (4) 適用
-  const record = reshapedSourceRecord(target);
-  const withRecord = (entity: CadEntity): CadEntity => (record === undefined ? entity : { ...entity, sourceRecord: record });
+  // (4) 適用(結果の座標が有限かの確認も、ここで行う)
   const label = mode === "trim" ? "図形をトリム" : "図形を延長";
-  let changeSet: ChangeSet;
-  let detail: string;
-  try {
-    if (result.pieces.length === 0) {
-      changeSet = removeEntitiesChangeSet(document, [target.id], label);
-      detail = "(切り取る部分が図形の全体だったため、図形を削除しました)";
-    } else {
-      const replace = replaceEntitiesChangeSet(document, [withRecord(result.pieces[0])], label);
-      if (result.pieces.length === 1) {
-        changeSet = replace;
-        detail = "";
-      } else {
-        // 2つに分かれた: 2つ目は、新しい図形。元の図形のすぐ上の描画順に入れる
-        const second = { ...withRecord(result.pieces[1]), id: session.allocateEntityId() } as CadEntity;
-        changeSet = { label, changes: [...replace.changes, { kind: "add", entity: second, index: targetIndex + 1 }] };
-        detail = "(2つの図形に分かれました)";
-      }
-    }
-  } catch (error) {
-    return { ok: false, message: `${name}できませんでした: ${error instanceof Error ? error.message : String(error)}` };
-  }
-  const outcome = session.apply(changeSet);
-  if (!outcome.ok) return { ok: false, message: `${name}できませんでした: ${outcome.error}` };
-  return { ok: true, message: `図形を${name}しました${detail}` };
-}
-
-/** 結果の図形の座標が、すべて有限か(桁あふれ・計算の失敗で、壊れた図形を作らないための確認) */
-function isFinitePiece(entity: CadEntity): boolean {
-  switch (entity.type) {
-    case "LINE":
-      return [entity.start.x, entity.start.y, entity.end.x, entity.end.y].every(Number.isFinite);
-    case "LWPOLYLINE":
-    case "POLYLINE":
-      return entity.vertices.every((v) => Number.isFinite(v.x) && Number.isFinite(v.y));
-    case "ARC":
-      return [entity.center.x, entity.center.y, entity.radius, entity.startAngle, entity.endAngle].every(Number.isFinite);
-    default:
-      return true;
-  }
+  const applied = applyPieces(session, target, result.pieces, label, name, "(切り取る部分が図形の全体だったため、図形を削除しました)");
+  if (!applied.ok) return applied;
+  return { ok: true, message: `図形を${name}しました${applied.detail}` };
 }

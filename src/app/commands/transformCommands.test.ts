@@ -9,6 +9,7 @@ import { createEditability, resolveEditTargets } from "../document/editability";
 import { createAppCommandSession } from "./builtinCommands";
 import { makeContext } from "./testHelpers";
 import { MAX_SCALE_FACTOR, MIN_SCALE_FACTOR } from "./transformCommands";
+import { NO_EDITING } from "./types";
 import type { AppEditing, AppRequest } from "./types";
 
 const base = { layer: "0", color: "#ffffff" };
@@ -34,6 +35,9 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
       return resolveEditTargets(editability, touching);
     },
     createStretchPreview: (ids, window) => createStretchPreview(ENTITIES.filter((entity) => ids.includes(entity.id)), window),
+    pickEntity: NO_EDITING.pickEntity,
+    createOffsetPreview: NO_EDITING.createOffsetPreview,
+    createBreakPreview: NO_EDITING.createBreakPreview,
     ...overrides,
   };
   return createAppCommandSession(() => makeContext({ editing }));
