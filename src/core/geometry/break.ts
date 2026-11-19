@@ -36,7 +36,8 @@ function nearestOnChain(chain: Chain, p: Point2D): { s: number; point: Point2D }
     const ux = dx / scale;
     const uy = dy / scale;
     const raw = (((p.x - a.x) / scale) * ux + ((p.y - a.y) / scale) * uy) / (ux * ux + uy * uy);
-    if (!Number.isFinite(raw)) return null;
+    // 割合が ±Infinity(点が、線分に比べて極端に遠い)でも、端への射影は決まる(クランプ)。NaN(Infinity − Infinity など)は、求められない
+    if (Number.isNaN(raw)) return null;
     let t = clamp(raw, 0, 1);
     let x: number;
     let y: number;

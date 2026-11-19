@@ -36,7 +36,12 @@ export function applyPieces(session: DocumentSession, target: CadEntity, pieces:
   if (pieces.some((piece) => !isFinitePiece(piece))) return { ok: false, message: `${name}できませんでした: 結果の座標が正しくありません` };
   const document = session.document;
   const record = reshapedSourceRecord(target);
-  const withRecord = (entity: CadEntity): CadEntity => (record === undefined ? entity : { ...entity, sourceRecord: record });
+  // 結果の図形が、もとの記録を持っていても、いったん外して、対応を付け直す(対応を持たない図形には、付けない)
+  const withRecord = (entity: CadEntity): CadEntity => {
+    const { sourceRecord: _inherited, ...shape } = entity;
+    void _inherited;
+    return (record === undefined ? shape : { ...shape, sourceRecord: record }) as CadEntity;
+  };
   let changeSet: ChangeSet;
   let detail: string;
   try {

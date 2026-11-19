@@ -398,6 +398,22 @@ describe("offsetEntity: Codex review fixes (Phase 12)", () => {
   });
 });
 
+describe("offsetEntity: Codex re-review fixes (Phase 12)", () => {
+  it("many tiny segments far from the origin are checked in a short time (the grid is counted from the figure's own corner, not from the origin)", () => {
+    // 座標 1e9 の位置に、半径 0.5 の小さな円(3万頂点)。絶対座標で格子の幅を決めると、幅が 1 以上になり、全線分が同じ升に集まる
+    const n = 30_000;
+    const points: Point2D[] = [];
+    for (let i = 0; i < n; i++) points.push(pt(1e9 + 0.5 * Math.cos((2 * Math.PI * i) / n), 1e9 + 0.5 * Math.sin((2 * Math.PI * i) / n)));
+    const started = performance.now();
+    const result = offsetEntity(poly(points, true), 0.01, -1);
+    const elapsed = performance.now() - started;
+    // 座標 1e9 に対して、0.01 は、許容(座標 × 1e-14 = 1e-5)の 1000 倍。検証できる
+    expect(result.ok).toBe(true);
+    // 単独で約0.2秒。幅を絶対座標で決めると、全線分が同じ升に集まって、数十秒かかる
+    expect(elapsed).toBeLessThan(4_000);
+  }, 120_000);
+});
+
 describe("offsetEntity: size", () => {
   it("a 100,000-vertex polyline (an imported arc-like curve) is offset in a short time", () => {
     const n = 100_000;

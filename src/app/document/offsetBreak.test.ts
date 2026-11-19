@@ -7,7 +7,7 @@ import { breakAt } from "./breaking";
 import { createEditability } from "./editability";
 import { DocumentSession } from "./documentSession";
 import { offsetAt } from "./offsetting";
-import { isFinitePiece } from "./pieces";
+import { applyPieces, isFinitePiece } from "./pieces";
 
 const LAYERS: CadLayer[] = [{ name: "0", color: "#ffffff", visible: true }, { name: "WALL", color: "#00ff00", visible: true }];
 const base = { layer: "0", color: "#ffffff" };
@@ -140,6 +140,16 @@ describe("results with non-finite numbers are never applied", () => {
   it("a click on the extension of a line gives an honest reason", () => {
     const { session, editability } = setup();
     expect(offsetAt(session, editability, "e0", 10, pt(500, 0))).toMatchObject({ ok: false, message: expect.stringContaining("延長線の上") });
+  });
+});
+
+describe("applyPieces", () => {
+  it("a piece that carries a source record gets it replaced; for a new figure without one, none is left", () => {
+    const fresh = setup([{ ...base, id: "n9", type: "LINE", start: pt(0, 800), end: pt(100, 800) }]);
+    const target = get(fresh.session, "n9") as CadEntity;
+    const stray = { ...target, sourceRecord: { id: "e0", matrix: IDENTITY_MATRIX } } as CadEntity;
+    expect(applyPieces(fresh.session, target, [stray], "test", "テスト", "")).toEqual({ ok: true, detail: "" });
+    expect(get(fresh.session, "n9")?.sourceRecord).toBeUndefined();
   });
 });
 

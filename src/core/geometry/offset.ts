@@ -308,14 +308,29 @@ class SegmentGrid {
   private queryId = 0;
   private readonly segments: ReadonlyArray<readonly [Point2D, Point2D]>;
   private readonly cell: number;
+  private readonly originX: number;
+  private readonly originY: number;
 
   constructor(segments: ReadonlyArray<readonly [Point2D, Point2D]>, cell: number) {
     this.segments = segments;
-    // 格子の番号が 2^53 を超えると、番号を1つ進める操作(x++)が効かず、ループが終わらない。座標の大きさ ÷ 格子の幅 が 1e9 以下になるよう、幅を広げる
-    // (巨大な座標の図形では、格子が粗くなって遅くなるだけで、結果は変わらない)
-    let largest = 0;
-    for (const [a, b] of segments) largest = Math.max(largest, Math.abs(a.x), Math.abs(a.y), Math.abs(b.x), Math.abs(b.y));
-    this.cell = Math.max(cell, largest / 1e9);
+    // 格子の番号は、図形の左下(最小の座標)からの距離で数える。絶対座標で数えると、座標が大きい図形(1e20 など)で、番号が 2^53 を超え、
+    // 番号を1つ進める操作(x++)が効かず、ループが終わらない。幅も、絶対座標ではなく、図形の広がり ÷ 1e9 以上に保つ
+    // (座標が大きいだけの図形で、幅が広がって、細かい線分が同じ升に集まり、遅くならないように)
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const [a, b] of segments) {
+      minX = Math.min(minX, a.x, b.x);
+      maxX = Math.max(maxX, a.x, b.x);
+      minY = Math.min(minY, a.y, b.y);
+      maxY = Math.max(maxY, a.y, b.y);
+    }
+    this.originX = Number.isFinite(minX) ? minX : 0;
+    this.originY = Number.isFinite(minY) ? minY : 0;
+    const extent = Math.max(maxX - minX, maxY - minY);
+    const widened = Math.max(cell, Number.isFinite(extent) ? extent / 1e9 : 0);
+    this.cell = Number.isFinite(widened) && widened > 0 ? widened : 1;
     this.stamp = new Int32Array(segments.length);
     segments.forEach(([a, b], i) => {
       const [x0, x1, y0, y1] = this.range(Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.y, b.y), Math.max(a.y, b.y));
@@ -335,7 +350,12 @@ class SegmentGrid {
   }
 
   private range(minX: number, maxX: number, minY: number, maxY: number): [number, number, number, number] {
-    return [Math.floor(minX / this.cell), Math.floor(maxX / this.cell), Math.floor(minY / this.cell), Math.floor(maxY / this.cell)];
+    return [
+      Math.floor((minX - this.originX) / this.cell),
+      Math.floor((maxX - this.originX) / this.cell),
+      Math.floor((minY - this.originY) / this.cell),
+      Math.floor((maxY - this.originY) / this.cell),
+    ];
   }
 
   /** 範囲に触れうる線分の番号を、1回ずつ渡す。visit が true を返したら、そこで止める(戻り値も true) */
@@ -348,7 +368,9 @@ class SegmentGrid {
     };
     for (const index of this.wide) if (once(index)) return true;
     const [x0, x1, y0, y1] = this.range(minX, maxX, minY, maxY);
-    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 64) {
+    // 範囲が広い、または、番号が安全な整数の範囲を超える(非有限を含む): すべての線分を調べる(番号を進めるループに入らない)
+    const safe = Math.abs(x0) <= 2 ** 50 && Math.abs(x1) <= 2 ** 50 && Math.abs(y0) <= 2 ** 50 && Math.abs(y1) <= 2 ** 50;
+    if (!safe || (x1 - x0 + 1) * (y1 - y0 + 1) > 64) {
       // 範囲が広い: すべての線分を調べる
       for (let i = 0; i < this.segments.length; i++) if (once(i)) return true;
       return false;

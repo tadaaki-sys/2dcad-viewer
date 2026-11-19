@@ -222,6 +222,14 @@ describe("breakEntity: Codex review fixes (Phase 12)", () => {
     expect(breakEntity(line(-1.7e308, 0, 1.7e308, 0), pt(0, 0), pt(10, 0))).toEqual({ ok: false, reason: BREAK_UNCOMPUTABLE_REASON });
   });
 
+  it("a point extremely far from a tiny line still projects onto its end (the ratio overflows, but the end is clear)", () => {
+    const result = pieces(breakEntity(line(0, 0, 1e-9, 0), pt(5e-10, 0), pt(1e308, 0)));
+    expect(result).toHaveLength(1);
+    expect(ends(result[0])).toEqual([0, 0, 5e-10, 0]); // 第2点は終点に射影され、第1点から終点までが取り除かれる
+    // 両方とも、終点の外: 何も変わらない(「求められない」ではなく、理由が正しい)
+    expect(breakEntity(line(0, 0, 1e-9, 0), pt(1e308, 0), pt(1e308, 0))).toEqual({ ok: false, reason: BREAK_NOTHING_REASON });
+  });
+
   it("the centre of a circle or an arc has no direction: refused", () => {
     expect(breakEntity(circle(0, 0, 10), pt(0, 0), pt(0, 10))).toEqual({ ok: false, reason: BREAK_AT_CENTER_REASON });
     expect(breakEntity(circle(0, 0, 10), pt(10, 0), pt(0, 0))).toEqual({ ok: false, reason: BREAK_AT_CENTER_REASON });
