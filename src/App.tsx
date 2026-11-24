@@ -47,6 +47,7 @@ import { createEditability } from "./app/document/editability";
 import type { Editability, EditabilitySource } from "./app/document/editability";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "./app/document/editing";
 import { breakAt } from "./app/document/breaking";
+import { cornerAt } from "./app/document/filleting";
 import { offsetAt } from "./app/document/offsetting";
 import { trimOrExtendAt } from "./app/document/trimming";
 import type { EditOutcome } from "./app/document/editing";
@@ -595,7 +596,9 @@ export default function App() {
         request.type === "stretchEntities" ||
         request.type === "trimAt" ||
         request.type === "offsetEntity" ||
-        request.type === "breakEntity";
+        request.type === "breakEntity" ||
+        request.type === "filletEntities" ||
+        request.type === "chamferEntities";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -650,6 +653,14 @@ export default function App() {
           break;
         case "breakEntity":
           applyEdit((session, editability) => breakAt(session, editability, request.id, request.first, request.second));
+          break;
+        case "filletEntities":
+          applyEdit((session, editability) => cornerAt(session, editability, { kind: "fillet", radius: request.radius }, request.first, request.second));
+          break;
+        case "chamferEntities":
+          applyEdit((session, editability) =>
+            cornerAt(session, editability, { kind: "chamfer", distance1: request.distance1, distance2: request.distance2 }, request.first, request.second),
+          );
           break;
         case "undo":
           performHistoryStep("undo");

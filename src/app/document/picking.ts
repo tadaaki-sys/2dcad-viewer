@@ -1,6 +1,7 @@
 // クリックした位置にある、編集できる図形を探す(TRIM・EXTEND・OFFSET・BREAK 共通)。React にも画面にも依存しない。
 // 手順: 範囲が点の近くにあるものだけを、距離で調べる(全図形の距離を計算しない)。いちばん近い図形から順に、
 // 編集できるか・対象の種類かを見て、最初に合うものを返す。合うものが無ければ、理由つきで断る。
+import { FILLET_TYPES } from "../../core/geometry/fillet";
 import { findEntitiesNearPoint } from "../../core/selection/Selection";
 import { BOUNDS_STRIDE, computeAllEntityBounds } from "../../core/spatial/entityBounds";
 import type { CadEntity, Point2D } from "../../types/cad";
@@ -12,11 +13,21 @@ export type PickOutcome = { ok: true; entity: CadEntity } | { ok: false; message
 /** 線・円弧・円・折れ線(TRIM・OFFSET・BREAK の対象の種類) */
 export const CURVE_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["LINE", "ARC", "CIRCLE", "LWPOLYLINE", "POLYLINE"]);
 
+/** 対象の種類ごとの、断りの文に入れる呼び名 */
+const CURVE_LABEL = "線・円弧・円・折れ線";
+const CHAIN_LABEL = "線・折れ線";
+
+/** pickEntityAt に渡す、対象の種類と呼び名(kind: curve = 線・円弧・円・折れ線、chain = 線・折れ線) */
+export function pickTargetOf(kind: "curve" | "chain"): { types: ReadonlySet<CadEntity["type"]>; label: string } {
+  return kind === "chain" ? { types: FILLET_TYPES, label: CHAIN_LABEL } : { types: CURVE_TYPES, label: CURVE_LABEL };
+}
+
 /**
  * 点 point の位置にある図形(対象にできるもの)を、1つ探す。
  * @param toleranceWorld 図形を指すときの許容距離(図面上の長さ)
  * @param name 操作の名前(「トリム」など)。断りの文に使う
  * @param bounds 全図形の範囲(computeAllEntityBounds)。呼び出し側が持っているときは渡す(再計算しない)
+ * @param targetLabel 対象の種類の呼び名。断りの文に使う
  */
 export function pickEntityAt(
   session: DocumentSession,
@@ -27,6 +38,7 @@ export function pickEntityAt(
   supportedTypes: ReadonlySet<CadEntity["type"]>,
   name: string,
   bounds: ArrayLike<number> = computeAllEntityBounds(session.document.entities),
+  targetLabel: string = CURVE_LABEL,
 ): PickOutcome {
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !(toleranceWorld > 0) || !Number.isFinite(toleranceWorld)) {
     return { ok: false, message: `${name}できませんでした: クリックの位置が正しくありません` };
@@ -46,7 +58,7 @@ export function pickEntityAt(
       continue;
     }
     if (!supportedTypes.has(hit.type)) {
-      firstReason ??= `${hit.type} は、${name}できません(線・円弧・円・折れ線が対象です)`;
+      firstReason ??= `${hit.type} は、${name}できません(${targetLabel}が対象です)`;
       continue;
     }
     return { ok: true, entity: hit };

@@ -16,7 +16,7 @@ function session(isDocumentOpen = true) {
 describe("built-in commands", () => {
   it("registers every command without name conflicts", () => {
     const registry = createAppCommandRegistry();
-    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "MOVE", "COPY", "ROTATE", "DELETE", "MIRROR", "SCALE", "STRETCH", "TRIM", "EXTEND", "OFFSET", "BREAK", "TOFRONT", "TOBACK", "OSNAP", "SNAP", "GRID", "ORTHO", "POLAR", "OTRACK", "ID"]);
+    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "MOVE", "COPY", "ROTATE", "DELETE", "MIRROR", "SCALE", "STRETCH", "TRIM", "EXTEND", "OFFSET", "BREAK", "FILLET", "CHAMFER", "TOFRONT", "TOBACK", "OSNAP", "SNAP", "GRID", "ORTHO", "POLAR", "OTRACK", "ID"]);
     expect(BUILTIN_COMMANDS.every((d) => d.description.length > 0)).toBe(true);
   });
 

@@ -8,7 +8,7 @@ import type { EntityId } from "../../core/model";
 import type { CadEntity } from "../../types/cad";
 import type { AppEditing } from "../commands/types";
 import { resolveEditTargets } from "./editability";
-import { CURVE_TYPES, pickEntityAt } from "./picking";
+import { pickEntityAt, pickTargetOf } from "./picking";
 import type { Editability } from "./editability";
 import type { DocumentSession } from "./documentSession";
 
@@ -63,10 +63,11 @@ export function createAppEditing(sources: AppEditingSources): AppEditing {
       }
       return createStretchPreview(entities, window);
     },
-    pickEntity: (point, name) => {
+    pickEntity: (point, name, kind = "curve") => {
       const session = sources.getSession();
       if (session === null) return { ok: false, message: "図面の準備中です" };
-      const picked = pickEntityAt(session, sources.getEditability(), point, sources.getPickTolerance(), sources.getVisibleLayerNames(), CURVE_TYPES, name);
+      const target = pickTargetOf(kind);
+      const picked = pickEntityAt(session, sources.getEditability(), point, sources.getPickTolerance(), sources.getVisibleLayerNames(), target.types, name, undefined, target.label);
       return picked.ok ? { ok: true, id: picked.entity.id } : picked;
     },
     createOffsetPreview: (id) => {

@@ -34,7 +34,14 @@ export type AppRequest =
   /** 図形を、距離だけ、点のある側へ写す(OFFSET)。distance が null なら、点を通るように写す(通過点)。元の図形は変えず、新しい図形を追加する。1つの依頼が、Undoの1段階 */
   | { type: "offsetEntity"; id: EntityId; distance: number | null; point: Point2D }
   /** 図形を、2点の間で切断する(BREAK)。1つの依頼が、Undoの1段階 */
-  | { type: "breakEntity"; id: EntityId; first: Point2D; second: Point2D };
+  | { type: "breakEntity"; id: EntityId; first: Point2D; second: Point2D }
+  /** 2つの図形の角を、半径の円弧で丸める(FILLET)。1つの依頼が、Undoの1段階 */
+  | { type: "filletEntities"; first: CornerPick; second: CornerPick; radius: number }
+  /** 2つの図形の角を、斜めの線で面取りする(CHAMFER)。distance1 は1つ目、distance2 は2つ目の図形の上の距離。1つの依頼が、Undoの1段階 */
+  | { type: "chamferEntities"; first: CornerPick; second: CornerPick; distance1: number; distance2: number };
+
+/** 角を処理する図形を指したクリック(図形のIDと、クリックした位置) */
+export type CornerPick = { id: EntityId; point: Point2D };
 
 /** オン・オフを切り替えられるトラッキングの設定 */
 export type TrackingToggleSetting = "ortho" | "polar" | "objectTracking";
@@ -48,10 +55,13 @@ export type DrawTarget = { ok: true; layer: string; color: string } | { ok: fals
 /** 選択から、編集できる図形だけを取り出した結果 */
 export type EditTargetsInfo = { editable: readonly EntityId[]; skipped: number; reason: string | null };
 
-/** クリックした位置の図形を探した結果(OFFSET・BREAK 用) */
+/** クリックした位置の図形を探した結果(OFFSET・BREAK・FILLET・CHAMFER 用) */
 export type PickResult = { ok: true; id: EntityId } | { ok: false; message: string };
 
-/** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH・OFFSET・BREAK)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
+/** 図形を探すときの、対象の種類: curve = 線・円弧・円・折れ線(既定)、chain = 線・折れ線(FILLET・CHAMFER) */
+export type PickKind = "curve" | "chain";
+
+/** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH・OFFSET・BREAK・FILLET・CHAMFER)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
 export type AppEditing = {
   /** 図面の準備ができていて(読み込み中でなく)、編集できるか */
   ready: boolean;
@@ -67,9 +77,9 @@ export type AppEditing = {
   createStretchPreview: (ids: readonly EntityId[], window: StretchWindow) => (dx: number, dy: number) => readonly PreviewShape[];
   /**
    * 最後に図面をクリックした位置(許容距離は、そのときの拡大率から決まる)にある、編集できる線・円弧・円・折れ線を探す。
-   * name は操作の名前(「オフセット」など)で、断りの文に使う。クリックの直後(コマンドの onInput の中)で呼ぶこと
+   * name は操作の名前(「オフセット」など)で、断りの文に使う。kind は対象の種類(省略すると curve)。クリックの直後(コマンドの onInput の中)で呼ぶこと
    */
-  pickEntity: (point: Point2D, name: string) => PickResult;
+  pickEntity: (point: Point2D, name: string, kind?: PickKind) => PickResult;
   /** OFFSET の仮表示を作る関数を返す(距離[null = 通過点]とカーソルの位置を渡すと、写した形を返す) */
   createOffsetPreview: (id: EntityId) => (distance: number | null, cursor: Point2D) => readonly PreviewShape[];
   /** BREAK の仮表示を作る関数を返す(第2点を渡すと、切断したあとに残る形を返す) */

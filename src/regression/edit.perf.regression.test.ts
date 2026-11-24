@@ -7,6 +7,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DocumentSession } from "../app/document/documentSession";
 import { breakAt } from "../app/document/breaking";
+import { cornerAt } from "../app/document/filleting";
+import type { CornerMode } from "../core/geometry/fillet";
 import { offsetAt } from "../app/document/offsetting";
 import { trimOrExtendAt } from "../app/document/trimming";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "../app/document/editing";
@@ -282,6 +284,68 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.offset.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[offset perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);
+
+    it(`${entry.name}: fillet and chamfer on real figures, then Undo (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model));
+      const original = session.document.entities;
+      const count = original.length;
+      if (count === 0) return;
+      const sampleOf = (types: string[], max: number) => {
+        const all = original.filter((entity) => types.includes(entity.type));
+        const step = Math.max(1, Math.floor(all.length / max));
+        return all.filter((_, i) => i % step === 0).slice(0, max);
+      };
+      const lines = sampleOf(["LINE"], 40) as Array<Extract<(typeof original)[number], { type: "LINE" }>>;
+      const polylines = original.filter((entity) => entity.type === "LWPOLYLINE" || entity.type === "POLYLINE") as Array<Extract<(typeof original)[number], { vertices: unknown }>>;
+      const heaviest = [...polylines].sort((a, b) => b.vertices.length - a.vertices.length).slice(0, 2);
+      const sampledPolylines = [...(sampleOf(["LWPOLYLINE", "POLYLINE"], 40) as typeof polylines), ...heaviest];
+      const modes: CornerMode[] = [
+        { kind: "fillet", radius: 5 },
+        { kind: "fillet", radius: 1000 },
+        { kind: "chamfer", distance1: 5, distance2: 5 },
+        { kind: "chamfer", distance1: 3, distance2: 8 },
+      ];
+      const stats = { tried: 0, ok: 0, polylineOk: 0, linePairOk: 0, ms: 0, maxMs: 0 };
+      const expectRestored = () => {
+        expect(session.canUndo).toBe(false);
+        const now = session.document.entities;
+        expect(now.length).toBe(count);
+        for (let i = 0; i < count; i++) {
+          if (now[i] !== original[i]) throw new Error(`Undo で元に戻りません(${i} 番目)`);
+        }
+      };
+      const run = (mode: CornerMode, first: { id: string; point: { x: number; y: number } }, second: { id: string; point: { x: number; y: number } }, added: boolean, kind: "polylineOk" | "linePairOk") => {
+        const timed = time(() => cornerAt(session, ALL_EDITABLE, mode, first, second));
+        stats.tried++;
+        stats.ms += timed.ms;
+        stats.maxMs = Math.max(stats.maxMs, timed.ms);
+        if (timed.value.ok) {
+          stats.ok++;
+          stats[kind]++;
+          // 折れ線は、置き換えるだけ(図形は増えない)。2本の線は、円弧・面取りの線を1つ足す(半径・距離 0 のときは足さない)
+          expect(session.document.entities.length).toBe(count + (added ? 1 : 0));
+          expect(session.undo().type).toBe("done");
+        }
+        expectRestored();
+      };
+      const mid = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      for (const polyline of sampledPolylines) {
+        const v = polyline.vertices as Array<{ x: number; y: number }>;
+        if (v.length < 3) continue;
+        const j = Math.min(v.length - 2, Math.max(1, Math.floor(v.length / 2)));
+        for (const mode of modes) run(mode, { id: polyline.id, point: mid(v[j - 1], v[j]) }, { id: polyline.id, point: mid(v[j], v[j + 1]) }, false, "polylineOk");
+      }
+      for (let i = 0; i + 1 < lines.length; i++) {
+        const a = lines[i];
+        const b = lines[i + 1];
+        for (const mode of modes) run(mode, { id: a.id, point: mid(a.start, a.end) }, { id: b.id, point: mid(b.start, b.end) }, true, "linePairOk");
+      }
+      const result = { entityCount: count, polylines: sampledPolylines.length, lines: lines.length, ...stats, averageMs: round(stats.tried > 0 ? stats.ms / stats.tried : 0), maxMs: round(stats.maxMs), ms: round(stats.ms) };
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.fillet.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[fillet perf] ${entry.name}`, JSON.stringify(result));
     }, 900_000);
   }
 });

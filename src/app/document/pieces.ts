@@ -26,6 +26,17 @@ export function isFinitePiece(entity: CadEntity): boolean {
   }
 }
 
+/**
+ * 図形 entity に、元の図形 source の記録(reshaped の印つき)を付ける。entity がもとの記録を持っていても、いったん外して付け直す。
+ * source に記録が無い(新しく描いた図形)ときは、付けない。
+ */
+export function withReshapedRecord(entity: CadEntity, source: CadEntity): CadEntity {
+  const { sourceRecord: _inherited, ...shape } = entity;
+  void _inherited;
+  const record = reshapedSourceRecord(source);
+  return (record === undefined ? shape : { ...shape, sourceRecord: record }) as CadEntity;
+}
+
 export type PiecesOutcome = { ok: true; detail: string } | { ok: false; message: string };
 
 /**
@@ -35,13 +46,8 @@ export type PiecesOutcome = { ok: true; detail: string } | { ok: false; message:
 export function applyPieces(session: DocumentSession, target: CadEntity, pieces: readonly CadEntity[], label: string, name: string, removedDetail: string): PiecesOutcome {
   if (pieces.some((piece) => !isFinitePiece(piece))) return { ok: false, message: `${name}できませんでした: 結果の座標が正しくありません` };
   const document = session.document;
-  const record = reshapedSourceRecord(target);
   // 結果の図形が、もとの記録を持っていても、いったん外して、対応を付け直す(対応を持たない図形には、付けない)
-  const withRecord = (entity: CadEntity): CadEntity => {
-    const { sourceRecord: _inherited, ...shape } = entity;
-    void _inherited;
-    return (record === undefined ? shape : { ...shape, sourceRecord: record }) as CadEntity;
-  };
+  const withRecord = (entity: CadEntity): CadEntity => withReshapedRecord(entity, target);
   let changeSet: ChangeSet;
   let detail: string;
   try {

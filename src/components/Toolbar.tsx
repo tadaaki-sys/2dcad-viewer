@@ -17,7 +17,9 @@ export type DrawCommandName =
   | "TRIM"
   | "EXTEND"
   | "OFFSET"
-  | "BREAK";
+  | "BREAK"
+  | "FILLET"
+  | "CHAMFER";
 
 type ToolbarProps = {
   isDocumentOpen: boolean;
@@ -58,6 +60,8 @@ const EDIT_BUTTONS: ReadonlyArray<{ name: DrawCommandName; label: string; title:
   { name: "EXTEND", label: "延長", title: "境界まで図形を延ばす(EXTEND)。境界を選んで Enter(何も選ばずに Enter = すべて)、延ばす図形の端に近い所をクリック" },
   { name: "OFFSET", label: "オフセット", title: "図形を、距離だけ平行に複写する(OFFSET)。距離を入力(T=通過点)、図形をクリック、写す側をクリック。繰り返せます" },
   { name: "BREAK", label: "切断", title: "図形を、2点の間で切断する(BREAK)。図形をクリック(その位置が第1点)、第2点をクリック。F で第1点を指定し直せます" },
+  { name: "FILLET", label: "フィレット", title: "2本の線(または折れ線の隣り合う線分)の角を、円弧で丸める(FILLET)。半径を入力(Enter=前回の値)、1つ目・2つ目の線をクリック。繰り返せます" },
+  { name: "CHAMFER", label: "面取り", title: "2本の線(または折れ線の隣り合う線分)の角を、斜めの線で面取りする(CHAMFER)。距離1・距離2を入力(Enter=前回の値)、1つ目・2つ目の線をクリック。繰り返せます" },
   { name: "DELETE", label: "削除", title: "選択した図形を削除する(DELETE・Delete キー)。Ctrl+Z で戻せます" },
 ];
 
