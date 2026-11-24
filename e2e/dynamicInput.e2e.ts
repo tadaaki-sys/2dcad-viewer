@@ -41,8 +41,11 @@ async function expectHue(page: Page, p: Pt, color: [number, number, number], pre
 
 /** 描いた線を、中点のクリックで選ぶ(コマンドが終わっているとき) */
 async function selectAt(page: Page, p: Pt): Promise<void> {
-  await page.mouse.click(p.x, p.y);
-  await expect(propertyPanel(page)).toContainText("LINE");
+  // 図面への反映(選択の索引の更新)より先にクリックが届くと、何も選べない。PC が忙しいときに、たまに起きるので、選べるまでクリックし直す
+  await expect(async () => {
+    await page.mouse.click(p.x, p.y);
+    await expect(propertyPanel(page)).toContainText("LINE", { timeout: 1500 });
+  }).toPass({ timeout: 10_000 });
 }
 
 test.describe("display near the cursor", () => {

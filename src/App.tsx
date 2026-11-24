@@ -48,6 +48,12 @@ import type { Editability, EditabilitySource } from "./app/document/editability"
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "./app/document/editing";
 import { breakAt } from "./app/document/breaking";
 import { cornerAt } from "./app/document/filleting";
+import { editTextContent } from "./app/document/texting";
+import { currentTextStyle, DEFAULT_TEXT_STYLE } from "./core/text/textStyle";
+import type { TextStyleTable } from "./core/text/textStyle";
+import { loadTextStyleTable, saveTextStyleTable } from "./utils/textStyleStorage";
+import { TextInputPanel } from "./components/TextInputPanel";
+import { TextStylePanel } from "./components/TextStylePanel";
 import { offsetAt } from "./app/document/offsetting";
 import { trimOrExtendAt } from "./app/document/trimming";
 import type { EditOutcome } from "./app/document/editing";
@@ -171,6 +177,7 @@ export default function App() {
       isDocumentOpen,
       drawTarget: { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
       editing: NO_EDITING,
+      textStyle: DEFAULT_TEXT_STYLE,
       allocateEntityId: () => {
         throw new Error("図面の準備ができていません");
       },
@@ -201,6 +208,12 @@ export default function App() {
   useEffect(() => {
     saveTrackingSettings(trackingSettings);
   }, [trackingSettings]);
+  // 文字スタイルの一覧と、現在のスタイル(TEXT・MTEXT で描く文字の見た目)。同じく、このブラウザに保存する。TEXTSTYLE で、管理パネルを開く
+  const [textStyles, setTextStyles] = useState<TextStyleTable>(loadTextStyleTable);
+  useEffect(() => {
+    saveTextStyleTable(textStyles);
+  }, [textStyles]);
+  const [showTextStyles, setShowTextStyles] = useState(false);
   useEffect(() => {
     commands.setContext({
       isDocumentOpen,
@@ -223,8 +236,9 @@ export default function App() {
         if (session === null) throw new Error("図面の準備ができていません");
         return session.allocateEntityId();
       },
+      textStyle: currentTextStyle(textStyles),
     });
-  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress]);
+  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress, textStyles]);
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
@@ -598,7 +612,8 @@ export default function App() {
         request.type === "offsetEntity" ||
         request.type === "breakEntity" ||
         request.type === "filletEntities" ||
-        request.type === "chamferEntities";
+        request.type === "chamferEntities" ||
+        request.type === "editText";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -661,6 +676,12 @@ export default function App() {
           applyEdit((session, editability) =>
             cornerAt(session, editability, { kind: "chamfer", distance1: request.distance1, distance2: request.distance2 }, request.first, request.second),
           );
+          break;
+        case "editText":
+          applyEdit((session, editability) => editTextContent(session, editability, request.id, request.text));
+          break;
+        case "openTextStyles":
+          setShowTextStyles(true);
           break;
         case "undo":
           performHistoryStep("undo");
@@ -822,6 +843,16 @@ export default function App() {
   const handleCommandCancel = useCallback(() => {
     applyCommandResult(commandSession.cancel());
   }, [applyCommandResult, commandSession]);
+
+  /** 文字の入力パネルで確定した文字を、コマンドへ渡す(空・長すぎるときは、コマンドが理由を出して、同じ段階で待つ) */
+  const handleTextEditorSubmit = useCallback(
+    (text: string) => {
+      const result = commandSession.submitText(text);
+      applyCommandResult(result);
+      focusCommandLineFor(result);
+    },
+    [applyCommandResult, commandSession, focusCommandLineFor],
+  );
 
   /** 図面のクリックで点が指示された */
   const handlePointPick = useCallback(
@@ -1107,6 +1138,17 @@ export default function App() {
               area={canvasAreaSize}
             />
           )}
+          {activeCommand?.textEditor != null && (
+            <TextInputPanel
+              key={commandRevision}
+              title={activeCommand.prompt}
+              multiline={activeCommand.textEditor.multiline}
+              initial={activeCommand.textEditor.initial}
+              onSubmit={handleTextEditorSubmit}
+              onCancel={handleCommandCancel}
+            />
+          )}
+          {showTextStyles && <TextStylePanel table={textStyles} onChange={setTextStyles} onClose={() => setShowTextStyles(false)} />}
           {import.meta.env.DEV && (
             <PerformanceOverlay
               cadCanvasRef={cadCanvasRef}

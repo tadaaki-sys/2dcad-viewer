@@ -8,7 +8,8 @@ import type { PreviewShape } from "../../core/commands";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 import { drawGrid, drawSnapMarker } from "./snapMarker";
 import { drawTracking } from "./trackingRender";
-import { TEXT_LINE_HEIGHT_FACTOR } from "../../core/geometry/entityGeometry";
+import { layoutTextLines, TEXT_LINE_HEIGHT_FACTOR } from "../../core/text/textLayout";
+import { cssFontFamily } from "../../core/text/textStyle";
 import { BOUNDS_STRIDE } from "../../core/spatial/entityBounds";
 
 const LINE_WIDTH_PX = 1;
@@ -206,7 +207,8 @@ function drawTextEntity(ctx: CanvasRenderingContext2D, camera: Camera, entity: C
   if (!(fontSizePx >= MIN_TEXT_RENDER_PX)) return;
 
   const screenPosition = camera.worldToScreen(entity.position);
-  const lines = entity.text.length > 0 ? entity.text.split("\n") : [""];
+  // 行の分け方は、選択範囲の計算と同じ関数(MTEXT の枠の幅で折り返す)
+  const lines = layoutTextLines(entity);
   const lineHeightPx = fontSizePx * TEXT_LINE_HEIGHT_FACTOR;
 
   ctx.save();
@@ -216,7 +218,7 @@ function drawTextEntity(ctx: CanvasRenderingContext2D, camera: Camera, entity: C
   // 幅係数は文字の進行方向(回転後のX方向)だけを伸縮する。基準点は原点なので配置は変わらない
   if (entity.widthFactor !== undefined && entity.widthFactor !== 1) ctx.scale(entity.widthFactor, 1);
   ctx.fillStyle = color;
-  ctx.font = `${fontSizePx}px sans-serif`;
+  ctx.font = `${entity.italic === true ? "italic " : ""}${fontSizePx}px ${cssFontFamily(entity.fontFamily)}`;
   ctx.textAlign = entity.horizontalAlign;
 
   if (entity.verticalAlign === "baseline") {

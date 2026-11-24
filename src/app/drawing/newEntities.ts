@@ -1,7 +1,8 @@
 // 作図コマンドが作る、新しい図形(線・ポリライン・長方形・円・円弧)。React にも画面にも依存しない。
 // 色は、取り込んだ図形と同じく、レイヤーの色を数値にして持つ(保存の Phase で、レイヤー色の指定(BYLAYER)へ戻す)。
 import type { ArcShape } from "../../core/geometry/construct";
-import type { CadArc, CadCircle, CadLine, CadPolyline, Point2D } from "../../types/cad";
+import type { TextStyle } from "../../core/text/textStyle";
+import type { CadArc, CadCircle, CadLine, CadPolyline, CadText, Point2D } from "../../types/cad";
 
 /** 新しい図形の見た目(現在のレイヤーと、その色) */
 export type DrawingStyle = { layer: string; color: string };
@@ -44,6 +45,39 @@ export function makeArc(id: string, arc: ArcShape, style: DrawingStyle): CadArc 
     radius: arc.radius,
     startAngle: arc.startAngle,
     endAngle: arc.endAngle,
+  };
+}
+
+/**
+ * 文字(TEXT・MTEXT)。描いたときの文字スタイルの値を、そのまま持つ(コピー)。スタイル名は記録するだけ。
+ * boxWidth を渡すと、複数行文字(MTEXT)になる(枠の幅で折り返す。垂直の配置は、枠の上に合わせて top にする)。
+ */
+export function makeText(
+  id: string,
+  position: Point2D,
+  text: string,
+  rotation: number,
+  textStyle: TextStyle,
+  style: DrawingStyle,
+  boxWidth?: number,
+): CadText {
+  const multiline = boxWidth !== undefined;
+  return {
+    id,
+    type: "TEXT",
+    layer: style.layer,
+    color: style.color,
+    position: { ...position },
+    text,
+    height: textStyle.height,
+    ...(textStyle.widthFactor !== 1 ? { widthFactor: textStyle.widthFactor } : {}),
+    rotation,
+    horizontalAlign: textStyle.horizontalAlign,
+    verticalAlign: multiline ? "top" : textStyle.verticalAlign,
+    fontFamily: textStyle.fontFamily,
+    italic: textStyle.italic,
+    styleName: textStyle.name,
+    ...(multiline ? { boxWidth, isMText: true } : {}),
   };
 }
 

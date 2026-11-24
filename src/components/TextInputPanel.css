@@ -1,0 +1,55 @@
+.text-input-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 25;
+  transform: translateX(-50%);
+  width: min(520px, calc(100% - 32px));
+  padding: 10px 12px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.text-input-panel__title {
+  margin-bottom: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.text-input-panel__field {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 6px;
+  background: var(--color-bg, #1e1e1e);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.text-input-panel__field--multiline {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.text-input-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.text-input-panel__actions button {
+  padding: 2px 10px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text);
+  font-size: 11px;
+  cursor: pointer;
+}

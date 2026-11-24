@@ -16,9 +16,12 @@ export const CURVE_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["LINE", "ARC
 /** 対象の種類ごとの、断りの文に入れる呼び名 */
 const CURVE_LABEL = "線・円弧・円・折れ線";
 const CHAIN_LABEL = "線・折れ線";
+const TEXT_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["TEXT"]);
+const TEXT_LABEL = "文字(TEXT・MTEXT)";
 
-/** pickEntityAt に渡す、対象の種類と呼び名(kind: curve = 線・円弧・円・折れ線、chain = 線・折れ線) */
-export function pickTargetOf(kind: "curve" | "chain"): { types: ReadonlySet<CadEntity["type"]>; label: string } {
+/** pickEntityAt に渡す、対象の種類と呼び名(kind: curve = 線・円弧・円・折れ線、chain = 線・折れ線、text = 文字) */
+export function pickTargetOf(kind: "curve" | "chain" | "text"): { types: ReadonlySet<CadEntity["type"]>; label: string } {
+  if (kind === "text") return { types: TEXT_TYPES, label: TEXT_LABEL };
   return kind === "chain" ? { types: FILLET_TYPES, label: CHAIN_LABEL } : { types: CURVE_TYPES, label: CURVE_LABEL };
 }
 

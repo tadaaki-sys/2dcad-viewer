@@ -3,6 +3,7 @@ import type { CommandDefinition, CommandSession, PreviewShape } from "../../core
 import type { EntityId } from "../../core/model";
 import type { StretchWindow } from "../../core/geometry/stretch";
 import type { Affine2D, CadEntity, Point2D } from "../../types/cad";
+import type { TextStyle } from "../../core/text/textStyle";
 
 /** コマンドが、アプリに頼むこと */
 export type AppRequest =
@@ -38,7 +39,11 @@ export type AppRequest =
   /** 2つの図形の角を、半径の円弧で丸める(FILLET)。1つの依頼が、Undoの1段階 */
   | { type: "filletEntities"; first: CornerPick; second: CornerPick; radius: number }
   /** 2つの図形の角を、斜めの線で面取りする(CHAMFER)。distance1 は1つ目、distance2 は2つ目の図形の上の距離。1つの依頼が、Undoの1段階 */
-  | { type: "chamferEntities"; first: CornerPick; second: CornerPick; distance1: number; distance2: number };
+  | { type: "chamferEntities"; first: CornerPick; second: CornerPick; distance1: number; distance2: number }
+  /** 文字(TEXT・MTEXT)の内容を、新しい文字に書き換える(TEXTEDIT)。位置・スタイルは変えない。1つの依頼が、Undoの1段階 */
+  | { type: "editText"; id: EntityId; text: string }
+  /** 文字スタイルの管理パネルを開く(TEXTSTYLE) */
+  | { type: "openTextStyles" };
 
 /** 角を処理する図形を指したクリック(図形のIDと、クリックした位置) */
 export type CornerPick = { id: EntityId; point: Point2D };
@@ -58,8 +63,8 @@ export type EditTargetsInfo = { editable: readonly EntityId[]; skipped: number; 
 /** クリックした位置の図形を探した結果(OFFSET・BREAK・FILLET・CHAMFER 用) */
 export type PickResult = { ok: true; id: EntityId } | { ok: false; message: string };
 
-/** 図形を探すときの、対象の種類: curve = 線・円弧・円・折れ線(既定)、chain = 線・折れ線(FILLET・CHAMFER) */
-export type PickKind = "curve" | "chain";
+/** 図形を探すときの、対象の種類: curve = 線・円弧・円・折れ線(既定)、chain = 線・折れ線(FILLET・CHAMFER)、text = 文字(TEXTEDIT) */
+export type PickKind = "curve" | "chain" | "text";
 
 /** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH・OFFSET・BREAK・FILLET・CHAMFER)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
 export type AppEditing = {
@@ -80,6 +85,8 @@ export type AppEditing = {
    * name は操作の名前(「オフセット」など)で、断りの文に使う。kind は対象の種類(省略すると curve)。クリックの直後(コマンドの onInput の中)で呼ぶこと
    */
   pickEntity: (point: Point2D, name: string, kind?: PickKind) => PickResult;
+  /** 文字(TEXT・MTEXT)の、いまの内容と、複数行文字か。文字でない・見つからないときは null(TEXTEDIT の入力パネルの、最初の文字に使う) */
+  textOf: (id: EntityId) => { text: string; isMText: boolean } | null;
   /** OFFSET の仮表示を作る関数を返す(距離[null = 通過点]とカーソルの位置を渡すと、写した形を返す) */
   createOffsetPreview: (id: EntityId) => (distance: number | null, cursor: Point2D) => readonly PreviewShape[];
   /** BREAK の仮表示を作る関数を返す(第2点を渡すと、切断したあとに残る形を返す) */
@@ -97,6 +104,7 @@ export const NO_EDITING: AppEditing = {
   pickEntity: () => ({ ok: false, message: "図面の準備中です" }),
   createOffsetPreview: () => () => [],
   createBreakPreview: () => () => [],
+  textOf: () => null,
 };
 
 /** コマンドを始める時点のアプリの状態 */
@@ -107,6 +115,8 @@ export type AppCommandContext = {
   editing: AppEditing;
   /** 新しい図形のIDを払い出す。図面の準備ができていないときは、drawTarget が「描けない」になっていて、呼ばれない */
   allocateEntityId: () => EntityId;
+  /** 現在の文字スタイル(TEXT・MTEXT で描く文字の見た目) */
+  textStyle: TextStyle;
 };
 
 export type AppCommandDefinition = CommandDefinition<AppRequest, AppCommandContext>;

@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 import { DocumentSession } from "../app/document/documentSession";
 import { breakAt } from "../app/document/breaking";
 import { cornerAt } from "../app/document/filleting";
+import { editTextContent } from "../app/document/texting";
+import { getTextBoundingBoxCorners } from "../core/geometry/entityGeometry";
+import type { CadText } from "../types/cad";
 import type { CornerMode } from "../core/geometry/fillet";
 import { offsetAt } from "../app/document/offsetting";
 import { trimOrExtendAt } from "../app/document/trimming";
@@ -346,6 +349,47 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.fillet.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[fillet perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);
+    it(`${entry.name}: edit the content of real texts, then Undo (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model));
+      const original = session.document.entities;
+      const count = original.length;
+      const texts = original.filter((entity): entity is (typeof original)[number] & CadText => entity.type === "TEXT");
+      if (texts.length === 0) return;
+      const step = Math.max(1, Math.floor(texts.length / 200));
+      const sample = texts.filter((_, i) => i % step === 0).slice(0, 200);
+      const stats = { texts: texts.length, tried: 0, ok: 0, ms: 0, maxMs: 0, boundsMs: 0 };
+      for (const entity of sample) {
+        // 範囲の計算(選択・窓選択が使う)は、取り込んだ文字では、Phase 14 より前と同じ(行は改行だけで分ける)
+        const boundsStarted = performance.now();
+        const corners = getTextBoundingBoxCorners(entity);
+        stats.boundsMs += performance.now() - boundsStarted;
+        expect(corners).toHaveLength(4);
+        const timed = time(() => editTextContent(session, ALL_EDITABLE, entity.id, `${entity.text}*`));
+        stats.tried++;
+        stats.ms += timed.ms;
+        stats.maxMs = Math.max(stats.maxMs, timed.ms);
+        if (timed.value.ok) {
+          stats.ok++;
+          const edited = session.document.entities.find((e) => e.id === entity.id) as CadText;
+          expect(edited.text.endsWith("*")).toBe(true);
+          expect(edited.position).toEqual(entity.position);
+          expect(edited.height).toBe(entity.height);
+          expect(session.document.entities.length).toBe(count);
+          expect(session.undo().type).toBe("done");
+        }
+        expect(session.canUndo).toBe(false);
+        const now = session.document.entities;
+        expect(now.length).toBe(count);
+        for (let i = 0; i < count; i++) {
+          if (now[i] !== original[i]) throw new Error(`Undo で元に戻りません(${i} 番目)`);
+        }
+      }
+      const result = { entityCount: count, ...stats, averageMs: round(stats.tried > 0 ? stats.ms / stats.tried : 0), maxMs: round(stats.maxMs), boundsMs: round(stats.boundsMs), ms: round(stats.ms) };
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.text.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[text perf] ${entry.name}`, JSON.stringify(result));
     }, 900_000);
   }
 });

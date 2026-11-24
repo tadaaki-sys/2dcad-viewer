@@ -64,6 +64,13 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
       { label: "Text Height", value: formatMm(entity.height) },
       { label: "Content", value: entity.text.replace(/\n/g, " / ") },
     );
+    // 新しく描いた文字だけが持つ属性(取り込んだ文字には、無い)
+    if (entity.isMText === true) rows.push({ label: "Type", value: "MTEXT" });
+    if (entity.boxWidth !== undefined) rows.push({ label: "Box Width", value: formatMm(entity.boxWidth) });
+    if (entity.fontFamily !== undefined) rows.push({ label: "Font", value: entity.fontFamily });
+    if (entity.italic === true) rows.push({ label: "Italic", value: "Yes" });
+    if (entity.widthFactor !== undefined && entity.widthFactor !== 1) rows.push({ label: "Width Factor", value: String(entity.widthFactor) });
+    if (entity.styleName !== undefined) rows.push({ label: "Text Style", value: entity.styleName });
   } else if (entity.type === "SPLINE") {
     // 曲線を折れ線に近似した長さなので、実際の弧長とはわずかに異なる
     rows.push(

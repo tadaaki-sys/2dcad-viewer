@@ -82,6 +82,11 @@ export type CadVerticalAlign = "top" | "middle" | "bottom" | "baseline";
 /**
  * rotationはラジアン、+X軸からCCW方向(DXFの角度系と同じ数学的な向き)。textは複数行の場合\nを含む。
  * widthFactorは文字の横幅の倍率(DXFのTEXT幅係数)。CADは枠に収めるために0.4〜1.7などへ変えるので無視できない。省略時は1。
+ *
+ * 次の属性は、すべて任意(取り込んだ文字には付かない)。新しく描いた文字が、描いたときの文字スタイルの値をコピーして持つ:
+ * fontFamilyはCSSのフォント名(省略時はsans-serif)、italicは斜体、styleNameは描いたときのスタイル名(記録だけ)。
+ * MTEXT(複数行文字)は、isMText が true で、boxWidth(枠の幅[mm])で折り返す。枠の幅を持たない文字は、改行(\n)だけで分ける。
+ * 基準点(position)は、水平・垂直の配置に応じた、枠(または文字の外形)の位置。
  */
 export type CadText = {
   id: string;
@@ -95,6 +100,11 @@ export type CadText = {
   rotation: number;
   horizontalAlign: CadHorizontalAlign;
   verticalAlign: CadVerticalAlign;
+  fontFamily?: string;
+  italic?: boolean;
+  boxWidth?: number;
+  isMText?: boolean;
+  styleName?: string;
 };
 
 /**

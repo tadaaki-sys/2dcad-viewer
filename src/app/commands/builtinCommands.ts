@@ -7,6 +7,7 @@ import { EDIT_COMMANDS } from "./editCommands";
 import { FILLET_COMMANDS } from "./filletCommands";
 import { formatCoordinate } from "./format";
 import { OFFSET_COMMANDS } from "./offsetCommands";
+import { TEXT_COMMANDS } from "./textCommands";
 import { TRANSFORM_COMMANDS } from "./transformCommands";
 import { TRIM_COMMANDS } from "./trimCommands";
 import { NO_DOCUMENT_MESSAGE } from "./types";
@@ -59,6 +60,7 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
   ...TRIM_COMMANDS,
   ...OFFSET_COMMANDS,
   ...FILLET_COMMANDS,
+  ...TEXT_COMMANDS,
   documentCommand("TOFRONT", [], "選択中の新しい図形を最前面へ", { type: "reorder", direction: "front" }),
   documentCommand("TOBACK", [], "選択中の新しい図形を最背面へ", { type: "reorder", direction: "back" }),
   documentCommand("OSNAP", [], "図形への吸着(端点・中点など)のオン・オフ", { type: "toggleSnapSetting", setting: "objectSnap" }),

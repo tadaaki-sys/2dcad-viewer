@@ -98,6 +98,12 @@ export type PromptStep<R> =
     })
   | (PromptBase<R> & {
       expect: "text";
+      /**
+       * 指定すると、画面は、コマンドラインではなく、文字の入力パネルを出す(文字・複数行文字の内容を入力する段階用)。
+       * multiline が true なら複数行(Ctrl+Enter で確定)、false なら1行(Enter で確定)。initial は、最初に入れておく文字(編集のとき)。
+       * 入力した文字は、ふつうの TextInput として、onInput に渡る(Esc で、コマンドを取り消す)
+       */
+      editor?: { multiline: boolean; initial?: string };
       onInput: (input: TextInput) => CommandStep<R>;
     })
   | (PromptBase<R> &

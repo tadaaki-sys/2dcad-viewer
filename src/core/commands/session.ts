@@ -26,6 +26,8 @@ export type ActiveCommand = {
   numberMeaning: NumberMeaning;
   /** クリックを、吸着せず、そのままの位置で渡す段階か(図形を指す操作) */
   rawPoints: boolean;
+  /** 文字の入力パネルを出す段階なら、その指定(複数行か・最初の文字)。ふつうの段階は null */
+  textEditor: { multiline: boolean; initial: string } | null;
 };
 
 export type SessionResult<R> = {
@@ -220,6 +222,7 @@ export class CommandSession<R, C> {
       acceptsDistance: step.expect === "point" && step.acceptsDistance === true,
       numberMeaning: step.expect === "point" && step.numberMeaning !== undefined ? step.numberMeaning : "length",
       rawPoints: step.expect === "point" && step.rawPoints === true,
+      textEditor: step.expect === "text" && step.editor !== undefined ? { multiline: step.editor.multiline, initial: step.editor.initial ?? "" } : null,
     };
   }
 

@@ -24,6 +24,7 @@ const active = (overrides: Partial<ActiveCommand> = {}): ActiveCommand => ({
   acceptsDistance: false,
   numberMeaning: "length",
   rawPoints: false,
+  textEditor: null,
   ...overrides,
 });
 

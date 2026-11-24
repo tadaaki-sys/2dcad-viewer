@@ -191,7 +191,14 @@ function transformSimilar(entity: CadEntity, matrix: Affine2D, move: (p: Point2D
       return { ...entity, position: move(entity.position) };
     case "TEXT":
       // 文字は反転させない。鏡像のときは、向きを変えない
-      return { ...entity, position: move(entity.position), height: scaled(entity.height), rotation: reflecting ? entity.rotation : turn(entity.rotation) };
+      // 枠の幅(MTEXT の折り返し)も、拡大縮小に合わせて変える
+      return {
+        ...entity,
+        position: move(entity.position),
+        height: scaled(entity.height),
+        ...(entity.boxWidth !== undefined ? { boxWidth: scaled(entity.boxWidth) } : {}),
+        rotation: reflecting ? entity.rotation : turn(entity.rotation),
+      };
   }
 }
 

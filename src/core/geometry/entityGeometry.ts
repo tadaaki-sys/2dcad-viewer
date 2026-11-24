@@ -1,34 +1,12 @@
 import { normalizeArcSpan, pointOnArc, pointOnEllipse } from "./geometry";
+import { measureTextBlock } from "../text/textLayout";
 import type { CadEntity, CadText, Point2D } from "../../types/cad";
 
 // 選択のヒットテストやWindow/Crossing判定用の固定分割数(描画時の解像度とは別、ズームに依存しない)
 const FIXED_ARC_SEGMENTS_PER_FULL_CIRCLE = 48;
 
-// TEXTの選択・バウンディングボックス用の概算値(実際のグリフ幅を測るのではなく、文字種ごとの固定幅の近似)
-export const TEXT_CHAR_WIDTH_FACTOR = 0.65;
-export const TEXT_LINE_HEIGHT_FACTOR = 1.2;
-// 日本語などの全角文字は、文字高とほぼ同じ幅になる
-const FULL_WIDTH_CHAR_WIDTH_FACTOR = 1;
-const FIRST_FULL_WIDTH_CODE_POINT = 0x2e80;
-
-function estimateLineWidthInEm(line: string): number {
-  let width = 0;
-  for (const char of line) {
-    const codePoint = char.codePointAt(0) ?? 0;
-    width += codePoint >= FIRST_FULL_WIDTH_CODE_POINT ? FULL_WIDTH_CHAR_WIDTH_FACTOR : TEXT_CHAR_WIDTH_FACTOR;
-  }
-  return width;
-}
-
-function measureTextBlock(entity: CadText): { width: number; height: number; lineCount: number } {
-  const lines = entity.text.split("\n");
-  const longestLineWidthInEm = Math.max(TEXT_CHAR_WIDTH_FACTOR, ...lines.map(estimateLineWidthInEm));
-  return {
-    width: longestLineWidthInEm * entity.height * (entity.widthFactor ?? 1),
-    height: lines.length * entity.height * TEXT_LINE_HEIGHT_FACTOR,
-    lineCount: lines.length,
-  };
-}
+// TEXTの選択・バウンディングボックス用の概算(行の分け方・字幅の見積もりは、描画と同じ core/text/textLayout.ts)
+export { TEXT_CHAR_WIDTH_FACTOR, TEXT_LINE_HEIGHT_FACTOR } from "../text/textLayout";
 
 /** 基準点(position)からの相対座標系(回転前)でのバウンディングボックス。ワールドはY-upなので上方向は+Y */
 function textLocalBounds(entity: CadText): { minX: number; maxX: number; minY: number; maxY: number } {
