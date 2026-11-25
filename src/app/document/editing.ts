@@ -152,7 +152,7 @@ export function reshapedSourceRecord(entity: CadEntity): SourceRecord | undefine
 /**
  * 交差窓の中の頂点・端点を、(dx, dy)だけ動かして、図形の形を変える(STRETCH)。ids は、窓にかかる図形の候補。
  * 図形ごとの扱いは、core/geometry/stretch.ts。1つの依頼が、Undoの1段階。
- * 円弧・楕円で、一部だけが窓に入っているものは、対象外(数を知らせる)。
+ * 円弧・楕円・(半径・直径・角度の)寸法で、一部だけが窓に入っているものは、対象外(数を知らせる)。
  */
 export function stretchEntities(
   session: DocumentSession,
@@ -190,7 +190,7 @@ export function stretchEntities(
   } catch (error) {
     return { ok: false, message: `ストレッチできませんでした: ${error instanceof Error ? error.message : String(error)}` };
   }
-  const notes = `${partial > 0 ? `(円弧・楕円 ${partial} 個は、一部だけが窓に入っているため、対象外)` : ""}${skippedNote(targets.skipped, targets.reason)}`;
+  const notes = `${partial > 0 ? `(円弧・楕円・寸法 ${partial} 個は、一部だけが窓に入っているため、対象外)` : ""}${skippedNote(targets.skipped, targets.reason)}`;
   if (replacements.length === 0) return { ok: false, message: `窓の中に、動かせる頂点や図形がありません${notes}` };
 
   let changeSet;

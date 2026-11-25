@@ -23,7 +23,7 @@ function isFullSweep(span: number): boolean {
 function endpointsOf(entity: CadEntity): Point2D[] {
   if (entity.type === "LINE") return [entity.start, entity.end];
   if (entity.type === "POINT") return [entity.position]; // 点そのものが「節点」スナップの対象
-  if (entity.type === "CIRCLE" || entity.type === "TEXT") return [];
+  if (entity.type === "CIRCLE" || entity.type === "TEXT" || entity.type === "DIMENSION") return [];
   // SPLINEは近似点列の中間点を端点として拾わず、開いている場合のみ両端を返す
   if (entity.type === "SPLINE") {
     return entity.closed || entity.points.length < 2 ? [] : [entity.points[0], entity.points[entity.points.length - 1]];
@@ -59,7 +59,7 @@ function collectMidpointCandidates({ entities, visibleLayerNames, worldPoint, to
     if (!visibleLayerNames.has(entity.layer)) continue;
 
     // CIRCLE/TEXT、および全周のELLIPSEには自然な中点がないため候補を出さない。ARC/部分ELLIPSEは弧の中央角度の厳密な1点のみ(テッセレーション頂点は使わない)
-    if (entity.type === "CIRCLE" || entity.type === "TEXT" || entity.type === "SPLINE" || entity.type === "POINT") continue;
+    if (entity.type === "CIRCLE" || entity.type === "TEXT" || entity.type === "DIMENSION" || entity.type === "SPLINE" || entity.type === "POINT") continue;
     if (entity.type === "ARC") {
       const span = normalizeArcSpan(entity.startAngle, entity.endAngle);
       const midpoint = pointOnArc(entity.center, entity.radius, entity.startAngle + span / 2);

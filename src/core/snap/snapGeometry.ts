@@ -5,7 +5,7 @@ import type { CadEntity, Point2D } from "../../types/cad";
 
 /** entity上でworldPointに最も近い点。TEXTなど線を持たない図形はnull */
 export function nearestPointOnEntity(entity: CadEntity, worldPoint: Point2D): Point2D | null {
-  if (entity.type === "TEXT") return null;
+  if (entity.type === "TEXT" || entity.type === "DIMENSION") return null;
   if (entity.type === "POINT") return entity.position;
   if (entity.type === "CIRCLE" || entity.type === "ARC") {
     const dx = worldPoint.x - entity.center.x;

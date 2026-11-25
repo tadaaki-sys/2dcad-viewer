@@ -1,0 +1,102 @@
+.dimension-style-panel {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 24;
+  width: 320px;
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.dimension-style-panel__title {
+  margin-bottom: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.dimension-style-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.dimension-style-panel__input {
+  width: 80px;
+  padding: 2px 4px;
+  background: var(--color-bg, #1e1e1e);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text);
+  font-size: 12px;
+  text-align: right;
+}
+
+.dimension-style-panel__input--wide {
+  width: 150px;
+  text-align: left;
+}
+
+.dimension-style-panel select {
+  max-width: 150px;
+  background: var(--color-bg, #1e1e1e);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.dimension-style-panel__manage {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.dimension-style-panel__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.dimension-style-panel__buttons button,
+.dimension-style-panel__actions button {
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dimension-style-panel__buttons button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.dimension-style-panel__error {
+  margin-top: 6px;
+  color: #e26d5a;
+  font-size: 11px;
+}
+
+.dimension-style-panel__note {
+  margin-top: 8px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.dimension-style-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}

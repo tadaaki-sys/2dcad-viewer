@@ -1,4 +1,6 @@
-import type { CadEntity, CadPoint, CadPointStyle, CadText, LineDash, Measurement, Point2D } from "../../types/cad";
+import type { CadDimension, CadEntity, CadPoint, CadPointStyle, CadText, LineDash, Measurement, Point2D } from "../../types/cad";
+import { dimensionTextEntity, layoutDimension } from "../../core/dimension/dimensionGeometry";
+import type { DimensionLayout } from "../../core/dimension/dimensionGeometry";
 import { computeMeasurementDistances } from "../../core/measurement/Measurement";
 import { formatMm } from "../../utils/format";
 import { normalizeArcSpan, pointOnEllipse } from "../../core/geometry/geometry";
@@ -36,7 +38,7 @@ const DOT_LENGTH_PX = 1;
 type StrokeBatch = { color: string; screenDash: number[] | null; widthPx: number; path: Path2D };
 
 /** 図形の線幅(px)。太線の指定が無ければ標準の1px */
-function strokeWidthOf(entity: Exclude<CadEntity, CadText>): number {
+function strokeWidthOf(entity: Exclude<CadEntity, CadText | CadDimension>): number {
   return entity.lineWeight === undefined ? LINE_WIDTH_PX : lineWeightToScreenWidthPx(entity.lineWeight);
 }
 
@@ -158,7 +160,7 @@ function appendPointMarker(strokePath: Path2D, fillPath: Path2D, x: number, y: n
 }
 
 /** 図形1つ分のパスをpath(CanvasRenderingContext2DまたはPath2D)へ追加する */
-function appendEntity(path: CanvasPath, entity: Exclude<CadEntity, CadText>, k: number, ox: number, oy: number): void {
+function appendEntity(path: CanvasPath, entity: Exclude<CadEntity, CadText | CadDimension>, k: number, ox: number, oy: number): void {
   switch (entity.type) {
     case "LINE":
       path.moveTo(entity.start.x * k + ox, oy - entity.start.y * k);
@@ -196,7 +198,7 @@ function appendEntity(path: CanvasPath, entity: Exclude<CadEntity, CadText>, k: 
 }
 
 /** 選択ハイライトなど、図形を個別にctxへ描くためのパス作成 */
-function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: Exclude<CadEntity, CadText>): void {
+function traceEntityPath(ctx: CanvasRenderingContext2D, camera: Camera, entity: Exclude<CadEntity, CadText | CadDimension>): void {
   ctx.beginPath();
   appendEntity(ctx, entity, camera.scale, camera.offsetX, camera.offsetY);
 }
@@ -233,6 +235,83 @@ function drawTextEntity(ctx: CanvasRenderingContext2D, camera: Camera, entity: C
   }
 
   ctx.restore();
+}
+
+// 寸法の形は、図形が変わらない限り同じなので、図形ごとに覚えておく(図形は、変更のたびに新しいオブジェクトになる)
+const dimensionLayoutCache = new WeakMap<CadDimension, DimensionLayout | null>();
+
+function layoutOf(entity: CadDimension): DimensionLayout | null {
+  let layout = dimensionLayoutCache.get(entity);
+  if (layout === undefined) {
+    layout = layoutDimension(entity);
+    dimensionLayoutCache.set(entity, layout);
+  }
+  return layout;
+}
+
+type DimensionBatch = { color: string; screenDash: number[] | null; lines: Path2D; arrows: Path2D };
+
+/**
+ * 寸法を描く。線(寸法線・補助線・弧)は、色と線種ごとにまとめて、矢印は塗りつぶして、数値は文字として描く。
+ * colorOverride を渡すと、その色で(選択のハイライトとして)描く。
+ */
+function drawDimensions(ctx: CanvasRenderingContext2D, camera: Camera, dimensions: readonly CadDimension[], colorOverride?: string): void {
+  const k = camera.scale;
+  const ox = camera.offsetX;
+  const oy = camera.offsetY;
+  const batches = new Map<string, DimensionBatch>();
+  const texts: Array<{ text: CadText; color: string }> = [];
+  const dashByKey = new Map<string, number[] | null>();
+  for (const entity of dimensions) {
+    const layout = layoutOf(entity);
+    if (layout === null) continue;
+    const color = colorOverride ?? entity.color;
+    let screenDash: number[] | null = null;
+    if (entity.lineDash && colorOverride === undefined) {
+      if (!dashByKey.has(entity.lineDash.key)) dashByKey.set(entity.lineDash.key, toScreenDashPattern(entity.lineDash, k));
+      screenDash = dashByKey.get(entity.lineDash.key) ?? null;
+    }
+    const key = `${color}|${screenDash === null ? "" : (entity.lineDash as LineDash).key}`;
+    let batch = batches.get(key);
+    if (!batch) {
+      batch = { color, screenDash, lines: new Path2D(), arrows: new Path2D() };
+      batches.set(key, batch);
+    }
+    for (const [a, b] of layout.segments) {
+      batch.lines.moveTo(a.x * k + ox, oy - a.y * k);
+      batch.lines.lineTo(b.x * k + ox, oy - b.y * k);
+    }
+    if (layout.arc !== null) {
+      const { center, radius, startAngle, sweep } = layout.arc;
+      const x = center.x * k + ox;
+      const y = oy - center.y * k;
+      const r = radius * k;
+      batch.lines.moveTo(x + r * Math.cos(startAngle), y - r * Math.sin(startAngle));
+      batch.lines.arc(x, y, r, -startAngle, -(startAngle + sweep), true);
+    }
+    for (const [p, q, s] of layout.arrows) {
+      batch.arrows.moveTo(p.x * k + ox, oy - p.y * k);
+      batch.arrows.lineTo(q.x * k + ox, oy - q.y * k);
+      batch.arrows.lineTo(s.x * k + ox, oy - s.y * k);
+      batch.arrows.closePath();
+    }
+    texts.push({ text: dimensionTextEntity(entity, layout), color });
+  }
+  ctx.save();
+  ctx.lineWidth = colorOverride === undefined ? LINE_WIDTH_PX : HIGHLIGHT_LINE_WIDTH_PX;
+  for (const key of Array.from(batches.keys()).sort()) {
+    const batch = batches.get(key) as DimensionBatch;
+    ctx.strokeStyle = batch.color;
+    ctx.fillStyle = batch.color;
+    ctx.setLineDash(batch.screenDash ?? []);
+    ctx.stroke(batch.lines);
+    // 矢印は、線種に関わらず、実線で塗りつぶす
+    ctx.setLineDash([]);
+    ctx.fill(batch.arrows);
+    ctx.stroke(batch.arrows);
+  }
+  ctx.restore();
+  for (const { text, color } of texts) drawTextEntity(ctx, camera, text, color);
 }
 
 /** 点を色ごとにまとめて描く(点の数だけstrokeすると、点が多い図面で遅くなるため) */
@@ -438,6 +517,7 @@ export class CanvasRenderer implements Renderer {
     const batches = new Map<string, StrokeBatch>();
     const screenDashByKey = new Map<string, number[] | null>();
     const texts: CadText[] = [];
+    const dimensions: CadDimension[] = [];
     const points: CadPoint[] = [];
     const selectedEntities: CadEntity[] = [];
     const pointStyle = model.pointStyle ?? DEFAULT_POINT_STYLE;
@@ -464,6 +544,11 @@ export class CanvasRenderer implements Renderer {
 
       if (entity.type === "TEXT") {
         texts.push(entity);
+        continue;
+      }
+      // 寸法は、通常の図形・文字より上に描く(別にためておく)
+      if (entity.type === "DIMENSION") {
+        dimensions.push(entity);
         continue;
       }
       let batchKey = entity.color;
@@ -498,6 +583,7 @@ export class CanvasRenderer implements Renderer {
     for (const text of texts) {
       drawTextEntity(ctx, camera, text, text.color);
     }
+    if (dimensions.length > 0) drawDimensions(ctx, camera, dimensions);
 
     if (points.length > 0 && !isPointHidden(pointStyle)) {
       drawPoints(ctx, camera, points, pointStyle);
@@ -509,6 +595,11 @@ export class CanvasRenderer implements Renderer {
       for (const entity of selectedEntities) {
         if (entity.type === "TEXT") {
           drawTextEntity(ctx, camera, entity, HIGHLIGHT_COLOR);
+          continue;
+        }
+        if (entity.type === "DIMENSION") {
+          drawDimensions(ctx, camera, [entity], HIGHLIGHT_COLOR);
+          ctx.lineWidth = HIGHLIGHT_LINE_WIDTH_PX;
           continue;
         }
         if (entity.type === "POINT") {

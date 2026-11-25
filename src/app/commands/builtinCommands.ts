@@ -2,6 +2,7 @@
 // 依頼(AppRequest)を実際に実行するのは画面の側(App.tsx)。
 import { CommandRegistry, CommandSession } from "../../core/commands";
 import { CIRCLE_ARC_COMMANDS } from "./circleArcCommands";
+import { DIMENSION_COMMANDS } from "./dimensionCommands";
 import { DRAW_COMMANDS } from "./drawCommands";
 import { EDIT_COMMANDS } from "./editCommands";
 import { FILLET_COMMANDS } from "./filletCommands";
@@ -61,6 +62,7 @@ export const BUILTIN_COMMANDS: readonly AppCommandDefinition[] = [
   ...OFFSET_COMMANDS,
   ...FILLET_COMMANDS,
   ...TEXT_COMMANDS,
+  ...DIMENSION_COMMANDS,
   documentCommand("TOFRONT", [], "選択中の新しい図形を最前面へ", { type: "reorder", direction: "front" }),
   documentCommand("TOBACK", [], "選択中の新しい図形を最背面へ", { type: "reorder", direction: "back" }),
   documentCommand("OSNAP", [], "図形への吸着(端点・中点など)のオン・オフ", { type: "toggleSnapSetting", setting: "objectSnap" }),

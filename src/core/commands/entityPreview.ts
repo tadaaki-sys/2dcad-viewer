@@ -1,5 +1,6 @@
 // 編集コマンド(MOVE・COPY・ROTATE)の、動かした形の仮表示(ゴム紐)を作る。図面のデータは変えない。画面にも依存しない。
 import type { Affine2D, CadEntity, Point2D } from "../../types/cad";
+import { dimensionTextEntity, layoutDimension } from "../dimension/dimensionGeometry";
 import { getEntityPoints, getTextBoundingBoxCorners } from "../geometry/entityGeometry";
 import { breakEntity } from "../geometry/break";
 import { offsetEntity, offsetSideTowards, offsetThroughPoint } from "../geometry/offset";
@@ -60,6 +61,16 @@ function shapesOf(moved: CadEntity): PreviewShape[] {
       return [{ kind: "polyline", points: getEntityPoints(moved), closed: false }];
     case "TEXT":
       return [{ kind: "polyline", points: getTextBoundingBoxCorners(moved), closed: true }];
+    case "DIMENSION": {
+      // 寸法線・補助線・矢印・弧を線として、数値は外形の枠で表す
+      const layout = layoutDimension(moved);
+      if (layout === null) return [];
+      const shapes: PreviewShape[] = layout.segments.map(([a, b]) => ({ kind: "polyline" as const, points: [a, b], closed: false }));
+      for (const arrow of layout.arrows) shapes.push({ kind: "polyline", points: [...arrow], closed: true });
+      if (layout.arc !== null) shapes.push({ kind: "arc", center: layout.arc.center, radius: layout.arc.radius, startAngle: layout.arc.startAngle, endAngle: layout.arc.startAngle + layout.arc.sweep });
+      shapes.push({ kind: "polyline", points: getTextBoundingBoxCorners(dimensionTextEntity(moved, layout)), closed: true });
+      return shapes;
+    }
     case "POINT":
       return [];
   }

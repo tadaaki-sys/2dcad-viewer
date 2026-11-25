@@ -147,7 +147,7 @@ describe("stretchEntities", () => {
     expect(result.message).toContain("4個の図形をストレッチしました");
     expect(result.message).toContain("形が変わった 1 個");
     expect(result.message).toContain("図形ごと移動 3 個");
-    expect(result.message).toContain("円弧・楕円 1 個は、一部だけが窓に入っている");
+    expect(result.message).toContain("円弧・楕円・寸法 1 個は、一部だけが窓に入っている");
     expect(result.message).toContain("編集できない図形 1 個");
   });
 
@@ -191,7 +191,7 @@ describe("stretchEntities", () => {
     const before = session.document;
     const result = stretchEntities(session, editability, ["e4"], WINDOW, 5, 0, "x");
     expect(result.ok).toBe(false);
-    expect(result.message).toContain("円弧・楕円 1 個");
+    expect(result.message).toContain("円弧・楕円・寸法 1 個");
     expect(session.document).toBe(before);
   });
 

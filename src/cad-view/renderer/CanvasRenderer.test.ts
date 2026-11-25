@@ -356,3 +356,77 @@ describe("CanvasRenderer points", () => {
     expect(ctx.fills).toHaveLength(0);
   });
 });
+
+describe("CanvasRenderer dimensions", () => {
+  const values = { textHeight: 10, arrowSize: 10, decimals: 0, angleDecimals: 1, unit: "mm", showUnit: false, extensionOffset: 5 } as const;
+  const horizontal = (extra: Partial<Extract<CadEntity, { type: "DIMENSION" }>> = {}): CadEntity => ({
+    id: "d", type: "DIMENSION", ...common, color: "#00ff00", kind: "linear", rotation: 0,
+    p1: { x: 0, y: 0 }, p2: { x: 100, y: 0 }, position: { x: 50, y: 30 }, values, ...extra,
+  });
+
+  it("strokes the lines in the entity color, fills the arrows, and writes the value as text", () => {
+    const ctx = render(makeModel([horizontal()]), camera());
+    const lines = ctx.strokes.filter((s) => s.style === "#00ff00" && s.path !== null);
+    // 線(寸法線・補助線)と、矢印の縁
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    const moves = lines[0].path!.ops.filter((op) => op[0] === "moveTo");
+    // 寸法線 1 本 + 補助線 2 本
+    expect(moves).toHaveLength(3);
+    // 矢印 2 つを、1つのパスにまとめて、塗りつぶす
+    expect(ctx.fills).toHaveLength(1);
+    expect(ctx.fills[0].style).toBe("#00ff00");
+    expect((ctx.fills[0].path as unknown as RecordingPath).ops.filter((op) => op[0] === "closePath")).toHaveLength(2);
+    expect(ctx.fillTexts).toEqual(["100"]);
+  });
+
+  it("converts the dimension line to screen coordinates with the Y axis flipped", () => {
+    const ctx = render(makeModel([horizontal()]), camera(2, 5, 100));
+    const ops = ctx.strokes.find((s) => s.path !== null)!.path!.ops;
+    // 補助線 1 本目: (0, 5) → (0, 35)。画面: x = 0 × 2 + 5、y = 100 − 5 × 2
+    expect(ops[0]).toEqual(["moveTo", 5, 90]);
+    expect(ops[1]).toEqual(["lineTo", 5, 30]);
+  });
+
+  it("is drawn after (on top of) the ordinary figures", () => {
+    const ctx = render(makeModel([horizontal(), line("l", 0, 10, 100, 10, "#ff0000")]), camera());
+    const red = ctx.strokes.findIndex((s) => s.style === "#ff0000");
+    const green = ctx.strokes.findIndex((s) => s.style === "#00ff00");
+    expect(red).toBeGreaterThanOrEqual(0);
+    expect(green).toBeGreaterThan(red);
+  });
+
+  it("uses the dash pattern of its linetype for the lines, but fills the arrows solid", () => {
+    const dash = { key: "dim:dashed:4", name: "破線", pattern: [48, 24] };
+    const ctx = render(makeModel([horizontal({ lineDash: dash })]), camera());
+    const lines = ctx.strokes.find((s) => s.path !== null && s.dash.length > 0);
+    expect(lines?.dash).toEqual([48, 24]);
+    // 矢印の縁は、実線
+    expect(ctx.strokes.some((s) => s.dash.length === 0)).toBe(true);
+  });
+
+  it("draws a selected dimension in the highlight color: lines, arrows and text", () => {
+    const ctx = render(makeModel([horizontal()]), camera(), { selectedEntityIds: new Set(["d"]) });
+    expect(ctx.strokes.every((s) => s.style === "#ffff00")).toBe(true);
+    expect(ctx.fills.every((f) => f.style === "#ffff00")).toBe(true);
+    expect(ctx.fillTexts).toEqual(["100"]);
+  });
+
+  it("an angular dimension draws its arc with the native arc call", () => {
+    const angular = horizontal({ kind: "angular", rotation: undefined, p1: { x: 0, y: 0 }, p2: { x: 100, y: 0 }, p3: { x: 0, y: 100 }, position: { x: 70, y: 70 } });
+    const ctx = render(makeModel([angular]), camera());
+    const ops = ctx.strokes.find((s) => s.path !== null)!.path!.ops;
+    const arc = ops.find((op) => op[0] === "arc");
+    expect(arc).toBeDefined();
+    expect(arc![3]).toBeCloseTo(Math.hypot(70, 70), 9);
+    expect(ctx.fillTexts).toEqual(["90.0\u00b0"]);
+  });
+
+  it("does not draw a dimension on a hidden layer, or one that cannot be computed", () => {
+    expect(render(makeModel([horizontal()]), camera(), { visibleLayerNames: new Set(["other"]) }).strokes).toHaveLength(0);
+    const broken = horizontal({ p2: { x: 0, y: 0 } });
+    const ctx = render(makeModel([broken]), camera());
+    expect(ctx.strokes).toHaveLength(0);
+    expect(ctx.fills).toHaveLength(0);
+    expect(ctx.fillTexts).toEqual([]);
+  });
+});

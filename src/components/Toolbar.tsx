@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import "./Toolbar.css";
 
 /** ツールバーから動かす作図コマンド */
@@ -23,7 +24,14 @@ export type DrawCommandName =
   | "TEXT"
   | "MTEXT"
   | "TEXTEDIT"
-  | "TEXTSTYLE";
+  | "TEXTSTYLE"
+  | "DIMHORIZONTAL"
+  | "DIMVERTICAL"
+  | "DIMALIGNED"
+  | "DIMRADIUS"
+  | "DIMDIAMETER"
+  | "DIMANGULAR"
+  | "DIMSTYLE";
 
 type ToolbarProps = {
   isDocumentOpen: boolean;
@@ -72,6 +80,77 @@ const EDIT_BUTTONS: ReadonlyArray<{ name: DrawCommandName; label: string; title:
   { name: "CHAMFER", label: "面取り", title: "2本の線(または折れ線の隣り合う線分)の角を、斜めの線で面取りする(CHAMFER)。距離1・距離2を入力(Enter=前回の値)、1つ目・2つ目の線をクリック。繰り返せます" },
   { name: "DELETE", label: "削除", title: "選択した図形を削除する(DELETE・Delete キー)。Ctrl+Z で戻せます" },
 ];
+
+/** 寸法のコマンド(「寸法」メニューに並べる。ボタンを増やさず、ツールバーを窮屈にしない) */
+const DIMENSION_MENU: ReadonlyArray<{ name: DrawCommandName; label: string; title: string }> = [
+  { name: "DIMHORIZONTAL", label: "水平寸法", title: "水平寸法を描く(DIMHORIZONTAL・DH)。2点と、寸法線の位置をクリック" },
+  { name: "DIMVERTICAL", label: "垂直寸法", title: "垂直寸法を描く(DIMVERTICAL・DV)。2点と、寸法線の位置をクリック" },
+  { name: "DIMALIGNED", label: "平行寸法", title: "2点を結ぶ向きの寸法を描く(DIMALIGNED・DAL)。2点と、寸法線の位置をクリック" },
+  { name: "DIMRADIUS", label: "半径寸法", title: "半径寸法を描く(DIMRADIUS・DRA)。円・円弧をクリックして、文字の側の点をクリック" },
+  { name: "DIMDIAMETER", label: "直径寸法", title: "直径寸法を描く(DIMDIAMETER・DDI)。円・円弧をクリックして、向きを決める点をクリック" },
+  { name: "DIMANGULAR", label: "角度寸法", title: "角度寸法を描く(DIMANGULAR・DAN)。2本の線をクリックして、弧が通る点をクリック(Enter = 3点指定)" },
+  { name: "DIMSTYLE", label: "寸法スタイル", title: "寸法スタイル(文字の高さ・矢印・小数桁・単位・色・レイヤー・線種)の管理パネルを開く(DIMSTYLE・DST)" },
+];
+
+/** 「寸法」ボタンと、その下に開くメニュー */
+function DimensionMenu({ isEditable, activeCommandName, onDraw }: { isEditable: boolean; activeCommandName: string | null; onDraw: (name: DrawCommandName) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    // メニューの外をクリックしたとき・Esc を押したときに閉じる
+    const close = (event: MouseEvent | KeyboardEvent): void => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setOpen(false);
+        return;
+      }
+      if (rootRef.current !== null && event.target instanceof Node && !rootRef.current.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+  const isActive = activeCommandName !== null && DIMENSION_MENU.some((item) => item.name === activeCommandName);
+  return (
+    <div className="toolbar__menu" ref={rootRef}>
+      <button
+        type="button"
+        className={`toolbar__button${isActive ? " toolbar__button--active" : ""}`}
+        title="寸法を描く・寸法スタイルを開く"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid="toolbar-dimension"
+        onClick={() => setOpen((value) => !value)}
+        disabled={!isEditable}
+      >
+        寸法▾
+      </button>
+      {open && (
+        <div className="toolbar__menu-list" role="menu" data-testid="toolbar-dimension-menu">
+          {DIMENSION_MENU.map((item) => (
+            <button
+              key={item.name}
+              type="button"
+              role="menuitem"
+              className="toolbar__menu-item"
+              title={item.title}
+              data-testid={`toolbar-${item.name.toLowerCase()}`}
+              onClick={() => {
+                setOpen(false);
+                onDraw(item.name);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Toolbar({
   isDocumentOpen,
@@ -137,6 +216,7 @@ export function Toolbar({
           {button.label}
         </button>
       ))}
+      <DimensionMenu isEditable={isEditable} activeCommandName={activeCommandName} onDraw={onDraw} />
       <div className="toolbar__separator" />
       <button type="button" className="toolbar__button" title="元に戻す(Ctrl+Z)" onClick={onUndo} disabled={!canUndo}>
         元に戻す

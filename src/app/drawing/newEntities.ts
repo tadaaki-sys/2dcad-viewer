@@ -2,7 +2,9 @@
 // 色は、取り込んだ図形と同じく、レイヤーの色を数値にして持つ(保存の Phase で、レイヤー色の指定(BYLAYER)へ戻す)。
 import type { ArcShape } from "../../core/geometry/construct";
 import type { TextStyle } from "../../core/text/textStyle";
-import type { CadArc, CadCircle, CadLine, CadPolyline, CadText, Point2D } from "../../types/cad";
+import { dimensionLineDash, dimensionValuesOf } from "../../core/dimension/dimensionStyle";
+import type { DimensionStyle } from "../../core/dimension/dimensionStyle";
+import type { CadArc, CadCircle, CadDimension, CadLine, CadPolyline, CadText, Point2D } from "../../types/cad";
 
 /** 新しい図形の見た目(現在のレイヤーと、その色) */
 export type DrawingStyle = { layer: string; color: string };
@@ -78,6 +80,32 @@ export function makeText(
     italic: textStyle.italic,
     styleName: textStyle.name,
     ...(multiline ? { boxWidth, isMText: true } : {}),
+  };
+}
+
+/** 寸法の、種類ごとの定義点(CadDimension の p1・p2・p3・position・rotation) */
+export type DimensionGeometry = Pick<CadDimension, "kind" | "p1" | "p2" | "p3" | "position" | "rotation">;
+
+/**
+ * 寸法。描いたときの寸法スタイルの値を、そのまま持つ(コピー。スタイル名は記録するだけ)。
+ * 色は、スタイルが色を指定していればそれ、無ければ描くレイヤーの色。線種は、スタイルの線種。
+ */
+export function makeDimension(id: string, geometry: DimensionGeometry, dimensionStyle: DimensionStyle, target: DrawingStyle): CadDimension {
+  const lineDash = dimensionLineDash(dimensionStyle.linetype, dimensionStyle.textHeight);
+  return {
+    id,
+    type: "DIMENSION",
+    layer: target.layer,
+    color: dimensionStyle.color ?? target.color,
+    ...(lineDash === undefined ? {} : { lineDash }),
+    kind: geometry.kind,
+    p1: { ...geometry.p1 },
+    p2: { ...geometry.p2 },
+    ...(geometry.p3 === undefined ? {} : { p3: { ...geometry.p3 } }),
+    position: { ...geometry.position },
+    ...(geometry.rotation === undefined ? {} : { rotation: geometry.rotation }),
+    values: dimensionValuesOf(dimensionStyle),
+    styleName: dimensionStyle.name,
   };
 }
 

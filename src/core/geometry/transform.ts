@@ -199,6 +199,17 @@ function transformSimilar(entity: CadEntity, matrix: Affine2D, move: (p: Point2D
         ...(entity.boxWidth !== undefined ? { boxWidth: scaled(entity.boxWidth) } : {}),
         rotation: reflecting ? entity.rotation : turn(entity.rotation),
       };
+    case "DIMENSION":
+      // 寸法は、定義点と寸法線の向きを動かす。測定値は、動かした定義点から、表示のたびに計算し直す。
+      // 拡大縮小では、文字の高さ・矢印の大きさなどの、スタイルの値は変えない(測定値だけが、倍率に合わせて変わる)
+      return {
+        ...entity,
+        p1: move(entity.p1),
+        p2: move(entity.p2),
+        ...(entity.p3 !== undefined ? { p3: move(entity.p3) } : {}),
+        position: move(entity.position),
+        ...(entity.rotation !== undefined ? { rotation: noRotation ? entity.rotation : mapDirection(entity.rotation) } : {}),
+      };
   }
 }
 
@@ -244,5 +255,14 @@ export function transformEntityGeometry(entity: CadEntity, matrix: Affine2D): Ca
       return { ...entity, position: move(entity.position) };
     case "TEXT":
       return { ...entity, position: move(entity.position), rotation: turn(entity.rotation) };
+    case "DIMENSION":
+      return {
+        ...entity,
+        p1: move(entity.p1),
+        p2: move(entity.p2),
+        ...(entity.p3 !== undefined ? { p3: move(entity.p3) } : {}),
+        position: move(entity.position),
+        ...(entity.rotation !== undefined ? { rotation: turn(entity.rotation) } : {}),
+      };
   }
 }

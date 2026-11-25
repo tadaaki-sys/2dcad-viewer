@@ -61,6 +61,8 @@ export function collectIntersectionCandidates(context: GeneratorContext): SnapCa
   for (let owner = 0; owner < entities.length; owner++) {
     const entity = entities[owner];
     if (!visibleLayerNames.has(entity.layer)) continue;
+    // 寸法は、スナップの対象にしない(寸法線・矢印・補助線は、吸着の候補を増やすだけ。連動寸法の Phase で見直す)
+    if (entity.type === "DIMENSION") continue;
     if (entity.type === "CIRCLE" || entity.type === "ARC") {
       if (distanceToCurve(entity, worldPoint) <= toleranceWorld) nearbyCurves.push(entity);
       continue;

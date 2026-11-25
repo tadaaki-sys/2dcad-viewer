@@ -30,9 +30,9 @@ export type EdgePrimitive =
   /** 円(sweep が無い)または円弧(startAngle から endAngle へ反時計回り) */
   | { kind: "circle"; center: Point2D; radius: number; sweep?: { startAngle: number; endAngle: number } };
 
-/** 図形を、境界として使う形(線分・円・円弧)の一覧にする。対象にならない図形(文字・点)は空 */
+/** 図形を、境界として使う形(線分・円・円弧)の一覧にする。対象にならない図形(文字・点・寸法)は空 */
 export function edgePrimitivesOf(entity: CadEntity): EdgePrimitive[] {
-  if (entity.type === "TEXT" || entity.type === "POINT") return [];
+  if (entity.type === "TEXT" || entity.type === "POINT" || entity.type === "DIMENSION") return [];
   if (entity.type === "CIRCLE") return [{ kind: "circle", center: entity.center, radius: entity.radius }];
   if (entity.type === "ARC") {
     return [{ kind: "circle", center: entity.center, radius: entity.radius, sweep: { startAngle: entity.startAngle, endAngle: entity.endAngle } }];

@@ -32,6 +32,7 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
     createOffsetPreview: NO_EDITING.createOffsetPreview,
     createBreakPreview: NO_EDITING.createBreakPreview,
     textOf: NO_EDITING.textOf,
+    entityOf: NO_EDITING.entityOf,
     ...overrides,
   };
   const context = makeContext({ editing });
@@ -329,6 +330,7 @@ describe("a large selection", () => {
       createOffsetPreview: NO_EDITING.createOffsetPreview,
       createBreakPreview: NO_EDITING.createBreakPreview,
       textOf: NO_EDITING.textOf,
+    entityOf: NO_EDITING.entityOf,
     };
     const session = createAppCommandSession(() => makeContext({ editing }));
     session.submitText("move");

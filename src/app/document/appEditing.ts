@@ -78,6 +78,10 @@ export function createAppEditing(sources: AppEditingSources): AppEditing {
       const entity = sources.getSession() === null ? undefined : getEntity(sources.getSession()!.document, id);
       return entity === undefined ? () => [] : createBreakPreview(entity, first);
     },
+    entityOf: (id) => {
+      const session = sources.getSession();
+      return (session === null ? undefined : getEntity(session.document, id)) ?? null;
+    },
     textOf: (id) => {
       const session = sources.getSession();
       const entity = session === null ? undefined : getEntity(session.document, id);

@@ -40,7 +40,7 @@ import { toggleTracking } from "./core/tracking/trackingSettings";
 import type { TrackingSettings } from "./core/tracking/trackingSettings";
 import { loadTrackingSettings, saveTrackingSettings } from "./utils/trackingSettingsStorage";
 import { createAppCommands } from "./app/commands/builtinCommands";
-import { defaultLayerName, resolveDrawTarget } from "./app/drawing/drawTarget";
+import { defaultLayerName, resolveDrawTarget, resolveNamedLayerTarget } from "./app/drawing/drawTarget";
 import { reorderSelection } from "./app/document/reorder";
 import { createAppEditing } from "./app/document/appEditing";
 import { createEditability } from "./app/document/editability";
@@ -50,6 +50,10 @@ import { breakAt } from "./app/document/breaking";
 import { cornerAt } from "./app/document/filleting";
 import { editTextContent } from "./app/document/texting";
 import { currentTextStyle, DEFAULT_TEXT_STYLE } from "./core/text/textStyle";
+import { currentDimensionStyle, DEFAULT_DIMENSION_STYLE } from "./core/dimension/dimensionStyle";
+import type { DimensionStyleTable } from "./core/dimension/dimensionStyle";
+import { loadDimensionStyleTable, saveDimensionStyleTable } from "./utils/dimensionStyleStorage";
+import { DimensionStylePanel } from "./components/DimensionStylePanel";
 import type { TextStyleTable } from "./core/text/textStyle";
 import { loadTextStyleTable, saveTextStyleTable } from "./utils/textStyleStorage";
 import { TextInputPanel } from "./components/TextInputPanel";
@@ -178,6 +182,8 @@ export default function App() {
       drawTarget: { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
       editing: NO_EDITING,
       textStyle: DEFAULT_TEXT_STYLE,
+      dimensionStyle: DEFAULT_DIMENSION_STYLE,
+      layerTarget: () => ({ ok: false, reason: DOCUMENT_NOT_READY_MESSAGE }),
       allocateEntityId: () => {
         throw new Error("図面の準備ができていません");
       },
@@ -214,6 +220,12 @@ export default function App() {
     saveTextStyleTable(textStyles);
   }, [textStyles]);
   const [showTextStyles, setShowTextStyles] = useState(false);
+  // 寸法スタイルの一覧と、現在のスタイル(寸法を描くときの見た目)。同じく、このブラウザに保存する。DIMSTYLE で、管理パネルを開く
+  const [dimensionStyles, setDimensionStyles] = useState<DimensionStyleTable>(loadDimensionStyleTable);
+  useEffect(() => {
+    saveDimensionStyleTable(dimensionStyles);
+  }, [dimensionStyles]);
+  const [showDimensionStyles, setShowDimensionStyles] = useState(false);
   useEffect(() => {
     commands.setContext({
       isDocumentOpen,
@@ -237,8 +249,10 @@ export default function App() {
         return session.allocateEntityId();
       },
       textStyle: currentTextStyle(textStyles),
+      dimensionStyle: currentDimensionStyle(dimensionStyles),
+      layerTarget: (name) => resolveNamedLayerTarget(layers, name),
     });
-  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress, textStyles]);
+  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress, textStyles, dimensionStyles]);
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
@@ -679,6 +693,9 @@ export default function App() {
           break;
         case "editText":
           applyEdit((session, editability) => editTextContent(session, editability, request.id, request.text));
+          break;
+        case "openDimensionStyles":
+          setShowDimensionStyles(true);
           break;
         case "openTextStyles":
           setShowTextStyles(true);
@@ -1149,6 +1166,9 @@ export default function App() {
             />
           )}
           {showTextStyles && <TextStylePanel table={textStyles} onChange={setTextStyles} onClose={() => setShowTextStyles(false)} />}
+          {showDimensionStyles && (
+            <DimensionStylePanel table={dimensionStyles} layerNames={layers.map((layer) => layer.name)} onChange={setDimensionStyles} onClose={() => setShowDimensionStyles(false)} />
+          )}
           {import.meta.env.DEV && (
             <PerformanceOverlay
               cadCanvasRef={cadCanvasRef}

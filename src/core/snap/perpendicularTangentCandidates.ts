@@ -39,7 +39,7 @@ export function collectPerpendicularCandidates(context: GeneratorContext): SnapC
       }
       continue;
     }
-    if (entity.type === "TEXT" || entity.type === "POINT") continue;
+    if (entity.type === "TEXT" || entity.type === "POINT" || entity.type === "DIMENSION") continue;
     // 線・折れ線は線分ごと。楕円・スプラインは、折れ線の近似
     for (const [a, b] of getEntitySegments(entity)) add(footOnSegment(fromPoint, a, b));
   }

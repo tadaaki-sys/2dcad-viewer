@@ -107,6 +107,56 @@ export type CadText = {
   styleName?: string;
 };
 
+export type CadDimensionKind = "linear" | "aligned" | "radius" | "diameter" | "angular";
+export type CadDimensionUnit = "mm" | "cm" | "m";
+
+/**
+ * 寸法の見た目の値(描いたときの寸法スタイルから、そのままコピーしたもの。スタイルを後で変えても、描いた寸法は変わらない)。
+ * 長さの単位は、図面の単位(mm)。
+ */
+export type CadDimensionValues = {
+  textHeight: number;
+  arrowSize: number;
+  /** 長さの小数桁 */
+  decimals: number;
+  /** 角度の小数桁 */
+  angleDecimals: number;
+  /** 長さを表示する単位(図面の値を、この単位に換算して表示する) */
+  unit: CadDimensionUnit;
+  /** 数値のあとに、単位(mm など)を付けるか */
+  showUnit: boolean;
+  /** 寸法補助線の、図形からの間隔(起点と、補助線の始まりとの間) */
+  extensionOffset: number;
+};
+
+/**
+ * 寸法。線・矢印・数値は、図形として持たず、定義点とスタイルの値から、表示のたびに計算する(測定値が古くならない)。
+ * - linear  : 水平・垂直(rotation = 寸法線の向き。0 = 水平、π/2 = 垂直)。p1・p2 = 寸法補助線の起点、position = 寸法線が通る点
+ * - aligned : p1・p2 を結ぶ向きに平行な寸法。p1・p2 = 起点、position = 寸法線が通る点
+ * - radius  : p1 = 中心、p2 = 円周上の点(半径を決める)、position = 文字の側の点(中心から見た向きで、矢印の位置が決まる)
+ * - diameter: radius と同じ(直径線は、中心を通る)
+ * - angular : p1 = 頂点、p2 = 1本目の腕の上の点、p3 = 2本目の腕の上の点、position = 寸法の弧が通る点(弧の側を決める)
+ * 色・レイヤーは、他の図形と同じ。線種は lineDash。
+ */
+export type CadDimension = {
+  id: string;
+  type: "DIMENSION";
+  layer: string;
+  color: string;
+  lineDash?: LineDash;
+  /** 線の太さは持たない(他の図形と同じ書き方で参照できるよう、未指定として宣言) */
+  lineWeight?: undefined;
+  kind: CadDimensionKind;
+  p1: Point2D;
+  p2: Point2D;
+  p3?: Point2D;
+  position: Point2D;
+  rotation?: number;
+  values: CadDimensionValues;
+  /** 描いたときのスタイル名(記録だけ) */
+  styleName?: string;
+};
+
 /**
  * rotationはメジャー軸の向き(ラジアン、+X軸からCCW方向)。
  * startParam/endParamはDXFの楕円パラメータ角(ラジアン)で、非全周の場合は楕円弧になる。
@@ -192,7 +242,7 @@ export type SourceRecord = {
 /** すべての図形が持てる、任意の項目 */
 type EntityExtras = { sourceRecord?: SourceRecord };
 
-export type CadEntity = (CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline | CadPoint) & EntityExtras;
+export type CadEntity = (CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline | CadPoint | CadDimension) & EntityExtras;
 
 export type CadBounds = {
   min: Point2D;

@@ -19,9 +19,14 @@ const CHAIN_LABEL = "線・折れ線";
 const TEXT_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["TEXT"]);
 const TEXT_LABEL = "文字(TEXT・MTEXT)";
 
-/** pickEntityAt に渡す、対象の種類と呼び名(kind: curve = 線・円弧・円・折れ線、chain = 線・折れ線、text = 文字) */
-export function pickTargetOf(kind: "curve" | "chain" | "text"): { types: ReadonlySet<CadEntity["type"]>; label: string } {
+const CIRCULAR_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["CIRCLE", "ARC"]);
+const LINE_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["LINE"]);
+
+/** pickEntityAt に渡す、対象の種類と呼び名(kind: curve = 線・円弧・円・折れ線、chain = 線・折れ線、text = 文字、circular = 円・円弧、line = 線) */
+export function pickTargetOf(kind: "curve" | "chain" | "text" | "circular" | "line"): { types: ReadonlySet<CadEntity["type"]>; label: string } {
   if (kind === "text") return { types: TEXT_TYPES, label: TEXT_LABEL };
+  if (kind === "circular") return { types: CIRCULAR_TYPES, label: "円・円弧" };
+  if (kind === "line") return { types: LINE_TYPES, label: "線(LINE)" };
   return kind === "chain" ? { types: FILLET_TYPES, label: CHAIN_LABEL } : { types: CURVE_TYPES, label: CURVE_LABEL };
 }
 

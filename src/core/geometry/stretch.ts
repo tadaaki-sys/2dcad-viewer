@@ -5,9 +5,11 @@
 //   LINE          端点が窓の中にあれば、その端点だけ動く(両方なら、線ごと移動)
 //   折れ線・スプライン  窓の中にある頂点だけ動く(全部なら、図形ごと移動)
 //   円・点・文字    中心(挿入点)が窓の中にあれば、図形ごと移動
+//   寸法(水平・垂直・平行)  窓の中にある定義点だけ動く(全部なら、寸法ごと移動)。半径・直径・角度は、全部が窓の中のときだけ移動(一部は対象外)
 //   円弧・楕円     全体が窓の中にあるときだけ、図形ごと移動。一部だけ窓に入っているものは、対象外(partial-skipped)
 // 窓の辺の上にある点は、中にあるものとして扱う(境界を含む)。
 import type { Affine2D, CadEllipse, CadEntity, Point2D } from "../../types/cad";
+import { dimensionDefiningPoints } from "../dimension/dimensionGeometry";
 import { computeAllEntityBounds } from "../spatial/entityBounds";
 import { transformEntityGeometry, translationMatrix } from "./transform";
 
@@ -145,6 +147,18 @@ export function stretchEntityGeometry(entity: CadEntity, window: StretchWindow, 
       return pointInWindow(entity.position, window) ? wholly() : { kind: "unchanged" };
     case "TEXT":
       return pointInWindow(entity.position, window) ? wholly() : { kind: "unchanged" };
+    case "DIMENSION": {
+      // 定義点(起点・寸法線が通る点など)のうち、窓の中にあるものだけを動かす。全部が窓の中なら、寸法ごと動かす。
+      const points = dimensionDefiningPoints(entity);
+      const count = points.filter((point) => pointInWindow(point, window)).length;
+      if (count === 0) return { kind: "unchanged" };
+      if (count === points.length) return wholly();
+      // 半径・直径・角度は、一部の点だけを動かすと、円や角の意味が変わるので、動かさない
+      if (entity.kind !== "linear" && entity.kind !== "aligned") return { kind: "partial-skipped" };
+      // 直線の寸法: 窓の中の点だけを動かす(測定する長さが変わる。寸法線の位置だけが窓の中のときは、寸法線が動く)
+      const move = (point: Point2D): Point2D => (pointInWindow(point, window) ? shift(point) : point);
+      return { kind: "reshaped", entity: { ...entity, p1: move(entity.p1), p2: move(entity.p2), position: move(entity.position) } };
+    }
     case "ARC":
     case "ELLIPSE": {
       // 楕円は、点列で近似した範囲(余裕つき)ではなく、厳密な範囲で判定する

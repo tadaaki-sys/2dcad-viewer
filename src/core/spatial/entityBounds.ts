@@ -92,6 +92,7 @@ export function writeEntityBounds(entity: CadEntity, out: Float64Array, offset: 
       writePointsBounds(out, offset, getEntityPoints(entity), Math.max(entity.majorRadius, entity.minorRadius) * ELLIPSE_BOUNDS_PADDING_RATIO);
       return;
     case "TEXT":
+    case "DIMENSION":
       writePointsBounds(out, offset, getEntityPoints(entity));
       return;
   }

@@ -39,6 +39,7 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
     createOffsetPreview: NO_EDITING.createOffsetPreview,
     createBreakPreview: NO_EDITING.createBreakPreview,
     textOf: NO_EDITING.textOf,
+    entityOf: NO_EDITING.entityOf,
     ...overrides,
   };
   return createAppCommandSession(() => makeContext({ editing }));

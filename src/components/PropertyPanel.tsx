@@ -2,6 +2,8 @@ import type { CadEntity } from "../types/cad";
 import { polylineLength, distance, normalizeArcSpan } from "../core/geometry/geometry";
 import { formatMm } from "../utils/format";
 import { getEntityPoints } from "../core/geometry/entityGeometry";
+import { layoutDimension } from "../core/dimension/dimensionGeometry";
+import { DIMENSION_KIND_LABELS } from "../core/dimension/dimensionStyle";
 import "./PropertyPanel.css";
 
 type PropertyPanelProps = {
@@ -18,7 +20,7 @@ function entityLength(entity: CadEntity): number {
   if (entity.type === "LINE") return distance(entity.start, entity.end);
   if (entity.type === "CIRCLE") return 2 * Math.PI * entity.radius;
   if (entity.type === "ARC") return entity.radius * normalizeArcSpan(entity.startAngle, entity.endAngle);
-  if (entity.type === "TEXT" || entity.type === "POINT") return 0;
+  if (entity.type === "TEXT" || entity.type === "POINT" || entity.type === "DIMENSION") return 0;
   // 楕円(弧)の正確な弧長は楕円積分が必要なため、既存のテッセレーション点を使った近似で済ませる
   if (entity.type === "ELLIPSE") return polylineLength(getEntityPoints(entity), false);
   if (entity.type === "SPLINE") return polylineLength(entity.points, entity.closed);
@@ -71,6 +73,18 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
     if (entity.italic === true) rows.push({ label: "Italic", value: "Yes" });
     if (entity.widthFactor !== undefined && entity.widthFactor !== 1) rows.push({ label: "Width Factor", value: String(entity.widthFactor) });
     if (entity.styleName !== undefined) rows.push({ label: "Text Style", value: entity.styleName });
+  } else if (entity.type === "DIMENSION") {
+    const layout = layoutDimension(entity);
+    rows.push(
+      { label: "Dimension Type", value: DIMENSION_KIND_LABELS[entity.kind] },
+      { label: "Measurement", value: layout === null ? "(計算できません)" : layout.text.text },
+      { label: "Text Height", value: formatMm(entity.values.textHeight) },
+      { label: "Arrow Size", value: formatMm(entity.values.arrowSize) },
+      { label: "Decimal Places", value: `${entity.values.decimals} / ${entity.values.angleDecimals}` },
+      { label: "Units", value: entity.values.unit },
+      { label: "Extension Offset", value: formatMm(entity.values.extensionOffset) },
+    );
+    if (entity.styleName !== undefined) rows.push({ label: "Dimension Style", value: entity.styleName });
   } else if (entity.type === "SPLINE") {
     // 曲線を折れ線に近似した長さなので、実際の弧長とはわずかに異なる
     rows.push(

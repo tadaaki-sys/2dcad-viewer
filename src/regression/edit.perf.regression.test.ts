@@ -10,7 +10,12 @@ import { breakAt } from "../app/document/breaking";
 import { cornerAt } from "../app/document/filleting";
 import { editTextContent } from "../app/document/texting";
 import { getTextBoundingBoxCorners } from "../core/geometry/entityGeometry";
-import type { CadText } from "../types/cad";
+import { makeDimension } from "../app/drawing/newEntities";
+import { layoutDimension } from "../core/dimension/dimensionGeometry";
+import { DEFAULT_DIMENSION_STYLE } from "../core/dimension/dimensionStyle";
+import { addEntitiesChangeSet } from "../core/history";
+import { findEntitiesNearPoint } from "../core/selection/Selection";
+import type { CadDimension, CadEntity, CadText } from "../types/cad";
 import type { CornerMode } from "../core/geometry/fillet";
 import { offsetAt } from "../app/document/offsetting";
 import { trimOrExtendAt } from "../app/document/trimming";
@@ -390,6 +395,63 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.text.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[text perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);
+    it(`${entry.name}: dimensions on real lines and circles, then Undo; 10,000 dimensions for layout / bounds / picking (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model));
+      const original = session.document.entities;
+      const count = original.length;
+      const lines = original.filter((entity) => entity.type === "LINE");
+      const circles = original.filter((entity) => entity.type === "CIRCLE" || entity.type === "ARC");
+      if (lines.length + circles.length === 0) return;
+      const drawing = { layer: original[0].layer, color: original[0].color };
+      const stepOf = (n: number): number => Math.max(1, Math.floor(n / 200));
+      const dimensions: CadDimension[] = [];
+      for (const entity of lines.filter((_, i) => i % stepOf(lines.length) === 0).slice(0, 200)) {
+        if (entity.type !== "LINE") continue;
+        const middle = { x: (entity.start.x + entity.end.x) / 2, y: (entity.start.y + entity.end.y) / 2 };
+        dimensions.push(makeDimension(session.allocateEntityId(), { kind: "aligned", p1: entity.start, p2: entity.end, position: { x: middle.x + 500, y: middle.y + 500 } }, DEFAULT_DIMENSION_STYLE, drawing));
+      }
+      for (const entity of circles.filter((_, i) => i % stepOf(circles.length) === 0).slice(0, 200)) {
+        if (entity.type !== "CIRCLE" && entity.type !== "ARC") continue;
+        dimensions.push(makeDimension(session.allocateEntityId(), { kind: "radius", p1: entity.center, p2: { x: entity.center.x + entity.radius, y: entity.center.y }, position: { x: entity.center.x + entity.radius * 2, y: entity.center.y } }, DEFAULT_DIMENSION_STYLE, drawing));
+      }
+      let computable = 0;
+      const layoutTime = time(() => {
+        for (const dimension of dimensions) if (layoutDimension(dimension) !== null) computable++;
+      });
+      const added = time(() => session.apply(addEntitiesChangeSet(session.document, dimensions, "寸法を追加")));
+      expect(added.value.ok).toBe(true);
+      expect(session.document.entities.length).toBe(count + dimensions.length);
+      const boundsTime = time(() => computeAllEntityBounds(session.document.entities));
+      expect(boundsTime.value.length).toBe((count + dimensions.length) * 4);
+      expect(session.undo().type).toBe("done");
+      expect(session.canUndo).toBe(false);
+      expect(session.document.entities.length).toBe(count);
+      for (let i = 0; i < count; i++) if (session.document.entities[i] !== original[i]) throw new Error(`Undo で元に戻りません(${i} 番目)`);
+
+      // 寸法 10,000 個(同じ形を、位置をずらして並べる): 形の計算・範囲・選択(1点)の時間
+      const many: CadEntity[] = [];
+      for (let i = 0; i < 10_000; i++) {
+        many.push(makeDimension(`m${i}`, { kind: "linear", rotation: 0, p1: { x: i * 10, y: 0 }, p2: { x: i * 10 + 5000, y: 0 }, position: { x: i * 10 + 2500, y: 800 } }, DEFAULT_DIMENSION_STYLE, drawing));
+      }
+      const manyLayout = time(() => many.reduce((n, d) => n + (layoutDimension(d as CadDimension) === null ? 0 : 1), 0));
+      expect(manyLayout.value).toBe(10_000);
+      const manyBounds = time(() => computeAllEntityBounds(many));
+      const picked = time(() => findEntitiesNearPoint(many, new Set([drawing.layer]), { x: 50_000, y: 800 }, 5));
+      expect(picked.value.length).toBeGreaterThan(0);
+      const result = {
+        entityCount: count,
+        dimensions: dimensions.length,
+        computable,
+        layoutMs: round(layoutTime.ms),
+        addMs: round(added.ms),
+        boundsWithDimensionsMs: round(boundsTime.ms),
+        tenThousand: { layoutMs: round(manyLayout.ms), boundsMs: round(manyBounds.ms), pickOnePointMs: round(picked.ms), hits: picked.value.length },
+      };
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.dimension.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[dimension perf] ${entry.name}`, JSON.stringify(result));
     }, 900_000);
   }
 });

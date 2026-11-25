@@ -6,7 +6,7 @@ import {
   pointToSegmentDistance,
   segmentsIntersect,
 } from "../geometry/geometry";
-import { distanceFromPointToText, getEntityPoints, getEntitySegments } from "../geometry/entityGeometry";
+import { distanceFromPointToDimension, distanceFromPointToText, getEntityPoints, getEntitySegments } from "../geometry/entityGeometry";
 import type { CadEntity, Point2D } from "../../types/cad";
 import type { SpatialIndex } from "../spatial/SpatialIndex";
 
@@ -23,6 +23,7 @@ export type BoxSelectionMode = "window" | "crossing";
  */
 function distanceFromEntity(entity: CadEntity, point: Point2D): number {
   if (entity.type === "TEXT") return distanceFromPointToText(entity, point);
+  if (entity.type === "DIMENSION") return distanceFromPointToDimension(entity, point);
   if (entity.type === "POINT") return distance(point, entity.position);
   // 円/円弧は折れ線近似ではなく解析的に距離を求める(半径が大きいと近似線分と実際の曲線の差が選択精度に響くため)
   if (entity.type === "CIRCLE") return Math.abs(distance(point, entity.center) - entity.radius);
@@ -128,6 +129,11 @@ export function isEntityTouchingBox(entity: CadEntity, box: SelectionBox): boole
       { x: box.max.x, y: box.min.y },
     ];
     if (corners.some((corner) => distanceFromPointToText(entity, corner) === 0)) return true;
+  }
+  // 寸法の数値も、詰まった矩形として扱う(選択範囲が数値の内側に収まっている場合も、触れているとみなす)
+  if (entity.type === "DIMENSION") {
+    const corners: Point2D[] = [box.min, box.max, { x: box.min.x, y: box.max.y }, { x: box.max.x, y: box.min.y }];
+    if (corners.some((corner) => distanceFromPointToDimension(entity, corner) === 0)) return true;
   }
   return getEntitySegments(entity).some(([a, b]) => segmentIntersectsBox(a, b, box));
 }
