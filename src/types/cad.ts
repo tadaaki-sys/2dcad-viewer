@@ -130,6 +130,33 @@ export type CadDimensionValues = {
 };
 
 /**
+ * 図形の上の位置(寸法が関連付ける点)。線: start・end・mid。円弧: start・end・mid・center。円: center。
+ * 折れ線: vertex(頂点の番号)。whole は、図形そのもの(半径・直径の円・円弧、角度の線)。
+ */
+export type DimensionAnchor =
+  | { kind: "start" }
+  | { kind: "end" }
+  | { kind: "mid" }
+  | { kind: "center" }
+  | { kind: "vertex"; index: number }
+  | { kind: "whole" };
+
+/** どの定義点(または円・線)を、関連付けているか。p1・p2・p3 = 点、figure = 半径・直径の円・円弧、line1・line2 = 角度の2本の線 */
+export type DimensionRefSlot = "p1" | "p2" | "p3" | "figure" | "line1" | "line2";
+
+/**
+ * 寸法の参照(Phase 16)。参照している図形の ID と、その図形の上の位置。
+ * 参照した図形が変わると、寸法は、この参照から、測る点を計算し直す(追従する)。
+ * broken が true のとき、参照は切れている(図形が削除された・位置が無くなった)。最後の位置のまま、警告として赤で表示する。
+ */
+export type DimensionRef = {
+  slot: DimensionRefSlot;
+  id: string;
+  anchor: DimensionAnchor;
+  broken?: true;
+};
+
+/**
  * 寸法。線・矢印・数値は、図形として持たず、定義点とスタイルの値から、表示のたびに計算する(測定値が古くならない)。
  * - linear  : 水平・垂直(rotation = 寸法線の向き。0 = 水平、π/2 = 垂直)。p1・p2 = 寸法補助線の起点、position = 寸法線が通る点
  * - aligned : p1・p2 を結ぶ向きに平行な寸法。p1・p2 = 起点、position = 寸法線が通る点
@@ -155,6 +182,8 @@ export type CadDimension = {
   values: CadDimensionValues;
   /** 描いたときのスタイル名(記録だけ) */
   styleName?: string;
+  /** 関連付けている図形(Phase 16)。無いか空なら、連動しない寸法(Phase 15 までの寸法) */
+  refs?: readonly DimensionRef[];
 };
 
 /**

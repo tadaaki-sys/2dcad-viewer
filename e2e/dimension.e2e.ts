@@ -54,13 +54,13 @@ async function drawHorizontal(page: Page, mapping: Mapping): Promise<void> {
 }
 
 test.describe("toolbar menu", () => {
-  test("one 寸法 button opens a menu of the seven commands; choosing one starts it and closes the menu", async ({ page }) => {
+  test("one 寸法 button opens a menu of the eight commands; choosing one starts it and closes the menu", async ({ page }) => {
     await openEditable(page);
     const button = page.getByTestId("toolbar-dimension");
     await expect(toolbarMenu(page)).toBeHidden();
     await button.click();
     await expect(toolbarMenu(page)).toBeVisible();
-    await expect(toolbarMenu(page).getByRole("menuitem")).toHaveText(["水平寸法", "垂直寸法", "平行寸法", "半径寸法", "直径寸法", "角度寸法", "寸法スタイル"]);
+    await expect(toolbarMenu(page).getByRole("menuitem")).toHaveText(["水平寸法", "垂直寸法", "平行寸法", "半径寸法", "直径寸法", "角度寸法", "関連付け", "寸法スタイル"]);
     await toolbarMenu(page).getByRole("menuitem", { name: "平行寸法" }).click();
     await expect(toolbarMenu(page)).toBeHidden();
     await expect(label(page)).toHaveText("DIMALIGNED:");

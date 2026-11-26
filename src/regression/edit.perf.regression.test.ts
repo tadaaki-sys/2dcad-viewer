@@ -12,6 +12,7 @@ import { editTextContent } from "../app/document/texting";
 import { getTextBoundingBoxCorners } from "../core/geometry/entityGeometry";
 import { makeDimension } from "../app/drawing/newEntities";
 import { layoutDimension } from "../core/dimension/dimensionGeometry";
+import { findAnchorsAt } from "../core/dimension/dimensionRefs";
 import { DEFAULT_DIMENSION_STYLE } from "../core/dimension/dimensionStyle";
 import { addEntitiesChangeSet } from "../core/history";
 import { findEntitiesNearPoint } from "../core/selection/Selection";
@@ -452,6 +453,91 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.dimension.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[dimension perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);
+    it(`${entry.name}: connected dimensions follow real lines (move / stretch / bulk delete), then Undo (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model));
+      const original = session.document.entities;
+      const count = original.length;
+      const lines = original.filter((entity) => entity.type === "LINE");
+      if (lines.length < 4) return;
+      const step = Math.max(1, Math.floor(lines.length / 200));
+      const sample = lines.filter((_, i) => i % step === 0).slice(0, 200);
+      const drawing = { layer: sample[0].layer, color: sample[0].color };
+
+      // 参照の探索: 400 点(各線の始点と終点)に一致する図形の位置を、1回の走査で探す
+      const points = sample.flatMap((entity) => (entity.type === "LINE" ? [entity.start, entity.end] : []));
+      const visible = new Set(model.layers.map((layer) => layer.name));
+      const search = time(() => findAnchorsAt(original, visible, points));
+      const matched = search.value.filter((found) => found !== null).length;
+      expect(matched).toBeGreaterThan(0);
+
+      const dimensions: CadDimension[] = [];
+      for (const entity of sample) {
+        if (entity.type !== "LINE") continue;
+        const middle = { x: (entity.start.x + entity.end.x) / 2, y: (entity.start.y + entity.end.y) / 2 };
+        dimensions.push(
+          makeDimension(session.allocateEntityId(), { kind: "aligned", p1: entity.start, p2: entity.end, position: { x: middle.x + 300, y: middle.y + 300 } }, DEFAULT_DIMENSION_STYLE, drawing, [
+            { slot: "p1", id: entity.id, anchor: { kind: "start" } },
+            { slot: "p2", id: entity.id, anchor: { kind: "end" } },
+          ]),
+        );
+      }
+      expect(session.apply(addEntitiesChangeSet(session.document, dimensions, "寸法を追加")).ok).toBe(true);
+      const withDimensions = session.document.entities;
+      /** Undo のあと、元と同じ図形(同じオブジェクト)・同じ順に戻っているか */
+      const restored = (): boolean => {
+        const now = session.document.entities;
+        if (now.length !== withDimensions.length) return false;
+        for (let i = 0; i < now.length; i++) if (now[i] !== withDimensions[i]) return false;
+        return true;
+      };
+      const sampleIds = sample.map((entity) => entity.id);
+      const followed = (): boolean =>
+        dimensions.every((dimension) => {
+          const now = session.document.entities[session.document.indexById.get(dimension.id) ?? -1] as CadDimension | undefined;
+          const line = session.document.entities[session.document.indexById.get((dimension.refs ?? [])[0].id) ?? -1];
+          return now !== undefined && line !== undefined && line.type === "LINE" && now.p1.x === line.start.x && now.p2.y === line.end.y;
+        });
+
+      const result: Record<string, number | object> = { entityCount: count, dimensions: dimensions.length, anchorSearchMs: round(search.ms), anchorsMatched: matched };
+      // 移動(追従つき)
+      const moved = time(() => transformEntities(session, ALL_EDITABLE, sampleIds, translationMatrix(1234.5, -678.9), "移動", "移動"));
+      expect(moved.value.ok).toBe(true);
+      expect(followed()).toBe(true);
+      result.moveWithFollowMs = round(moved.ms);
+      expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      // ストレッチ(線の端を動かす)
+      const first = sample[0];
+      if (first.type === "LINE") {
+        const window = windowFromCorners({ x: first.end.x - 1, y: first.end.y - 1 }, { x: first.end.x + 1, y: first.end.y + 1 });
+        const stretched = time(() => stretchEntities(session, ALL_EDITABLE, sampleIds, window, 50, 50, "ストレッチ"));
+        result.stretchWithFollowMs = round(stretched.ms);
+        if (stretched.value.ok) {
+          expect(followed()).toBe(true);
+          expect(session.undo().type).toBe("done");
+        }
+        expect(restored()).toBe(true);
+      }
+
+      // 一括の削除(散らばった図形と、参照されている線): 参照が切れる。高速な経路を保つ(置き換えが足されても、1件ずつにならない)
+      const ids: string[] = [...sampleIds];
+      for (let i = 0; i < count && ids.length < Math.min(100_000, count); i += 2) if (original[i].type !== "DIMENSION" && !sampleIds.includes(original[i].id)) ids.push(original[i].id);
+      const removed = time(() => deleteEntities(session, ALL_EDITABLE, ids, "削除"));
+      expect(removed.value.ok).toBe(true);
+      const brokenDimensions = session.document.entities.filter((e) => e.type === "DIMENSION" && (e.refs ?? []).some((ref) => ref.broken === true)).length;
+      expect(brokenDimensions).toBe(dimensions.length);
+      expect(session.takeNotice()).toContain("参照が切れました");
+      result.bulkDeleteMs = round(removed.ms);
+      result.bulkDeleteCount = ids.length;
+      expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+      expect(session.document.entities.length).toBe(count + dimensions.length);
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.assoc.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[assoc perf] ${entry.name}`, JSON.stringify(result));
     }, 900_000);
   }
 });

@@ -20,6 +20,8 @@ const HIGHLIGHT_COLOR = "#ffff00";
 const WINDOW_BOX_COLOR = "#4a90e2";
 const CROSSING_BOX_COLOR = "#50c878";
 const MEASUREMENT_COLOR = "#ff8c00";
+/** 参照が切れた連動寸法の色(警告) */
+const BROKEN_REFERENCE_COLOR = "#ff3b30";
 const MEASUREMENT_MARKER_RADIUS_PX = 4;
 const PREVIEW_COLOR = "#ffffff";
 const MEASUREMENT_FONT = "11px sans-serif";
@@ -265,7 +267,8 @@ function drawDimensions(ctx: CanvasRenderingContext2D, camera: Camera, dimension
   for (const entity of dimensions) {
     const layout = layoutOf(entity);
     if (layout === null) continue;
-    const color = colorOverride ?? entity.color;
+    // 参照が切れた寸法(Broken Reference)は、警告として、赤で描く(選択のハイライトの色が、優先)
+    const color = colorOverride ?? (entity.refs?.some((ref) => ref.broken === true) ? BROKEN_REFERENCE_COLOR : entity.color);
     let screenDash: number[] | null = null;
     if (entity.lineDash && colorOverride === undefined) {
       if (!dashByKey.has(entity.lineDash.key)) dashByKey.set(entity.lineDash.key, toScreenDashPattern(entity.lineDash, k));

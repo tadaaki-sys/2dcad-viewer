@@ -4,7 +4,7 @@ import type { ArcShape } from "../../core/geometry/construct";
 import type { TextStyle } from "../../core/text/textStyle";
 import { dimensionLineDash, dimensionValuesOf } from "../../core/dimension/dimensionStyle";
 import type { DimensionStyle } from "../../core/dimension/dimensionStyle";
-import type { CadArc, CadCircle, CadDimension, CadLine, CadPolyline, CadText, Point2D } from "../../types/cad";
+import type { CadArc, CadCircle, CadDimension, CadLine, DimensionRef, CadPolyline, CadText, Point2D } from "../../types/cad";
 
 /** 新しい図形の見た目(現在のレイヤーと、その色) */
 export type DrawingStyle = { layer: string; color: string };
@@ -89,8 +89,9 @@ export type DimensionGeometry = Pick<CadDimension, "kind" | "p1" | "p2" | "p3" |
 /**
  * 寸法。描いたときの寸法スタイルの値を、そのまま持つ(コピー。スタイル名は記録するだけ)。
  * 色は、スタイルが色を指定していればそれ、無ければ描くレイヤーの色。線種は、スタイルの線種。
+ * refs は、関連付ける図形(連動寸法。無ければ、連動しない寸法)。
  */
-export function makeDimension(id: string, geometry: DimensionGeometry, dimensionStyle: DimensionStyle, target: DrawingStyle): CadDimension {
+export function makeDimension(id: string, geometry: DimensionGeometry, dimensionStyle: DimensionStyle, target: DrawingStyle, refs: readonly DimensionRef[] = []): CadDimension {
   const lineDash = dimensionLineDash(dimensionStyle.linetype, dimensionStyle.textHeight);
   return {
     id,
@@ -106,6 +107,7 @@ export function makeDimension(id: string, geometry: DimensionGeometry, dimension
     ...(geometry.rotation === undefined ? {} : { rotation: geometry.rotation }),
     values: dimensionValuesOf(dimensionStyle),
     styleName: dimensionStyle.name,
+    ...(refs.length > 0 ? { refs: refs.map((ref) => ({ ...ref, anchor: { ...ref.anchor } })) } : {}),
   };
 }
 

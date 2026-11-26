@@ -2,7 +2,8 @@
 import type { CommandDefinition, CommandSession, PreviewShape } from "../../core/commands";
 import type { EntityId } from "../../core/model";
 import type { StretchWindow } from "../../core/geometry/stretch";
-import type { Affine2D, CadEntity, Point2D } from "../../types/cad";
+import type { Affine2D, CadDimension, CadEntity, Point2D } from "../../types/cad";
+import type { FoundAnchor } from "../../core/dimension/dimensionRefs";
 import type { TextStyle } from "../../core/text/textStyle";
 import type { DimensionStyle } from "../../core/dimension/dimensionStyle";
 
@@ -46,7 +47,9 @@ export type AppRequest =
   /** 文字スタイルの管理パネルを開く(TEXTSTYLE) */
   | { type: "openTextStyles" }
   /** 寸法スタイルの管理パネルを開く(DIMSTYLE) */
-  | { type: "openDimensionStyles" };
+  | { type: "openDimensionStyles" }
+  /** 寸法を、関連付けし直した寸法に置き換える(DIMREASSOC)。測る点・参照が変わる。1つの依頼が、Undoの1段階 */
+  | { type: "reassociateDimension"; id: EntityId; dimension: CadDimension };
 
 /** 角を処理する図形を指したクリック(図形のIDと、クリックした位置) */
 export type CornerPick = { id: EntityId; point: Point2D };
@@ -68,9 +71,9 @@ export type PickResult = { ok: true; id: EntityId } | { ok: false; message: stri
 
 /**
  * 図形を探すときの、対象の種類: curve = 線・円弧・円・折れ線(既定)、chain = 線・折れ線(FILLET・CHAMFER)、text = 文字(TEXTEDIT)、
- * circular = 円・円弧(半径・直径の寸法)、line = 線(角度の寸法)
+ * circular = 円・円弧(半径・直径の寸法)、line = 線(角度の寸法)、dimension = 寸法(DIMREASSOC)
  */
-export type PickKind = "curve" | "chain" | "text" | "circular" | "line";
+export type PickKind = "curve" | "chain" | "text" | "circular" | "line" | "dimension";
 
 /** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH・OFFSET・BREAK・FILLET・CHAMFER)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
 export type AppEditing = {
@@ -95,6 +98,12 @@ export type AppEditing = {
   textOf: (id: EntityId) => { text: string; isMText: boolean } | null;
   /** 図形(いまの図面にあるもの)。見つからないときは null(寸法の、円・線の形を読むのに使う) */
   entityOf: (id: EntityId) => CadEntity | null;
+  /**
+   * 点ごとに、その点に一致する、図形の位置(線・円弧の端点・中点、円・円弧の中心、折れ線の頂点)を探す。
+   * 連動寸法が、測る点を図形に付けるのに使う(Snap で吸着した点は、図形の座標そのものなので、一致する)。見つからない点は null。
+   * 同じ点に複数の図形が一致するとき(共有する角)は、描画順で最前面の図形
+   */
+  anchorsAt: (points: readonly Point2D[]) => Array<FoundAnchor | null>;
   /** OFFSET の仮表示を作る関数を返す(距離[null = 通過点]とカーソルの位置を渡すと、写した形を返す) */
   createOffsetPreview: (id: EntityId) => (distance: number | null, cursor: Point2D) => readonly PreviewShape[];
   /** BREAK の仮表示を作る関数を返す(第2点を渡すと、切断したあとに残る形を返す) */
@@ -114,6 +123,7 @@ export const NO_EDITING: AppEditing = {
   createBreakPreview: () => () => [],
   textOf: () => null,
   entityOf: () => null,
+  anchorsAt: (points) => points.map(() => null),
 };
 
 /** コマンドを始める時点のアプリの状態 */

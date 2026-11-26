@@ -48,6 +48,7 @@ import type { Editability, EditabilitySource } from "./app/document/editability"
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "./app/document/editing";
 import { breakAt } from "./app/document/breaking";
 import { cornerAt } from "./app/document/filleting";
+import { reassociateDimension } from "./app/document/dimensioning";
 import { editTextContent } from "./app/document/texting";
 import { currentTextStyle, DEFAULT_TEXT_STYLE } from "./core/text/textStyle";
 import { currentDimensionStyle, DEFAULT_DIMENSION_STYLE } from "./core/dimension/dimensionStyle";
@@ -601,7 +602,10 @@ export default function App() {
         return;
       }
       try {
-        appendCommandLog([run(session, editabilityRef.current).message]);
+        const message = run(session, editabilityRef.current).message;
+        // 連動寸法の追従で知らせること(参照が切れた・関連付けを解除した)も、続けて知らせる
+        const notice = session.takeNotice();
+        appendCommandLog(notice === null ? [message] : [message, notice]);
       } catch (error) {
         console.error("[App] failed to apply an edit", error);
         appendCommandLog(["表示の更新に失敗しました。図面を開き直してください"]);
@@ -627,7 +631,8 @@ export default function App() {
         request.type === "breakEntity" ||
         request.type === "filletEntities" ||
         request.type === "chamferEntities" ||
-        request.type === "editText";
+        request.type === "editText" ||
+        request.type === "reassociateDimension";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -693,6 +698,9 @@ export default function App() {
           break;
         case "editText":
           applyEdit((session, editability) => editTextContent(session, editability, request.id, request.text));
+          break;
+        case "reassociateDimension":
+          applyEdit((session, editability) => reassociateDimension(session, editability, request.id, request.dimension));
           break;
         case "openDimensionStyles":
           setShowDimensionStyles(true);

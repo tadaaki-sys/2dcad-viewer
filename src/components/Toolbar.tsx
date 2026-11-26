@@ -31,6 +31,7 @@ export type DrawCommandName =
   | "DIMRADIUS"
   | "DIMDIAMETER"
   | "DIMANGULAR"
+  | "DIMREASSOC"
   | "DIMSTYLE";
 
 type ToolbarProps = {
@@ -89,6 +90,7 @@ const DIMENSION_MENU: ReadonlyArray<{ name: DrawCommandName; label: string; titl
   { name: "DIMRADIUS", label: "半径寸法", title: "半径寸法を描く(DIMRADIUS・DRA)。円・円弧をクリックして、文字の側の点をクリック" },
   { name: "DIMDIAMETER", label: "直径寸法", title: "直径寸法を描く(DIMDIAMETER・DDI)。円・円弧をクリックして、向きを決める点をクリック" },
   { name: "DIMANGULAR", label: "角度寸法", title: "角度寸法を描く(DIMANGULAR・DAN)。2本の線をクリックして、弧が通る点をクリック(Enter = 3点指定)" },
+  { name: "DIMREASSOC", label: "関連付け", title: "寸法を、図形に関連付けし直す(DIMREASSOC・DRE)。測る点を図形の端点などに付ける。参照が切れた寸法や、Phase 15 までの寸法を、連動にできる" },
   { name: "DIMSTYLE", label: "寸法スタイル", title: "寸法スタイル(文字の高さ・矢印・小数桁・単位・色・レイヤー・線種)の管理パネルを開く(DIMSTYLE・DST)" },
 ];
 

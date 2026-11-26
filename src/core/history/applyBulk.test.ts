@@ -151,3 +151,72 @@ describe("applyChangeSet: bulk path edge cases give the same outcome as the sequ
     });
   }
 });
+
+describe("applyChangeSet: a bulk remove / add followed by replaces (the follow-up of a connected dimension)", () => {
+  it("random removals / additions with trailing replaces match the one-by-one result, and the inverse restores the original", () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const random = seededRandom(5000 + seed);
+      const count = 3 + Math.floor(random() * 40);
+      const doc = makeDocument(sequentialIds(count));
+      const picked = sequentialIds(count).filter(() => random() < 0.3);
+      if (picked.length === 0 || picked.length === count) continue;
+      const removal = removeEntitiesChangeSet(doc, picked, "削除");
+      const after = applyChangeSet(doc, removal);
+      if (!after.ok) throw new Error(after.error);
+      // 残った図形のいくつかを、置き換える(位置は、削除の後の配列での位置)
+      const replaces: EntityChange[] = [];
+      after.document.entities.forEach((entity, index) => {
+        if (random() < 0.3) replaces.push({ kind: "replace", before: entity, after: { ...entity, color: "#abcdef" }, index });
+      });
+      const change: ChangeSet = { label: "削除と置き換え", changes: [...removal.changes, ...replaces] };
+      const fast = applyChangeSet(doc, change);
+      const slow = applyChangeSetSequentially(doc, change);
+      expectSameResult(fast, slow, `remove+replace seed ${seed}`);
+      if (!fast.ok) throw new Error(fast.error);
+      const undo = applyChangeSet(fast.document, invertChangeSet(change));
+      if (!undo.ok) throw new Error(undo.error);
+      expect(expectSameDocument(undo.document, doc), `restored seed ${seed}`).toBeNull();
+    }
+  });
+
+  it("random insertions with trailing replaces match the one-by-one result", () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const random = seededRandom(9000 + seed);
+      const count = 2 + Math.floor(random() * 20);
+      const doc = makeDocument(sequentialIds(count));
+      const adds = 1 + Math.floor(random() * 5);
+      const total = count + adds;
+      const positions = new Set<number>();
+      while (positions.size < adds) positions.add(Math.floor(random() * total));
+      const addChanges: EntityChange[] = [...positions].sort((a, b) => a - b).map((index, i) => ({ kind: "add" as const, entity: makeLine(`n${i + 1}`, i), index }));
+      const afterAdd = applyChangeSet(doc, { label: "追加", changes: addChanges });
+      if (!afterAdd.ok) throw new Error(afterAdd.error);
+      const replace: EntityChange = { kind: "replace", before: afterAdd.document.entities[0], after: { ...afterAdd.document.entities[0], color: "#123456" }, index: 0 };
+      const change: ChangeSet = { label: "追加と置き換え", changes: [...addChanges, replace] };
+      expectSameResult(applyChangeSet(doc, change), applyChangeSetSequentially(doc, change), `add+replace seed ${seed}`);
+    }
+  });
+
+  it("an invalid tail gives the same error as the one-by-one application, and changes nothing", () => {
+    const doc = makeDocument(sequentialIds(10));
+    const removal = removeEntitiesChangeSet(doc, ["e1", "e3"], "削除");
+    const bad: EntityChange = { kind: "replace", before: doc.entities[0], after: { ...doc.entities[0], color: "#000" }, index: 99 };
+    const change: ChangeSet = { label: "不正", changes: [...removal.changes, bad] };
+    expectSameResult(applyChangeSet(doc, change), applyChangeSetSequentially(doc, change), "invalid tail");
+    expect(applyChangeSet(doc, change).ok).toBe(false);
+  });
+
+  it("deleting 100,000 scattered figures with a trailing replace stays on the fast path (not the one-by-one path)", () => {
+    const ids = sequentialIds(200_000);
+    const doc = makeDocument(ids);
+    const picked = ids.filter((_, i) => i % 2 === 0);
+    const removal = removeEntitiesChangeSet(doc, picked, "削除");
+    const first = doc.entities[1];
+    const change: ChangeSet = { label: "削除と置き換え", changes: [...removal.changes, { kind: "replace", before: first, after: { ...first, color: "#abcdef" }, index: 0 }] };
+    const started = Date.now();
+    const result = applyChangeSet(doc, change);
+    expect(result.ok).toBe(true);
+    // 1件ずつの経路では、数十秒かかる(図形数 × 削除数)。高速経路なら、数百ミリ秒
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+});

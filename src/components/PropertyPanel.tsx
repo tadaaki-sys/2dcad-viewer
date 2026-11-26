@@ -1,4 +1,4 @@
-import type { CadEntity } from "../types/cad";
+import type { CadEntity, DimensionAnchor } from "../types/cad";
 import { polylineLength, distance, normalizeArcSpan } from "../core/geometry/geometry";
 import { formatMm } from "../utils/format";
 import { getEntityPoints } from "../core/geometry/entityGeometry";
@@ -14,6 +14,11 @@ type Row = { label: string; value: string };
 
 function radiansToDegrees(radians: number): number {
   return (radians * 180) / Math.PI;
+}
+
+/** 参照の位置の表示 */
+function anchorText(anchor: DimensionAnchor): string {
+  return anchor.kind === "vertex" ? `vertex ${anchor.index}` : anchor.kind;
 }
 
 function entityLength(entity: CadEntity): number {
@@ -85,6 +90,9 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
       { label: "Extension Offset", value: formatMm(entity.values.extensionOffset) },
     );
     if (entity.styleName !== undefined) rows.push({ label: "Dimension Style", value: entity.styleName });
+    const refs = entity.refs ?? [];
+    rows.push({ label: "Associativity", value: refs.length === 0 ? "None" : refs.some((ref) => ref.broken === true) ? "Broken Reference" : "Associated" });
+    for (const ref of refs) rows.push({ label: `Reference ${ref.slot}`, value: `${ref.id} ${anchorText(ref.anchor)}${ref.broken === true ? " (broken)" : ""}` });
   } else if (entity.type === "SPLINE") {
     // 曲線を折れ線に近似した長さなので、実際の弧長とはわずかに異なる
     rows.push(

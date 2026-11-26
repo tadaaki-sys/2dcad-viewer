@@ -178,6 +178,10 @@ describe("figures a dimension is not a target of", () => {
     const { session, editability } = withDimension();
     const circular = pickTargetOf("circular");
     expect(pickEntityAt(session, editability, pt(3100, 0), TOLERANCE, VISIBLE, circular.types, "寸法", undefined, circular.label)).toMatchObject({ ok: true });
+    // 寸法を指す(DIMREASSOC): 寸法だけが対象
+    const dimensionTarget = pickTargetOf("dimension");
+    expect(pickEntityAt(session, editability, pt(300, 600), TOLERANCE, VISIBLE, dimensionTarget.types, "寸法の関連付け", undefined, dimensionTarget.label)).toMatchObject({ ok: true });
+    expect(pickEntityAt(session, editability, pt(300, 300), TOLERANCE, VISIBLE, dimensionTarget.types, "寸法の関連付け", undefined, dimensionTarget.label)).toMatchObject({ ok: false });
     const line = pickTargetOf("line");
     expect(pickEntityAt(session, editability, pt(3100, 0), TOLERANCE, VISIBLE, line.types, "寸法", undefined, line.label)).toMatchObject({ ok: false });
     expect(pickEntityAt(session, editability, pt(300, 300), TOLERANCE, VISIBLE, line.types, "寸法", undefined, line.label)).toMatchObject({ ok: true });

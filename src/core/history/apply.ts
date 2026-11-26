@@ -27,8 +27,30 @@ function fail(error: string): { ok: false; error: string } {
  */
 export function applyChangeSet(document: CadDocument, changeSet: ChangeSet): ApplyResult {
   if (changeSet.changes.length === 0) return fail("変更がありません");
-  const applied = applyBulk(document, changeSet.changes) ?? applySequentially(document, changeSet.changes);
-  return finish(document, applied);
+  const bulk = applyBulk(document, changeSet.changes);
+  if (bulk !== null) return finish(document, bulk);
+  return applyBulkThenReplaces(document, changeSet.changes) ?? finish(document, applySequentially(document, changeSet.changes));
+}
+
+/**
+ * 削除だけ(または追加だけ)の大きな変更のあとに、置き換えが続く変更(連動寸法の追従が、置き換えを足したとき)を、
+ * 前半は1回の走査(applyBulk)、後半は1件ずつ、で適用する。多数の図形の削除が、置き換えが1つ付いただけで、遅い経路に落ちないように。
+ * 前半が高速経路の条件に合わない・失敗するときは null(1件ずつの適用に任せる。エラーの文言もそちらが出す)。
+ */
+function applyBulkThenReplaces(document: CadDocument, changes: readonly EntityChange[]): ApplyResult | null {
+  const kind = changes[0].kind;
+  if (kind !== "remove" && kind !== "add") return null;
+  let split = 0;
+  while (split < changes.length && changes[split].kind === kind) split++;
+  if (split === changes.length) return null;
+  for (let i = split; i < changes.length; i++) if (changes[i].kind !== "replace") return null;
+  const bulk = applyBulk(document, changes.slice(0, split));
+  if (bulk === null) return null;
+  const middle = finish(document, bulk);
+  if (!middle.ok) return null;
+  const tail = applySequentially(middle.document, changes.slice(split));
+  // 後半が失敗するときも、null(1件ずつの適用に任せる。何番目の変更か、という文言が、同じになる)
+  return tail.ok ? finish(middle.document, tail) : null;
 }
 
 /** 1件ずつ順に適用する方法だけで適用する(高速経路を通らない)。高速経路と結果が同じことを、テストで確かめるために使う */

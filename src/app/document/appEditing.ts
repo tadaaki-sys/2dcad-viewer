@@ -1,5 +1,6 @@
 // 編集コマンドが使う情報(AppEditing)を作る。画面の側が、いまの図面・編集可否の判断・選択を、関数で渡す。
 // 関数で渡すので、コマンドは、始まる時点の(最新の)状態を読める。React にも画面にも依存しない。
+import { findAnchorsAt } from "../../core/dimension/dimensionRefs";
 import { createBreakPreview, createOffsetPreview, createSelectionPreview, createStretchPreview } from "../../core/commands/entityPreview";
 import { boundsTouchWindow } from "../../core/geometry/stretch";
 import { BOUNDS_STRIDE, computeAllEntityBounds } from "../../core/spatial/entityBounds";
@@ -77,6 +78,10 @@ export function createAppEditing(sources: AppEditingSources): AppEditing {
     createBreakPreview: (id, first) => {
       const entity = sources.getSession() === null ? undefined : getEntity(sources.getSession()!.document, id);
       return entity === undefined ? () => [] : createBreakPreview(entity, first);
+    },
+    anchorsAt: (points) => {
+      const session = sources.getSession();
+      return session === null ? points.map(() => null) : findAnchorsAt(session.document.entities, sources.getVisibleLayerNames(), points);
     },
     entityOf: (id) => {
       const session = sources.getSession();

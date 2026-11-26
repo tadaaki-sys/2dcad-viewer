@@ -40,6 +40,7 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
     createBreakPreview: NO_EDITING.createBreakPreview,
     textOf: NO_EDITING.textOf,
     entityOf: NO_EDITING.entityOf,
+    anchorsAt: NO_EDITING.anchorsAt,
     ...overrides,
   };
   return createAppCommandSession(() => makeContext({ editing }));

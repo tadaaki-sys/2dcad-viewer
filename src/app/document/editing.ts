@@ -115,7 +115,10 @@ export function copyEntities(
         const { sourceRecord: _ignored, ...withoutRecord } = source;
         void _ignored;
         const copy: CadEntity = root === undefined ? withoutRecord : { ...withoutRecord, sourceRecord: root };
-        shaped.push(movedEntity(copy, matrix));
+        // 複写した寸法は、連動しない寸法にする(複写を動かした点が、参照している図形から外れたまま、参照だけが残ると、
+        // 参照した図形が変わったとき、複写が、図形の位置へ引き戻されるため)
+        const plain: CadEntity = copy.type === "DIMENSION" && copy.refs !== undefined ? withoutRefs(copy) : copy;
+        shaped.push(movedEntity(plain, matrix));
       }
     }
   } catch (error) {
@@ -125,6 +128,13 @@ export function copyEntities(
   const outcome = session.apply(addEntitiesChangeSet(session.document, copies, label));
   if (!outcome.ok) return { ok: false, message: `複写できませんでした: ${outcome.error}` };
   return { ok: true, message: `${sources.length}個の図形を${matrices.length}回、複写しました(合計 ${copies.length} 個を追加)${skippedNote(targets.skipped, targets.reason)}` };
+}
+
+/** 寸法から、関連付け(refs)を除いたもの */
+function withoutRefs(dimension: Extract<CadEntity, { type: "DIMENSION" }>): CadEntity {
+  const { refs: _refs, ...rest } = dimension;
+  void _refs;
+  return rest;
 }
 
 /** 選んだ図形を、削除する。編集できない図形は、除く */

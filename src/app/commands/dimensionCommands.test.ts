@@ -14,10 +14,16 @@ const LINE_X: CadEntity = { id: "lx", type: "LINE", layer: "0", color: "#fff", s
 const LINE_Y: CadEntity = { id: "ly", type: "LINE", layer: "0", color: "#fff", start: { x: 0, y: 0 }, end: { x: 0, y: 1000 } };
 const LINE_PARALLEL: CadEntity = { id: "lp", type: "LINE", layer: "0", color: "#fff", start: { x: 0, y: 500 }, end: { x: 1000, y: 500 } };
 const POLY: CadEntity = { id: "pl", type: "LWPOLYLINE", layer: "0", color: "#fff", vertices: [{ x: 0, y: 0 }, { x: 5, y: 5 }], closed: false };
-const ENTITIES: Readonly<Record<string, CadEntity>> = { c1: CIRCLE, a1: ARC, lx: LINE_X, ly: LINE_Y, lp: LINE_PARALLEL, pl: POLY };
+const DIM_H: CadDimension = {
+  id: "d1", type: "DIMENSION", layer: "0", color: "#fff", kind: "aligned", p1: { x: 0, y: 0 }, p2: { x: 1000, y: 0 }, position: { x: 500, y: -300 },
+  values: { textHeight: 100, arrowSize: 100, decimals: 0, angleDecimals: 1, unit: "mm", showUnit: false, extensionOffset: 50 },
+};
+const DIM_R: CadDimension = { ...DIM_H, id: "d2", kind: "radius", p1: { x: 1000, y: 1000 }, p2: { x: 1250, y: 1000 }, position: { x: 1500, y: 1000 } };
+const DIM_A: CadDimension = { ...DIM_H, id: "d3", kind: "angular", p1: { x: 0, y: 0 }, p2: { x: 1000, y: 0 }, p3: { x: 0, y: 1000 }, position: { x: 700, y: 700 } };
+const ENTITIES: Readonly<Record<string, CadEntity>> = { c1: CIRCLE, a1: ARC, lx: LINE_X, ly: LINE_Y, lp: LINE_PARALLEL, pl: POLY, d1: DIM_H, d2: DIM_R, d3: DIM_A };
 
 /** クリックの位置の x で、指す図形を決める(100 = 円、200 = 円弧、300 = 横線、400 = 縦線、500 = 平行線、600 = 折れ線。それ以外は、図形なし) */
-const PICKS: Readonly<Record<number, string>> = { 100: "c1", 200: "a1", 300: "lx", 400: "ly", 500: "lp", 600: "pl" };
+const PICKS: Readonly<Record<number, string>> = { 100: "c1", 200: "a1", 300: "lx", 400: "ly", 500: "lp", 600: "pl", 700: "d1", 710: "d2", 720: "d3" };
 
 function start(context: Partial<AppCommandContext> = {}, editing: Partial<AppEditing> = {}) {
   const picks: Array<{ point: { x: number; y: number }; name: string; kind: PickKind | undefined }> = [];
@@ -30,7 +36,7 @@ function start(context: Partial<AppCommandContext> = {}, editing: Partial<AppEdi
         const id = PICKS[point.x];
         if (id === undefined) return { ok: false, message: `${name}: クリックした所に図形がありません` };
         const entity = ENTITIES[id];
-        const allowed = kind === "circular" ? ["CIRCLE", "ARC"] : kind === "line" ? ["LINE"] : ["LINE", "CIRCLE", "ARC", "LWPOLYLINE"];
+        const allowed = kind === "circular" ? ["CIRCLE", "ARC"] : kind === "line" ? ["LINE"] : kind === "dimension" ? ["DIMENSION"] : ["LINE", "CIRCLE", "ARC", "LWPOLYLINE"];
         return allowed.includes(entity.type) ? { ok: true, id } : { ok: false, message: `${entity.type} は、${name}できません` };
       },
       entityOf: (id) => ENTITIES[id] ?? null,
@@ -390,5 +396,240 @@ describe("DIMANGULAR", () => {
     const ended = session.submitText("");
     expect(ended.active).toBeNull();
     expect(ended.requests).toEqual([]);
+  });
+});
+
+// ---- Phase 16: 連動寸法 ----
+
+/** 点が一致する図形の位置を返す(連動寸法が、測る点を図形に付けるのに使う)。"x,y" の文字で、図形の位置を決める */
+const ANCHORS = (map: Record<string, { id: string; anchor: { kind: "start" | "end" | "mid" | "center" } }>): Partial<AppEditing> => ({
+  anchorsAt: (points) => points.map((p) => map[`${p.x},${p.y}`] ?? null),
+});
+
+describe("associating at creation", () => {
+  it("points that match a figure's endpoint / center become references; the others stay plain points; the message says how many", () => {
+    const { session } = start({}, ANCHORS({ "0,0": { id: "lx", anchor: { kind: "start" } } }));
+    session.submitText("dh");
+    session.submitPoint({ x: 0, y: 0 });
+    session.submitPoint({ x: 800, y: 0 });
+    const done = session.submitPoint({ x: 400, y: -200 });
+    const dimension = addedDimension(done.requests);
+    expect(dimension.refs).toEqual([{ slot: "p1", id: "lx", anchor: { kind: "start" } }]);
+    expect(done.messages.some((m) => m.includes("関連付けました(1か所)"))).toBe(true);
+  });
+
+  it("both points matched: two references; nothing matched: no refs property at all", () => {
+    const both = start({}, ANCHORS({ "0,0": { id: "lx", anchor: { kind: "start" } }, "1000,0": { id: "lx", anchor: { kind: "end" } } }));
+    both.session.submitText("dal");
+    both.session.submitPoint({ x: 0, y: 0 });
+    both.session.submitPoint({ x: 1000, y: 0 });
+    expect(addedDimension(both.session.submitPoint({ x: 500, y: -200 }).requests).refs).toEqual([
+      { slot: "p1", id: "lx", anchor: { kind: "start" } },
+      { slot: "p2", id: "lx", anchor: { kind: "end" } },
+    ]);
+    const none = start();
+    none.session.submitText("dv");
+    none.session.submitPoint({ x: 0, y: 0 });
+    none.session.submitPoint({ x: 100, y: 800 });
+    const done = none.session.submitPoint({ x: -200, y: 400 });
+    expect("refs" in addedDimension(done.requests)).toBe(false);
+    expect(done.messages.some((m) => m.includes("関連付けました"))).toBe(false);
+  });
+
+  it("the preview does not ask for references (only the final click does, once)", () => {
+    let calls = 0;
+    const { session } = start({}, { anchorsAt: (points) => { calls++; return points.map(() => null); } });
+    session.submitText("dh");
+    session.submitPoint({ x: 0, y: 0 });
+    session.submitPoint({ x: 1000, y: 0 });
+    for (let i = 0; i < 5; i++) session.previewAt({ x: 500, y: 100 * i });
+    expect(calls).toBe(0);
+    session.submitPoint({ x: 500, y: -200 });
+    expect(calls).toBe(1);
+  });
+
+  it("a refused position (no result) does not ask for references either", () => {
+    let calls = 0;
+    const { session } = start({}, { anchorsAt: (points) => { calls++; return points.map(() => null); } });
+    session.submitText("dh");
+    session.submitPoint({ x: -1e308, y: 0 });
+    session.submitPoint({ x: 1e308, y: 0 });
+    expect(session.submitPoint({ x: 0, y: 100 }).requests).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  it("radius and diameter reference the clicked circle / arc itself", () => {
+    const radius = start();
+    radius.session.submitText("dra");
+    radius.session.submitPoint({ x: 100, y: 5000 });
+    expect(addedDimension(radius.session.submitPoint({ x: 1000, y: 1600 }).requests).refs).toEqual([{ slot: "figure", id: "c1", anchor: { kind: "whole" } }]);
+    const diameter = start();
+    diameter.session.submitText("ddi");
+    diameter.session.submitPoint({ x: 200, y: 50 });
+    expect(addedDimension(diameter.session.submitPoint({ x: 300, y: 300 }).requests).refs).toEqual([{ slot: "figure", id: "a1", anchor: { kind: "whole" } }]);
+  });
+
+  it("an angular dimension by two lines references both lines; by three points, the matching points", () => {
+    const lines = start();
+    lines.session.submitText("dan");
+    lines.session.submitPoint({ x: 300, y: 0 });
+    lines.session.submitPoint({ x: 400, y: 0 });
+    expect(addedDimension(lines.session.submitPoint({ x: 500, y: 500 }).requests).refs).toEqual([
+      { slot: "line1", id: "lx", anchor: { kind: "whole" } },
+      { slot: "line2", id: "ly", anchor: { kind: "whole" } },
+    ]);
+    const three = start({}, ANCHORS({ "0,0": { id: "lx", anchor: { kind: "start" } }, "1000,0": { id: "lx", anchor: { kind: "end" } } }));
+    three.session.submitText("dan");
+    three.session.submitText("");
+    three.session.submitPoint({ x: 0, y: 0 });
+    three.session.submitPoint({ x: 1000, y: 0 });
+    three.session.submitPoint({ x: 0, y: 1000 });
+    expect(addedDimension(three.session.submitPoint({ x: 700, y: 700 }).requests).refs).toEqual([
+      { slot: "p1", id: "lx", anchor: { kind: "start" } },
+      { slot: "p2", id: "lx", anchor: { kind: "end" } },
+    ]);
+  });
+});
+
+const reassociation = (requests: readonly AppRequest[]): CadDimension => {
+  expect(requests).toHaveLength(1);
+  const request = requests[0];
+  if (request.type !== "reassociateDimension") throw new Error(`reassociateDimension ではありません: ${request.type}`);
+  return request.dimension;
+};
+
+describe("DIMREASSOC", () => {
+  it("DRE is the short name; it needs a document and a ready drawing", () => {
+    expect(start().session.submitText("dre").active).toMatchObject({ name: "DIMREASSOC", expect: "point", rawPoints: true });
+    expect(start({ isDocumentOpen: false }).session.submitText("dimreassoc").messages[0]).toContain("図面が開かれていません");
+    expect(start({}, { ready: false }).session.submitText("dimreassoc").messages[0]).toContain("準備中");
+  });
+
+  it("refuses a click on nothing and on a figure that is not a dimension (asked again); Enter ends without a request", () => {
+    const { session, picks } = start();
+    session.submitText("dre");
+    expect(session.submitPoint({ x: 9999, y: 0 }).messages[0]).toContain("クリックした所に図形がありません");
+    const notDim = session.submitPoint({ x: 300, y: 0 });
+    expect(notDim.messages[0]).toContain("できません");
+    expect(picks.at(-1)?.kind).toBe("dimension");
+    const ended = session.submitText("");
+    expect(ended.requests).toEqual([]);
+    expect(ended.active).toBeNull();
+  });
+
+  it("a linear dimension: each point is clicked on a figure position (the point moves there) and becomes a reference", () => {
+    const { session } = start({}, ANCHORS({ "5,5": { id: "lx", anchor: { kind: "start" } }, "995,5": { id: "lx", anchor: { kind: "end" } } }));
+    session.submitText("dre");
+    expect(session.submitPoint({ x: 700, y: 0 }).active?.prompt).toContain("1つ目の点");
+    expect(session.submitPoint({ x: 5, y: 5 }).active?.prompt).toContain("2つ目の点");
+    const done = session.submitPoint({ x: 995, y: 5 });
+    const dimension = reassociation(done.requests);
+    expect(dimension).toMatchObject({ id: "d1", p1: { x: 5, y: 5 }, p2: { x: 995, y: 5 }, position: { x: 500, y: -300 } });
+    expect(dimension.refs).toEqual([
+      { slot: "p1", id: "lx", anchor: { kind: "start" } },
+      { slot: "p2", id: "lx", anchor: { kind: "end" } },
+    ]);
+    expect(done.messages[0]).toContain("関連付けました(2か所)");
+  });
+
+  it("a click that matches no figure position is refused with the reason (asked again); Enter keeps the point and tries to match it", () => {
+    const { session } = start({}, ANCHORS({ "0,0": { id: "lx", anchor: { kind: "start" } } }));
+    session.submitText("dre");
+    session.submitPoint({ x: 700, y: 0 });
+    const refused = session.submitPoint({ x: 333, y: 3 });
+    expect(refused.messages[0]).toContain("一致しません");
+    expect(refused.active?.prompt).toContain("1つ目の点");
+    // Enter: 今の点 p1 = (0,0) は、図形の位置に一致する → 付く。p2 = (1000,0) は一致しない → 付かない
+    expect(session.submitText("").active?.prompt).toContain("2つ目の点");
+    const done = session.submitText("");
+    const dimension = reassociation(done.requests);
+    expect(dimension.p1).toEqual({ x: 0, y: 0 });
+    expect(dimension.p2).toEqual({ x: 1000, y: 0 });
+    expect(dimension.refs).toEqual([{ slot: "p1", id: "lx", anchor: { kind: "start" } }]);
+  });
+
+  it("with nothing to link, the dimension is still replaced (its old references are dropped) and the message says no point was linked", () => {
+    const withRefs: CadDimension = { ...DIM_H, refs: [{ slot: "p1", id: "lx", anchor: { kind: "start" } }] };
+    const { session } = start({}, { entityOf: (id) => (id === "d1" ? withRefs : ENTITIES[id] ?? null) });
+    session.submitText("dre");
+    session.submitPoint({ x: 700, y: 0 });
+    session.submitText("");
+    const done = session.submitText("");
+    expect("refs" in reassociation(done.requests)).toBe(false);
+    expect(done.messages[0]).toContain("関連付けた点はありません");
+  });
+
+  it("a radius dimension: click a circle (center and radius follow, the direction is kept); Enter ends unchanged", () => {
+    const { session } = start();
+    session.submitText("dre");
+    expect(session.submitPoint({ x: 710, y: 0 }).active?.prompt).toContain("円または円弧");
+    const done = session.submitPoint({ x: 200, y: 50 });
+    const dimension = reassociation(done.requests);
+    expect(dimension.p1).toEqual({ x: 0, y: 0 });
+    // 向きは +X のまま、円弧の半径 100
+    expect(dimension.p2.x).toBeCloseTo(100, 9);
+    expect(dimension.p2.y).toBeCloseTo(0, 9);
+    expect(dimension.refs).toEqual([{ slot: "figure", id: "a1", anchor: { kind: "whole" } }]);
+
+    const keep = start().session;
+    keep.submitText("dre");
+    keep.submitPoint({ x: 710, y: 0 });
+    const ended = keep.submitText("");
+    expect(ended.requests).toEqual([]);
+    expect(ended.messages[0]).toContain("変更されませんでした");
+  });
+
+  it("a radius dimension refuses a line (asked again)", () => {
+    const { session } = start();
+    session.submitText("dre");
+    session.submitPoint({ x: 710, y: 0 });
+    const refused = session.submitPoint({ x: 300, y: 0 });
+    expect(refused.messages[0]).toContain("できません");
+    expect(refused.requests).toEqual([]);
+  });
+
+  it("an angular dimension: two lines give the vertex and arms again (by the dimension's arc position); the same line twice and parallel lines are refused", () => {
+    const { session } = start();
+    session.submitText("dre");
+    expect(session.submitPoint({ x: 720, y: 0 }).active?.prompt).toContain("1本目の線");
+    expect(session.submitPoint({ x: 300, y: 0 }).active?.prompt).toContain("2本目の線");
+    expect(session.submitPoint({ x: 300, y: 0 }).messages[0]).toContain("同じ線");
+    expect(session.submitPoint({ x: 500, y: 0 }).messages[0]).toContain("平行");
+    const done = session.submitPoint({ x: 400, y: 0 });
+    const dimension = reassociation(done.requests);
+    expect(dimension.p1).toMatchObject({ x: 0, y: 0 });
+    expect(dimension.refs).toEqual([
+      { slot: "line1", id: "lx", anchor: { kind: "whole" } },
+      { slot: "line2", id: "ly", anchor: { kind: "whole" } },
+    ]);
+    expect(dimension.position).toEqual({ x: 700, y: 700 });
+  });
+
+  it("an angular dimension: Enter at the first prompt switches to the three points (Enter keeps a point)", () => {
+    const { session } = start({}, ANCHORS({ "0,0": { id: "lx", anchor: { kind: "start" } }, "1000,0": { id: "lx", anchor: { kind: "end" } } }));
+    session.submitText("dre");
+    session.submitPoint({ x: 720, y: 0 });
+    expect(session.submitText("").active?.prompt).toContain("頂点");
+    session.submitText("");
+    session.submitText("");
+    const done = session.submitText("");
+    const dimension = reassociation(done.requests);
+    expect(dimension.refs).toEqual([
+      { slot: "p1", id: "lx", anchor: { kind: "start" } },
+      { slot: "p2", id: "lx", anchor: { kind: "end" } },
+    ]);
+  });
+
+  it("an angular result that cannot be computed is refused without a request", () => {
+    const degenerate: CadDimension = { ...DIM_A, position: { x: 0, y: 0 } };
+    const { session } = start({}, { entityOf: (id) => (id === "d3" ? degenerate : ENTITIES[id] ?? null) });
+    session.submitText("dre");
+    session.submitPoint({ x: 720, y: 0 });
+    session.submitText("");
+    session.submitText("");
+    session.submitText("");
+    const done = session.submitText("");
+    expect(done.requests).toEqual([]);
+    expect(done.messages[0]).toContain("計算できません");
   });
 });

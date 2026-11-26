@@ -14,7 +14,7 @@ import { angularFromLines, intersectionOfLines, pointOnCircleToward } from "../.
 import { layoutDimension } from "../../core/dimension/dimensionGeometry";
 import type { DimensionStyle } from "../../core/dimension/dimensionStyle";
 import { IDENTITY_MATRIX } from "../../core/geometry/transform";
-import type { CadDimension, CadEntity, Point2D } from "../../types/cad";
+import type { CadDimension, CadEntity, DimensionRef, Point2D } from "../../types/cad";
 import { isSamePoint, makeDimension } from "../drawing/newEntities";
 import type { DimensionGeometry, DrawingStyle } from "../drawing/newEntities";
 import { endedMessage, NOT_READY_MESSAGE } from "./editCommands";
@@ -47,8 +47,24 @@ type Build = (position: Point2D) => DimensionGeometry;
  * 寸法線の位置(または文字の側・弧が通る点)を指示する段階。
  * カーソルを動かすたびに、その位置の寸法を、仮表示する。確定のとき、形が計算できなければ、理由を知らせて、やり直せる。
  */
-function positionStep(prompt: string, basePoint: Point2D | undefined, build: Build, refusal: string, ready: Extract<Ready, { ok: true }>, context: AppCommandContext, summary: (value: CadDimension) => string): Step {
-  const candidate = (position: Point2D, id: string): CadDimension => makeDimension(id, build(position), ready.style, ready.drawing);
+/** 確定する寸法の、関連付け(連動寸法の参照)。定義点から、図形の位置を探す(円・線は、クリックした図形をそのまま)。決めるのは、確定のときの1回だけ */
+type RefsOf = (geometry: DimensionGeometry) => readonly DimensionRef[];
+
+const NO_REFS: RefsOf = () => [];
+
+/** 定義点のうち、図形の端点・中点・中心・頂点に一致するものを、参照にする(一致しない点は、固定の点のまま) */
+function pointRefs(context: AppCommandContext, slots: ReadonlyArray<readonly ["p1" | "p2" | "p3", Point2D]>): DimensionRef[] {
+  const found = context.editing.anchorsAt(slots.map(([, point]) => point));
+  const refs: DimensionRef[] = [];
+  slots.forEach(([slot], i) => {
+    const at = found[i];
+    if (at !== null && at !== undefined) refs.push({ slot, id: at.id, anchor: at.anchor });
+  });
+  return refs;
+}
+
+function positionStep(prompt: string, basePoint: Point2D | undefined, build: Build, refusal: string, ready: Extract<Ready, { ok: true }>, context: AppCommandContext, summary: (value: CadDimension) => string, refsOf: RefsOf = NO_REFS): Step {
+  const candidate = (position: Point2D, id: string, refs: readonly DimensionRef[] = []): CadDimension => makeDimension(id, build(position), ready.style, ready.drawing, refs);
   const step: Step = {
     type: "prompt",
     prompt,
@@ -59,9 +75,12 @@ function positionStep(prompt: string, basePoint: Point2D | undefined, build: Bui
     onInput: (input) => {
       if (input.kind === "enter") return { type: "done", messages: [endedMessage("寸法", NO_DIMENSION_DETAIL)] };
       if (input.kind !== "point") return step;
-      const dimension = candidate(input.point, context.allocateEntityId());
-      if (layoutDimension(dimension) === null) return { ...step, messages: [`${NAME}を作れません: ${refusal}`] };
-      return { type: "done", messages: [summary(dimension)], requests: [{ type: "addEntities", entities: [dimension], label: "寸法を追加" }] };
+      // 形が計算できるか、先に確かめる(だめなら、IDを払い出さない)
+      if (layoutDimension(candidate(input.point, "check")) === null) return { ...step, messages: [`${NAME}を作れません: ${refusal}`] };
+      const refs = refsOf(build(input.point));
+      const dimension = candidate(input.point, context.allocateEntityId(), refs);
+      const linked = refs.length > 0 ? [`図形に関連付けました(${refs.length}か所)。図形を動かすと、寸法が追従します`] : [];
+      return { type: "done", messages: [summary(dimension), ...linked], requests: [{ type: "addEntities", entities: [dimension], label: "寸法を追加" }] };
     },
   };
   return step;
@@ -104,6 +123,7 @@ function linearSecondStep(kind: LinearKind, p1: Point2D, ready: Extract<Ready, {
         ready,
         context,
         (dimension) => `${LINEAR_LABELS[kind]}寸法を追加しました(${lengthText(dimension)})`,
+        () => pointRefs(context, [["p1", p1], ["p2", p2]]),
       );
     },
   };
@@ -160,6 +180,7 @@ function roundPickStep(kind: RoundKind, ready: Extract<Ready, { ok: true }>, con
         ready,
         context,
         (dimension) => `${ROUND_LABELS[kind]}寸法を追加しました(${lengthText(dimension)})`,
+        () => [{ slot: "figure", id: picked.id, anchor: { kind: "whole" } }],
       );
     },
   };
@@ -210,6 +231,7 @@ function threePointSteps(ready: Extract<Ready, { ok: true }>, context: AppComman
             ready,
             context,
             ANGLE_SUMMARY,
+            () => pointRefs(context, [["p1", vertex], ["p2", arm1], ["p3", arm2]]),
           ),
         vertex,
       ),
@@ -218,7 +240,7 @@ function threePointSteps(ready: Extract<Ready, { ok: true }>, context: AppComman
   );
 }
 
-function angularSecondLineStep(first: { start: Point2D; end: Point2D }, ready: Extract<Ready, { ok: true }>, context: AppCommandContext): Step {
+function angularSecondLineStep(first: { start: Point2D; end: Point2D }, firstId: string, ready: Extract<Ready, { ok: true }>, context: AppCommandContext): Step {
   const step: Step = {
     type: "prompt",
     prompt: "2本目の線をクリックしてください[Enter=終了]",
@@ -246,6 +268,10 @@ function angularSecondLineStep(first: { start: Point2D; end: Point2D }, ready: E
         ready,
         context,
         ANGLE_SUMMARY,
+        () => [
+          { slot: "line1", id: firstId, anchor: { kind: "whole" } },
+          { slot: "line2", id: picked.id, anchor: { kind: "whole" } },
+        ],
       );
     },
   };
@@ -266,12 +292,157 @@ function angularFirstStep(ready: Extract<Ready, { ok: true }>, context: AppComma
       if (!picked.ok) return { ...step, messages: [picked.message] };
       const first = lineOf(context.editing.entityOf(picked.id));
       if (first === null) return { ...step, messages: [`${NAME}できません: 線が見つからないか、長さが正しくありません`] };
-      return angularSecondLineStep(first, ready, context);
+      return angularSecondLineStep(first, picked.id, ready, context);
     },
   };
   return step;
 }
 
+// ---- DIMREASSOC(関連付けし直す) ----
+
+const REASSOC_NAME = "寸法の関連付け";
+
+const POINT_LABELS: Readonly<Record<"p1" | "p2" | "p3", string>> = { p1: "1つ目の点", p2: "2つ目の点", p3: "3つ目の点" };
+const ANGULAR_POINT_LABELS: Readonly<Record<"p1" | "p2" | "p3", string>> = { p1: "頂点", p2: "1本目の腕の上の点", p3: "2本目の腕の上の点" };
+
+/** 関連付けし直した寸法の依頼(形が計算できないときは、理由を知らせて、何も変えずに終える) */
+function reassociated(dimension: CadDimension, id: string): CommandStep<AppRequest> {
+  if (layoutDimension(dimension) === null) return { type: "done", messages: [`${REASSOC_NAME}できません: 寸法の形を計算できません(何も変えませんでした)`] };
+  const count = dimension.refs?.length ?? 0;
+  return {
+    type: "done",
+    messages: [count > 0 ? `寸法を関連付けました(${count}か所)。図形を動かすと、寸法が追従します` : "関連付けた点はありません(図形の位置に一致する点がありませんでした)"],
+    requests: [{ type: "reassociateDimension", id, dimension }],
+  };
+}
+
+/** 寸法の測る点を、1つずつ図形に付ける段階。Enter = 今の点のまま(その点が図形の位置に一致していれば、付ける) */
+function reassocPointsStep(
+  dimension: CadDimension,
+  slots: readonly ("p1" | "p2" | "p3")[],
+  labels: Readonly<Record<"p1" | "p2" | "p3", string>>,
+  context: AppCommandContext,
+  index = 0,
+  points: Partial<Record<"p1" | "p2" | "p3", Point2D>> = {},
+  refs: readonly DimensionRef[] = [],
+): CommandStep<AppRequest> {
+  if (index >= slots.length) {
+    const { refs: _old, ...rest } = dimension;
+    void _old;
+    return reassociated({ ...rest, ...points, ...(refs.length > 0 ? { refs } : {}) }, dimension.id);
+  }
+  const slot = slots[index];
+  const next = (point: Point2D, ref: DimensionRef | null): CommandStep<AppRequest> =>
+    reassocPointsStep(dimension, slots, labels, context, index + 1, { ...points, [slot]: point }, ref === null ? refs : [...refs, ref]);
+  const step: Step = {
+    type: "prompt",
+    prompt: `${labels[slot]}を図形に付けます: 図形の端点・中点・中心・頂点をクリックしてください(Enter=今の点のまま)`,
+    expect: "point",
+    acceptsEnter: true,
+    onInput: (input) => {
+      if (input.kind === "enter") {
+        const current = dimension[slot];
+        if (current === undefined) return next({ x: 0, y: 0 }, null);
+        const found = context.editing.anchorsAt([current])[0];
+        return next(current, found === null || found === undefined ? null : { slot, id: found.id, anchor: found.anchor });
+      }
+      if (input.kind !== "point") return step;
+      const found = context.editing.anchorsAt([input.point])[0];
+      if (found === null || found === undefined) {
+        return { ...step, messages: ["その点は、図形の端点・中点・中心・頂点に一致しません。スナップで吸着して、図形の点をクリックしてください"] };
+      }
+      return next(input.point, { slot, id: found.id, anchor: found.anchor });
+    },
+  };
+  return step;
+}
+
+function reassocRoundStep(dimension: CadDimension, context: AppCommandContext): Step {
+  const step: Step = {
+    type: "prompt",
+    prompt: "付ける円または円弧をクリックしてください(Enter=今のまま)",
+    expect: "point",
+    acceptsEnter: true,
+    rawPoints: true,
+    onInput: (input) => {
+      if (input.kind === "enter") return { type: "done", messages: [endedMessage("DIMREASSOC", "関連付けは変更されませんでした")] };
+      if (input.kind !== "point") return step;
+      const picked = context.editing.pickEntity(input.point, REASSOC_NAME, "circular");
+      if (!picked.ok) return { ...step, messages: [picked.message] };
+      const circle = circleOf(context.editing.entityOf(picked.id));
+      if (circle === null) return { ...step, messages: [`${REASSOC_NAME}できません: 円・円弧が見つからないか、半径が正しくありません`] };
+      // 円周上の点は、いまの向きのまま
+      const toward = { x: circle.center.x + (dimension.p2.x - dimension.p1.x), y: circle.center.y + (dimension.p2.y - dimension.p1.y) };
+      const { refs: _old, ...rest } = dimension;
+      void _old;
+      return reassociated({ ...rest, p1: circle.center, p2: pointOnCircleToward(circle.center, circle.radius, toward), refs: [{ slot: "figure", id: picked.id, anchor: { kind: "whole" } }] }, dimension.id);
+    },
+  };
+  return step;
+}
+
+function reassocAngularLinesStep(dimension: CadDimension, context: AppCommandContext, first?: { id: string; line: { start: Point2D; end: Point2D } }): Step {
+  const step: Step = {
+    type: "prompt",
+    prompt: first === undefined ? "1本目の線をクリックしてください(Enter=頂点・腕の3点を付け直す)" : "2本目の線をクリックしてください",
+    expect: "point",
+    acceptsEnter: true,
+    rawPoints: true,
+    onInput: (input) => {
+      if (input.kind === "enter") {
+        if (first !== undefined) return { type: "done", messages: [endedMessage("DIMREASSOC", "関連付けは変更されませんでした")] };
+        return reassocPointsStep(dimension, ["p1", "p2", "p3"], ANGULAR_POINT_LABELS, context);
+      }
+      if (input.kind !== "point") return step;
+      const picked = context.editing.pickEntity(input.point, REASSOC_NAME, "line");
+      if (!picked.ok) return { ...step, messages: [picked.message] };
+      const line = lineOf(context.editing.entityOf(picked.id));
+      if (line === null) return { ...step, messages: [`${REASSOC_NAME}できません: 線が見つからないか、長さが正しくありません`] };
+      if (first === undefined) return reassocAngularLinesStep(dimension, context, { id: picked.id, line });
+      if (first.id === picked.id) return { ...step, messages: ["1本目と同じ線です。別の線をクリックしてください"] };
+      const solved = angularFromLines(first.line, line, dimension.position);
+      if (!solved.ok) return { ...step, messages: [`${REASSOC_NAME}できません: ${solved.reason}`] };
+      const { refs: _old, ...rest } = dimension;
+      void _old;
+      return reassociated(
+        {
+          ...rest,
+          p1: solved.vertex,
+          p2: solved.arm1,
+          p3: solved.arm2,
+          refs: [
+            { slot: "line1", id: first.id, anchor: { kind: "whole" } },
+            { slot: "line2", id: picked.id, anchor: { kind: "whole" } },
+          ],
+        },
+        dimension.id,
+      );
+    },
+  };
+  return step;
+}
+
+function reassocPickStep(context: AppCommandContext): Step {
+  const step: Step = {
+    type: "prompt",
+    prompt: "関連付けし直す寸法をクリックしてください[Enter=終了]",
+    expect: "point",
+    acceptsEnter: true,
+    rawPoints: true,
+    onInput: (input) => {
+      if (input.kind === "enter") return { type: "done", messages: [endedMessage("DIMREASSOC", "関連付けは変更されませんでした")] };
+      if (input.kind !== "point") return step;
+      const picked = context.editing.pickEntity(input.point, REASSOC_NAME, "dimension");
+      if (!picked.ok) return { ...step, messages: [picked.message] };
+      const entity = context.editing.entityOf(picked.id);
+      if (entity === null || entity.type !== "DIMENSION") return { ...step, messages: [`${REASSOC_NAME}できません: 寸法が見つかりません(削除された可能性があります)`] };
+      if (entity.kind === "radius" || entity.kind === "diameter") return reassocRoundStep(entity, context);
+      if (entity.kind === "angular") return reassocAngularLinesStep(entity, context);
+      return reassocPointsStep(entity, ["p1", "p2"], POINT_LABELS, context);
+    },
+  };
+  return step;
+}
 // ---- 定義 ----
 
 function startWith(context: AppCommandContext, make: (ready: Extract<Ready, { ok: true }>) => Step) {
@@ -315,6 +486,16 @@ export const DIMENSION_COMMANDS: readonly AppCommandDefinition[] = [
     aliases: ["DAN"],
     description: "角度寸法を描く(2本の線をクリックして、弧が通る点を指定する。Enter で3点指定)",
     start: (context) => startWith(context, (ready) => angularFirstStep(ready, context)),
+  },
+  {
+    name: "DIMREASSOC",
+    aliases: ["DRE"],
+    description: "寸法を、図形に関連付けし直す(測る点を図形の端点などに付ける。円・線は、図形をクリックする)。Phase 15 までの寸法を連動にもできる",
+    start: (context) => {
+      if (!context.isDocumentOpen) return { type: "done", messages: [NO_DOCUMENT_MESSAGE] };
+      if (!context.editing.ready) return { type: "done", messages: [NOT_READY_MESSAGE] };
+      return reassocPickStep(context);
+    },
   },
   {
     name: "DIMSTYLE",

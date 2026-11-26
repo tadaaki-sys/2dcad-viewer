@@ -429,4 +429,21 @@ describe("CanvasRenderer dimensions", () => {
     expect(ctx.fills).toHaveLength(0);
     expect(ctx.fillTexts).toEqual([]);
   });
+
+  it("draws a dimension with a broken reference in the warning color (red) for its lines, arrows and text; a dimension with healthy references keeps its own color", () => {
+    const broken = horizontal({ refs: [{ slot: "p1", id: "x", anchor: { kind: "start" }, broken: true }, { slot: "p2", id: "y", anchor: { kind: "end" } }] });
+    const ctx = render(makeModel([broken]), camera());
+    expect(ctx.strokes.length).toBeGreaterThan(0);
+    expect(ctx.strokes.every((s) => s.style === "#ff3b30")).toBe(true);
+    expect(ctx.fills.every((f) => f.style === "#ff3b30")).toBe(true);
+    expect(ctx.fillTexts).toEqual(["100"]);
+    const healthy = horizontal({ refs: [{ slot: "p1", id: "x", anchor: { kind: "start" } }] });
+    expect(render(makeModel([healthy]), camera()).strokes.every((s) => s.style === "#00ff00")).toBe(true);
+  });
+
+  it("the selection highlight wins over the warning color", () => {
+    const broken = horizontal({ refs: [{ slot: "p1", id: "x", anchor: { kind: "start" }, broken: true }] });
+    const ctx = render(makeModel([broken]), camera(), { selectedEntityIds: new Set(["d"]) });
+    expect(ctx.strokes.every((s) => s.style === "#ffff00")).toBe(true);
+  });
 });
