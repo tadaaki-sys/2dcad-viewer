@@ -20,8 +20,9 @@ export type DocumentChange = {
    * apply / undo / redo: 図面が変わった。
    * reset: 履歴と図面が食い違って履歴を破棄した(図面は変わらない。ボタンと未保存の状態だけが変わる)。
    * saved: 保存済みとして覚えた(図面は変わらない。未保存の状態が変わる)。
+   * view: レイヤーの表示・非表示を切り替えた(図面の図形は変わらない。履歴・未保存の状態にも入らない表示設定)。
    */
-  kind: "apply" | "undo" | "redo" | "reset" | "saved";
+  kind: "apply" | "undo" | "redo" | "reset" | "saved" | "view";
   /** 変更の名前(例: 「線を追加」) */
   label: string;
   /** 変更後のドキュメント */
@@ -140,6 +141,22 @@ export class DocumentSession {
     const allocated = allocateEntityId(this.current);
     this.current = allocated.document;
     return allocated.id;
+  }
+
+  /**
+   * レイヤーの表示・非表示を切り替える。表示設定なので、履歴には記録せず、未保存の状態も変えない(購読者には知らせる)。
+   * 戻り値は、そのレイヤーがあったか。
+   */
+  setLayerVisible(name: string, visible: boolean): boolean {
+    const index = this.current.layerIndexByName.get(name);
+    if (index === undefined) return false;
+    const layer = this.current.layers[index];
+    if (layer.visible === visible) return true;
+    const layers = this.current.layers.slice();
+    layers[index] = { ...layer, visible };
+    this.current = { ...this.current, layers };
+    this.notify({ kind: "view", label: "レイヤーの表示", document: this.current, state: this.state });
+    return true;
   }
 
   /** 図面の変更を購読する。戻り値の関数で、購読をやめる */

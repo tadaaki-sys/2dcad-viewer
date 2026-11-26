@@ -3,6 +3,7 @@
 exports[`reading: DXF -> internal model > reads the factory layout drawing completely > entities 1`] = `
 [
   {
+    "byLayer": 7,
     "closed": true,
     "color": "#ff0000",
     "layer": "WALL",
@@ -27,6 +28,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     ],
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 300,
       "y": 300,
@@ -37,6 +39,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "CIRCLE",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 700,
       "y": 300,
@@ -49,6 +52,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "ARC",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 500,
       "y": 150,
@@ -63,6 +67,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "ELLIPSE",
   },
   {
+    "byLayer": 3,
     "color": "#00ff00",
     "end": {
       "x": 500,
@@ -77,6 +82,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "color": "#0000ff",
     "end": {
       "x": 1000,
@@ -98,6 +104,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "closed": false,
     "color": "#00ff00",
     "layer": "MACHINE",
@@ -154,6 +161,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     ],
   },
   {
+    "byLayer": 7,
     "closed": false,
     "color": "#00ff00",
     "layer": "MACHINE",
@@ -294,6 +302,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "SPLINE",
   },
   {
+    "byLayer": 1,
     "color": "#ffff00",
     "height": 30,
     "horizontalAlign": "left",
@@ -309,6 +318,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "widthFactor": 1,
   },
   {
+    "byLayer": 1,
     "color": "#ffff00",
     "height": 20,
     "horizontalAlign": "left",
@@ -323,6 +333,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "verticalAlign": "top",
   },
   {
+    "byLayer": 1,
     "color": "#00ff00",
     "layer": "MACHINE",
     "position": {
@@ -332,6 +343,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "POINT",
   },
   {
+    "byLayer": 7,
     "color": "#00ff00",
     "end": {
       "x": 900,
@@ -345,6 +357,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 850,
       "y": 500,
@@ -355,6 +368,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "CIRCLE",
   },
   {
+    "byLayer": 7,
     "color": "#00ff00",
     "end": {
       "x": 850,
@@ -368,6 +382,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 900,
       "y": 500,
@@ -378,6 +393,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "CIRCLE",
   },
   {
+    "byLayer": 7,
     "color": "#00ff00",
     "end": {
       "x": 800,
@@ -391,6 +407,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 750,
       "y": 150,
@@ -401,6 +418,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "CIRCLE",
   },
   {
+    "byLayer": 7,
     "color": "#00ff00",
     "end": {
       "x": 920,
@@ -414,6 +432,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 870,
       "y": 150,
@@ -424,6 +443,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "CIRCLE",
   },
   {
+    "byLayer": 7,
     "color": "#00ff00",
     "end": {
       "x": 800,
@@ -437,6 +457,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 750,
       "y": 230,
@@ -447,6 +468,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "CIRCLE",
   },
   {
+    "byLayer": 7,
     "color": "#00ff00",
     "end": {
       "x": 920,
@@ -460,6 +482,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "center": {
       "x": 870,
       "y": 230,
@@ -470,6 +493,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "CIRCLE",
   },
   {
+    "byLayer": 6,
     "color": "#00ffff",
     "end": {
       "x": 500,
@@ -483,6 +507,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 1,
     "color": "#00ffff",
     "height": 20,
     "horizontalAlign": "left",
@@ -497,6 +522,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "verticalAlign": "top",
   },
   {
+    "byLayer": 7,
     "color": "#ff00ff",
     "end": {
       "x": 1000,
@@ -510,6 +536,7 @@ exports[`reading: DXF -> internal model > reads the factory layout drawing compl
     "type": "LINE",
   },
   {
+    "byLayer": 7,
     "color": "#ff00ff",
     "end": {
       "x": 1000,

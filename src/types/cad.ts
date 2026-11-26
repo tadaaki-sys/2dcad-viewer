@@ -12,6 +12,16 @@ export type CadLayer = {
   name: string;
   color: string;
   visible: boolean;
+  /** レイヤーの線種名(線種表にある名前)。無ければ実線(CONTINUOUS)。Phase 17 */
+  lineType?: string;
+  /** レイヤーの線の太さ(1/100mm)。無ければ既定(細線)。Phase 17 */
+  lineWeight?: number;
+};
+
+/** 線種の定義。elements は DXF の LTYPE と同じ要素列(正=線、負=空き、0=点)。長さは図面の単位(mm)で、全体の線種尺度(ltScale)を掛ける前の値 */
+export type CadLineType = {
+  name: string;
+  elements: readonly number[];
 };
 
 /**
@@ -268,8 +278,16 @@ export type SourceRecord = {
   reshaped?: boolean;
 };
 
+/**
+ * ByLayer の印(ビット。Phase 17): 立っている属性は、レイヤーの設定に従う(レイヤーの設定を変えると、図形も追従する)。
+ * 図形の color・lineDash・lineWeight は、従うべき値を解決済みで持っている(描画はこれをそのまま使う)。
+ * 印が無い(0)属性は、図形自身の指定(ByObject)で、レイヤーが変わっても動かない。
+ * ビットの値は core/style/byLayer.ts(BYLAYER_COLOR=1・BYLAYER_LINETYPE=2・BYLAYER_LINEWEIGHT=4)。
+ */
+
 /** すべての図形が持てる、任意の項目 */
-type EntityExtras = { sourceRecord?: SourceRecord };
+/** lineTypeScale: 図形ごとの線種尺度(DXF の 48)。1 以外のときだけ持つ。破線が無い(実線の)間も失わないために、破線とは別に持つ */
+export type EntityExtras = { sourceRecord?: SourceRecord; byLayer?: number; lineTypeScale?: number };
 
 export type CadEntity = (CadLine | CadPolyline | CadCircle | CadArc | CadText | CadEllipse | CadSpline | CadPoint | CadDimension) & EntityExtras;
 
@@ -290,6 +308,10 @@ export type CadModel = {
   /** entities[i]のバウンディングボックス [minX,minY,maxX,maxY] を4要素ずつ並べたもの(選択・描画の絞り込み用) */
   entityBounds: Float64Array;
   layers: CadLayer[];
+  /** 線種表(取り込んだ図面の LTYPE。標準の線種との合成はドキュメント側)。省略時は取り込んだ線種なし */
+  lineTypes?: CadLineType[];
+  /** 全体の線種尺度($LTSCALE)。省略時は 1 */
+  ltScale?: number;
   /** 点(POINT)の表示設定。省略時は点(PDMODE 0)として扱う */
   pointStyle?: CadPointStyle;
   bounds: CadBounds | null;

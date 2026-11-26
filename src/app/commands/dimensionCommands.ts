@@ -15,7 +15,7 @@ import { layoutDimension } from "../../core/dimension/dimensionGeometry";
 import type { DimensionStyle } from "../../core/dimension/dimensionStyle";
 import { IDENTITY_MATRIX } from "../../core/geometry/transform";
 import type { CadDimension, CadEntity, DimensionRef, Point2D } from "../../types/cad";
-import { isSamePoint, makeDimension } from "../drawing/newEntities";
+import { drawingStyleOfTarget, isSamePoint, makeDimension } from "../drawing/newEntities";
 import type { DimensionGeometry, DrawingStyle } from "../drawing/newEntities";
 import { endedMessage, NOT_READY_MESSAGE } from "./editCommands";
 import type { Step } from "./editCommands";
@@ -37,7 +37,7 @@ function readyFor(context: AppCommandContext): Ready {
   // スタイルがレイヤーを指定していれば、そのレイヤー。指定が無ければ、現在のレイヤー
   const target = style.layer === null ? context.drawTarget : context.layerTarget(style.layer);
   if (!target.ok) return done(style.layer === null ? target.reason : `寸法スタイル「${style.name}」のレイヤー: ${target.reason}`);
-  return { ok: true, drawing: { layer: target.layer, color: target.color }, style };
+  return { ok: true, drawing: drawingStyleOfTarget(target), style };
 }
 
 /** 寸法の定義点から、寸法を作る(図形のIDは、確定のときに払い出す) */

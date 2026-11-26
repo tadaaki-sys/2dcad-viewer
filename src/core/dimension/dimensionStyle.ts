@@ -10,8 +10,11 @@ import type { CadDimensionKind, CadDimensionUnit, CadDimensionValues, LineDash }
 import { DIMENSION_UNITS, MAX_DECIMALS } from "./dimensionFormat";
 import { normalizeDashPattern } from "../style/lineDash";
 
-/** 寸法の線種(新しい寸法に付ける。線種の管理は、Layer / Linetype の Phase で整える) */
-export type DimensionLinetype = "continuous" | "dashed" | "center" | "phantom";
+/**
+ * 寸法の線種(新しい寸法に付ける)。bylayer は、描くレイヤーの線種に従う(ByLayer。Phase 17)。それ以外は、寸法自身の指定
+ * (continuous = 実線。dashed・center・phantom は、文字の高さに比例した長さの破線)。
+ */
+export type DimensionLinetype = "bylayer" | "continuous" | "dashed" | "center" | "phantom";
 
 export type DimensionStyle = {
   name: string;
@@ -42,7 +45,7 @@ export const DEFAULT_DIMENSION_STYLE: DimensionStyle = {
   extensionOffset: 50,
   color: null,
   layer: null,
-  linetype: "continuous",
+  linetype: "bylayer",
 };
 
 /** 値の範囲(これを超える値は、断る) */
@@ -55,9 +58,10 @@ export const DIMENSION_STYLE_LIMITS = {
   maxStyles: 100,
 } as const;
 
-export const DIMENSION_LINETYPES: readonly DimensionLinetype[] = ["continuous", "dashed", "center", "phantom"];
+export const DIMENSION_LINETYPES: readonly DimensionLinetype[] = ["bylayer", "continuous", "dashed", "center", "phantom"];
 
 export const DIMENSION_LINETYPE_LABELS: Readonly<Record<DimensionLinetype, string>> = {
+  bylayer: "レイヤーに従う",
   continuous: "実線",
   dashed: "破線",
   center: "中心線",
@@ -75,7 +79,7 @@ export const DIMENSION_KIND_LABELS: Readonly<Record<CadDimensionKind, string>> =
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 /** 線種の模様(文字の高さ 2.5mm を基準にした、線・空きの長さの並び。文字の高さに比例して伸び縮みする) */
-const LINETYPE_PATTERNS: Readonly<Record<Exclude<DimensionLinetype, "continuous">, readonly number[]>> = {
+const LINETYPE_PATTERNS: Readonly<Record<Exclude<DimensionLinetype, "continuous" | "bylayer">, readonly number[]>> = {
   dashed: [12, -6],
   center: [32, -6, 6, -6],
   phantom: [25, -6, 6, -6, 6, -6],
@@ -86,7 +90,8 @@ const LINETYPE_PATTERNS: Readonly<Record<Exclude<DimensionLinetype, "continuous"
  * (寸法のスタイルの文字の高さが、図面の縮尺に合わせた大きさになっているため)。
  */
 export function dimensionLineDash(linetype: DimensionLinetype, textHeight: number): LineDash | undefined {
-  if (linetype === "continuous") return undefined;
+  // 実線と、レイヤーに従う線種(レイヤーの破線は、描く側で付ける)は、ここでは破線を作らない
+  if (linetype === "continuous" || linetype === "bylayer") return undefined;
   const scale = textHeight / 2.5;
   const pattern = normalizeDashPattern(LINETYPE_PATTERNS[linetype], scale);
   if (pattern === null) return undefined;

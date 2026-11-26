@@ -2,7 +2,7 @@
 import type { CommandDefinition, CommandSession, PreviewShape } from "../../core/commands";
 import type { EntityId } from "../../core/model";
 import type { StretchWindow } from "../../core/geometry/stretch";
-import type { Affine2D, CadDimension, CadEntity, Point2D } from "../../types/cad";
+import type { Affine2D, CadDimension, CadEntity, LineDash, Point2D } from "../../types/cad";
 import type { FoundAnchor } from "../../core/dimension/dimensionRefs";
 import type { TextStyle } from "../../core/text/textStyle";
 import type { DimensionStyle } from "../../core/dimension/dimensionStyle";
@@ -49,7 +49,16 @@ export type AppRequest =
   /** 寸法スタイルの管理パネルを開く(DIMSTYLE) */
   | { type: "openDimensionStyles" }
   /** 寸法を、関連付けし直した寸法に置き換える(DIMREASSOC)。測る点・参照が変わる。1つの依頼が、Undoの1段階 */
-  | { type: "reassociateDimension"; id: EntityId; dimension: CadDimension };
+  | { type: "reassociateDimension"; id: EntityId; dimension: CadDimension }
+  /** レイヤー・線種・線の太さの管理パネルを開く(LAYER・LINETYPE・LINEWEIGHT)。tab は、最初に見せる部分 */
+  | { type: "openLayers"; tab: LayerPanelTab }
+  /** 全体の線種尺度を変える(LTSCALE)。破線の長さが変わる。1つの依頼が、Undoの1段階 */
+  | { type: "setLineTypeScale"; value: number }
+  /** 図形を、別のレイヤーへ移す(LAYMOVE)。ByLayer の属性は、移した先に従う。1つの依頼が、Undoの1段階 */
+  | { type: "moveToLayer"; ids: readonly EntityId[]; layer: string };
+
+/** レイヤー管理パネルの、見せる部分 */
+export type LayerPanelTab = "layers" | "linetypes" | "lineweights";
 
 /** 角を処理する図形を指したクリック(図形のIDと、クリックした位置) */
 export type CornerPick = { id: EntityId; point: Point2D };
@@ -60,8 +69,11 @@ export type TrackingToggleSetting = "ortho" | "polar" | "objectTracking";
 /** オン・オフを切り替えられる Snap の設定 */
 export type SnapToggleSetting = "objectSnap" | "gridSnap" | "gridDisplay";
 
-/** 新しい図形を描く先(現在のレイヤー)。描けないときは、理由を持つ */
-export type DrawTarget = { ok: true; layer: string; color: string } | { ok: false; reason: string };
+/**
+ * 新しい図形を描く先(現在のレイヤー)。描けないときは、理由を持つ。
+ * color・lineDash・lineWeight は、レイヤーの設定を解決した値で、byLayer は、それに従う印(新しい図形は、ByLayer)。
+ */
+export type DrawTarget = { ok: true; layer: string; color: string; lineDash?: LineDash; lineWeight?: number; byLayer?: number } | { ok: false; reason: string };
 
 /** 選択から、編集できる図形だけを取り出した結果 */
 export type EditTargetsInfo = { editable: readonly EntityId[]; skipped: number; reason: string | null };
@@ -140,6 +152,8 @@ export type AppCommandContext = {
   dimensionStyle: DimensionStyle;
   /** 名前を指定したレイヤーに描けるか(寸法スタイルがレイヤーを指定しているとき)。描けるなら、そのレイヤーと色 */
   layerTarget: (name: string) => DrawTarget;
+  /** 全体の線種尺度(LTSCALE の案内に使う) */
+  ltScale: number;
 };
 
 export type AppCommandDefinition = CommandDefinition<AppRequest, AppCommandContext>;

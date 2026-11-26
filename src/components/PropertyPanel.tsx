@@ -4,6 +4,7 @@ import { formatMm } from "../utils/format";
 import { getEntityPoints } from "../core/geometry/entityGeometry";
 import { layoutDimension } from "../core/dimension/dimensionGeometry";
 import { DIMENSION_KIND_LABELS } from "../core/dimension/dimensionStyle";
+import { BYLAYER_COLOR, BYLAYER_LINETYPE, BYLAYER_LINEWEIGHT, followsLayer } from "../core/style/byLayer";
 import "./PropertyPanel.css";
 
 type PropertyPanelProps = {
@@ -37,11 +38,13 @@ function buildSingleEntityRows(entity: CadEntity): Row[] {
     { label: "Entity Type", value: entity.type },
     { label: "Layer", value: entity.layer },
   ];
-  if (entity.type !== "TEXT" && entity.type !== "POINT" && entity.lineDash) {
-    rows.push({ label: "Linetype", value: entity.lineDash.name });
+  // 色・線種・線の太さ: レイヤーの設定に従う属性(ByLayer)には、印を付けて見せる(Phase 17)
+  rows.push({ label: "Color", value: `${entity.color}${followsLayer(entity, BYLAYER_COLOR) ? " (ByLayer)" : ""}` });
+  if (entity.type !== "TEXT" && entity.type !== "POINT" && (entity.lineDash || followsLayer(entity, BYLAYER_LINETYPE))) {
+    rows.push({ label: "Linetype", value: `${entity.lineDash?.name ?? "CONTINUOUS"}${followsLayer(entity, BYLAYER_LINETYPE) ? " (ByLayer)" : ""}` });
   }
-  if (entity.type !== "TEXT" && entity.type !== "POINT" && entity.lineWeight !== undefined) {
-    rows.push({ label: "Lineweight", value: `${(entity.lineWeight / 100).toFixed(2)} mm` });
+  if (entity.type !== "TEXT" && entity.type !== "POINT" && (entity.lineWeight !== undefined || followsLayer(entity, BYLAYER_LINEWEIGHT))) {
+    rows.push({ label: "Lineweight", value: `${entity.lineWeight === undefined ? "Default" : `${(entity.lineWeight / 100).toFixed(2)} mm`}${followsLayer(entity, BYLAYER_LINEWEIGHT) ? " (ByLayer)" : ""}` });
   }
 
   if (entity.type === "LINE") {

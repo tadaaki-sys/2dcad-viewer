@@ -1000,3 +1000,97 @@ describe("DxfParserAdapter - linetypes", () => {
     expect(dashOf(buildDxf(circle, LTYPE_AND_LAYER_TABLES))?.name).toBe("DASHED");
   });
 });
+
+describe("DxfParserAdapter - ByLayer marks, layer styles and linetype table (Phase 17)", () => {
+  const TABLES = [
+    "0", "TABLE", "2", "LTYPE", "70", "2",
+    "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
+    "0", "LTYPE", "2", "Dashed", "70", "0", "3", "Dashed", "72", "65", "73", "2", "40", "9.525", "49", "6.35", "74", "0", "49", "-3.175", "74", "0",
+    "0", "ENDTAB",
+    "0", "TABLE", "2", "LAYER", "70", "3",
+    "0", "LAYER", "2", "HEAVY", "70", "0", "62", "1", "6", "Dashed", "370", "50",
+    "0", "LAYER", "2", "PLAIN", "70", "0", "62", "7", "6", "Continuous", "370", "-3",
+    "0", "LAYER", "2", "0", "70", "0", "62", "7", "6", "Continuous",
+    "0", "ENDTAB",
+  ].join("\n");
+
+  const lineOn = (layer: string, extra: string[] = []) => ["0", "LINE", "8", layer, ...extra, "10", "0.0", "20", "0.0", "11", "100.0", "21", "0.0"].join("\n");
+  const first = (dxf: string) => parseDxfText(dxf).entities[0];
+
+  it("marks an entity with no own color / linetype / weight as following all three attributes of its layer", () => {
+    const entity = first(buildDxf(lineOn("HEAVY"), TABLES));
+    expect(entity.byLayer).toBe(7);
+    expect(entity.color).toBe("#ff0000");
+    expect(entity.type !== "TEXT" && entity.lineWeight).toBe(50);
+    expect(entity.type !== "TEXT" && entity.lineDash?.name).toBe("Dashed");
+  });
+
+  it("treats explicit color (62 / 420), linetype (6) and weight (370 >= 0, -2, -3) as the entity's own, not ByLayer", () => {
+    expect(first(buildDxf(lineOn("HEAVY", ["62", "3"]), TABLES)).byLayer).toBe(2 | 4);
+    expect(first(buildDxf(lineOn("HEAVY", ["6", "Continuous"]), TABLES)).byLayer).toBe(1 | 4);
+    expect(first(buildDxf(lineOn("HEAVY", ["370", "100"]), TABLES)).byLayer).toBe(1 | 2);
+    expect(first(buildDxf(lineOn("HEAVY", ["370", "-3"]), TABLES)).byLayer).toBe(1 | 2);
+    expect(first(buildDxf(lineOn("HEAVY", ["370", "-2"]), TABLES)).byLayer).toBe(1 | 2);
+    expect(first(buildDxf(lineOn("HEAVY", ["62", "3", "6", "Continuous", "370", "100"]), TABLES)).byLayer).toBeUndefined();
+  });
+
+  it("treats explicit ByLayer values (62 = 256, 6 = BYLAYER, 370 = -1) as ByLayer", () => {
+    expect(first(buildDxf(lineOn("HEAVY", ["62", "256", "6", "BYLAYER", "370", "-1"]), TABLES)).byLayer).toBe(7);
+  });
+
+  it("keeps the entity's own linetype scale (group 48) on the figure even when its linetype is solid; 1 is not stored", () => {
+    expect(first(buildDxf(lineOn("PLAIN", ["48", "2.5"]), TABLES)).lineTypeScale).toBe(2.5);
+    expect(first(buildDxf(lineOn("PLAIN", ["48", "1"]), TABLES)).lineTypeScale).toBeUndefined();
+    expect(first(buildDxf(lineOn("PLAIN", ["48", "-3"]), TABLES)).lineTypeScale).toBeUndefined();
+    expect(first(buildDxf(lineOn("PLAIN"), TABLES)).lineTypeScale).toBeUndefined();
+    const text = ["0", "TEXT", "8", "HEAVY", "10", "0.0", "20", "0.0", "40", "5.0", "1", "ABC", "48", "2"].join("\n");
+    expect(first(buildDxf(text, TABLES)).lineTypeScale).toBeUndefined();
+  });
+
+  it("marks only the color for text and points (they have no linetype or weight)", () => {
+    const text = ["0", "TEXT", "8", "HEAVY", "10", "0.0", "20", "0.0", "40", "5.0", "1", "ABC"].join("\n");
+    expect(first(buildDxf(text, TABLES)).byLayer).toBe(1);
+    const point = ["0", "POINT", "8", "HEAVY", "10", "0.0", "20", "0.0"].join("\n");
+    expect(first(buildDxf(point, TABLES)).byLayer).toBe(1);
+  });
+
+  it("does not mark a color inherited from an INSERT (ByBlock) as ByLayer", () => {
+    const insert = ["0", "INSERT", "8", "PLAIN", "2", "SYMBOL", "10", "0.0", "20", "0.0", "62", "3"].join("\n");
+    const block = blockDef("SYMBOL", { x: 0, y: 0 }, lineOn("PLAIN", ["62", "0"]));
+    const entity = first(buildDxfWithBlocks(insert, block, TABLES));
+    expect(entity.color).toBe("#00ff00");
+    expect((entity.byLayer ?? 0) & 1).toBe(0);
+  });
+
+  it("reads each layer's linetype (not CONTINUOUS) and weight (not the default) into the layer", () => {
+    const layers = parseDxfText(buildDxf(lineOn("HEAVY"), TABLES)).layers;
+    expect(layers.find((l) => l.name === "HEAVY")).toMatchObject({ color: "#ff0000", lineType: "Dashed", lineWeight: 50 });
+    const plain = layers.find((l) => l.name === "PLAIN")!;
+    expect(plain.lineType).toBeUndefined();
+    expect(plain.lineWeight).toBeUndefined();
+  });
+
+  it("builds the linetype table (CONTINUOUS, the drawing's own, then the standard ones) and keeps $LTSCALE", () => {
+    const model = parseDxfText(["0", "SECTION", "2", "HEADER", "9", "$LTSCALE", "40", "2.5", "0", "ENDSEC", buildDxf(lineOn("HEAVY"), TABLES)].join("\n"));
+    expect(model.ltScale).toBe(2.5);
+    const names = model.lineTypes!.map((l) => l.name);
+    expect(names.slice(0, 2)).toEqual(["CONTINUOUS", "Dashed"]);
+    expect(names).toContain("CENTER");
+    // 図面の定義が、同じ名前の標準の線種より優先される
+    expect(model.lineTypes!.find((l) => l.name === "Dashed")!.elements).toEqual([6.35, -3.175]);
+    expect(names.filter((n) => n.toUpperCase() === "DASHED")).toHaveLength(1);
+  });
+
+  it("every ByLayer attribute of every entity equals what its layer says (the invariant layer edits rely on)", () => {
+    const body = [lineOn("HEAVY"), lineOn("PLAIN"), lineOn("0"), lineOn("HEAVY", ["62", "3"]), lineOn("PLAIN", ["370", "100"])].join("\n");
+    const model = parseDxfText(buildDxf(body, TABLES));
+    for (const entity of model.entities) {
+      const layer = model.layers.find((l) => l.name === entity.layer)!;
+      const mask = entity.byLayer ?? 0;
+      if (mask & 1) expect(entity.color).toBe(layer.color);
+      if (entity.type === "TEXT") continue;
+      if (mask & 2) expect(entity.lineDash?.name.toUpperCase()).toBe(layer.lineType?.toUpperCase());
+      if (mask & 4) expect(entity.lineWeight).toBe(layer.lineWeight !== undefined && layer.lineWeight > 27 ? layer.lineWeight : undefined);
+    }
+  });
+});

@@ -14,11 +14,14 @@ import type {
   CadHorizontalAlign,
   LineDash,
   CadLayer,
+  CadLineType,
   CadModel,
   CadPointStyle,
   CadVerticalAlign,
   Point2D,
 } from "../../types/cad";
+import { BYLAYER_COLOR, BYLAYER_LINETYPE, BYLAYER_LINEWEIGHT } from "../../core/style/byLayer";
+import { buildLineTypeTable } from "../../core/style/lineTypes";
 import { applyMatrix, buildInsertMatrix, IDENTITY_MATRIX, multiplyMatrices } from "../../core/geometry/matrix2d";
 import type { Matrix2D } from "../../core/geometry/matrix2d";
 import { computeAllEntityBounds, unionOfEntityBounds } from "../../core/spatial/entityBounds";
@@ -174,6 +177,8 @@ export function convertToCadModelWithOrigin(raw: IDxf, options: ConvertOptions =
     entities: context.entities,
     entityBounds,
     layers,
+    lineTypes: buildLineTypeTable(buildImportedLineTypes(raw)),
+    ltScale: context.ltScale,
     pointStyle: readPointStyle(raw),
     bounds: unionOfEntityBounds(entityBounds),
     stats: {
@@ -230,13 +235,21 @@ function walkEntities(
     context.totalEntityCount++;
     const converted = convertEntity(entity, context.layerColorByName, matrix, byBlock.color, () => `e${context.nextId++}`);
     if (converted) {
+      // ByLayer の印(Phase 17): 色・線種・線の太さが、図形自身の指定ではなく、レイヤーの設定で決まっている属性
+      let byLayer = isColorByLayer(entity, byBlock.color) ? BYLAYER_COLOR : 0;
       if (converted.type !== "TEXT" && converted.type !== "POINT") {
         const lineTypeName = resolveLineTypeName(entity, context.layerStyleByName, byBlock.lineType);
         const dash = resolveLineDash(lineTypeName, entity.lineTypeScale, context);
         if (dash) converted.lineDash = dash;
+        // 図形ごとの線種尺度は、破線が無くても持つ(レイヤーの線種が、実線から破線に変わったとき、尺度を失わないため)
+        const ownScale = entity.lineTypeScale;
+        if (ownScale !== undefined && ownScale > 0 && Number.isFinite(ownScale) && ownScale !== 1) converted.lineTypeScale = ownScale;
         const weight = resolveLineWeight(entity, context.layerStyleByName, byBlock.lineWeight);
         if (weight !== null && weight > THIN_LINE_WEIGHT_LIMIT) converted.lineWeight = weight;
+        if (isLineTypeByLayer(entity)) byLayer |= BYLAYER_LINETYPE;
+        if (isLineWeightByLayer(entity)) byLayer |= BYLAYER_LINEWEIGHT;
       }
+      if (byLayer !== 0) converted.byLayer = byLayer;
       context.entities.push(converted);
       context.originParserIndex.push(context.currentTopIndex);
       context.originNested.push(depth > 0 ? 1 : 0);
@@ -396,6 +409,31 @@ function resolveLineTypeName(
 const LINEWEIGHT_BY_BLOCK = -2;
 const LINEWEIGHT_DEFAULT = -3;
 
+/** 色が、図形自身の指定でも ByBlock の継承でもなく、レイヤーの色で決まるか(resolveEntityColor の最後の分岐と同じ判断) */
+function isColorByLayer(entity: IEntity, byBlockColor: string | null): boolean {
+  const colorIndex = entity.colorIndex;
+  const isExplicitColor =
+    colorIndex === undefined ||
+    (colorIndex === 256 && entity.color !== undefined) ||
+    (colorIndex === 0 && entity.color !== undefined && entity.color !== 0) ||
+    (colorIndex !== 0 && colorIndex !== 256);
+  if (isExplicitColor && entity.color !== undefined) return false;
+  if (colorIndex === 0 && byBlockColor) return false;
+  return true;
+}
+
+/** 線種が、ByLayer(未指定または BYLAYER)か(resolveLineTypeName と同じ判断) */
+function isLineTypeByLayer(entity: IEntity): boolean {
+  const own = entity.lineType?.trim();
+  return !own || own.toUpperCase() === "BYLAYER";
+}
+
+/** 線の太さが、ByLayer(未指定・-1)か。数値の指定・ByBlock(-2)・既定値(-3)は、図形自身の指定として扱う(resolveLineWeight と同じ判断) */
+function isLineWeightByLayer(entity: IEntity): boolean {
+  const own = entity.lineweight;
+  return !(own !== undefined && own >= 0) && own !== LINEWEIGHT_BY_BLOCK && own !== LINEWEIGHT_DEFAULT;
+}
+
 /**
  * 図形の線の太さ(1/100mm)を解決する。数値の指定が最優先、ByBlockは属するINSERT側、
  * 未指定とByLayerはレイヤーの値を使う。既定値(-3)や解決できない場合はnull(細線扱い)。
@@ -442,13 +480,33 @@ function buildLayers(
   const rawLayerNames = Object.keys(raw.tables?.layer?.layers ?? {});
   const allLayerNames = new Set([...rawLayerNames, ...usedLayerNames]);
 
-  const layers: CadLayer[] = Array.from(allLayerNames).map((name) => ({
-    name,
-    color: layerColorByName.get(name) ?? DEFAULT_COLOR,
-    // 図面を開いた時点で、CADでOFF・フリーズされているレイヤーは非表示にしておく(レイヤー一覧のチェックで表示できる)
-    visible: !isLayerHidden(layerStyleByName.get(name), ignoreLayerOffFlag),
-  }));
+  const layers: CadLayer[] = Array.from(allLayerNames).map((name) => {
+    const style = layerStyleByName.get(name);
+    const layer: CadLayer = {
+      name,
+      color: layerColorByName.get(name) ?? DEFAULT_COLOR,
+      // 図面を開いた時点で、CADでOFF・フリーズされているレイヤーは非表示にしておく(レイヤー一覧のチェックで表示できる)
+      visible: !isLayerHidden(style, ignoreLayerOffFlag),
+    };
+    // レイヤーの線種・線の太さ(Phase 17)。実線・既定値は持たない
+    const lineType = style?.lineType?.trim();
+    if (lineType && lineType.toUpperCase() !== "CONTINUOUS" && lineType.toUpperCase() !== "BYLAYER" && lineType.toUpperCase() !== "BYBLOCK") layer.lineType = lineType;
+    if (style?.lineWeight !== undefined && style.lineWeight !== null && style.lineWeight >= 0 && Number.isFinite(style.lineWeight)) layer.lineWeight = style.lineWeight;
+    return layer;
+  });
   return layers.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** 図面の線種表(LTYPE)から、名前と要素列を取り出す。要素が数でない線種は、使えないので入れない */
+function buildImportedLineTypes(raw: IDxf): CadLineType[] {
+  const lineTypes: CadLineType[] = [];
+  for (const [name, lineType] of Object.entries(raw.tables?.lineType?.lineTypes ?? {})) {
+    if (!lineType.pattern) continue;
+    // dxf-parserの型はstring[]だが、実際にはグループコード49の数値が入る
+    const elements = lineType.pattern.map(Number);
+    if (elements.every((element) => Number.isFinite(element))) lineTypes.push({ name, elements });
+  }
+  return lineTypes;
 }
 
 /**

@@ -6,7 +6,7 @@
 import type { CadDocument } from "../model/document";
 import { getEntity, indexOfEntity } from "../model/document";
 import type { EntityId } from "../model/ids";
-import type { CadEntity } from "../../types/cad";
+import type { CadEntity, CadLayer } from "../../types/cad";
 
 /**
  * 図形の変更1つ。位置(index)は、「その変更を適用する直前の、描画順の配列」での位置。
@@ -25,21 +25,61 @@ export type EntityChange =
    */
   | { kind: "move"; entity: CadEntity; from: number; to: number };
 
+/**
+ * レイヤー表・全体の線種尺度の変更(Phase 17)。図形の変更と同じ ChangeSet に入れて、1つの変更として適用する
+ * (レイヤーの色を変えたら、ByLayer の図形の置き換えも、同じ Undo の1段階になる)。
+ * 位置(index)は、「その変更を適用する直前の、レイヤー表の配列」での位置。
+ * レイヤーの「表示・非表示」は、履歴の対象ではない(図面の表示設定)ので、置き換えでは、いまの表示状態を引き継ぐ。
+ */
+export type LayerChange =
+  /** レイヤーを、表の index の位置に挿入する */
+  | { kind: "layerAdd"; layer: CadLayer; index: number }
+  /** index の位置にあるレイヤー(layer)を削除する。layer は、削除前のレイヤーそのもの(Undoで元に戻すために持つ) */
+  | { kind: "layerRemove"; layer: CadLayer; index: number }
+  /** index の位置にあるレイヤー(before)を、after に置き換える(名前・色・線種・線の太さ。位置は変わらない) */
+  | { kind: "layerReplace"; before: CadLayer; after: CadLayer; index: number }
+  /** 全体の線種尺度を、before から after に変える */
+  | { kind: "ltScale"; before: number; after: number };
+
+export type Change = EntityChange | LayerChange;
+
 export type ChangeSet = {
   /** 利用者に見せる名前(例: 「線を追加」)。Undoの案内に使う */
   label: string;
-  changes: readonly EntityChange[];
+  changes: readonly Change[];
 };
 
 /** 変更を反転する。追加と削除を入れ替え、置き換えの前後を入れ替え、順序を逆にする */
 export function invertChangeSet(changeSet: ChangeSet): ChangeSet {
-  const inverted: EntityChange[] = [];
+  const inverted: Change[] = [];
   for (let i = changeSet.changes.length - 1; i >= 0; i--) {
     const change = changeSet.changes[i];
-    if (change.kind === "add") inverted.push({ kind: "remove", entity: change.entity, index: change.index });
-    else if (change.kind === "remove") inverted.push({ kind: "add", entity: change.entity, index: change.index });
-    else if (change.kind === "move") inverted.push({ kind: "move", entity: change.entity, from: change.to, to: change.from });
-    else inverted.push({ kind: "replace", before: change.after, after: change.before, index: change.index });
+    switch (change.kind) {
+      case "add":
+        inverted.push({ kind: "remove", entity: change.entity, index: change.index });
+        break;
+      case "remove":
+        inverted.push({ kind: "add", entity: change.entity, index: change.index });
+        break;
+      case "move":
+        inverted.push({ kind: "move", entity: change.entity, from: change.to, to: change.from });
+        break;
+      case "replace":
+        inverted.push({ kind: "replace", before: change.after, after: change.before, index: change.index });
+        break;
+      case "layerAdd":
+        inverted.push({ kind: "layerRemove", layer: change.layer, index: change.index });
+        break;
+      case "layerRemove":
+        inverted.push({ kind: "layerAdd", layer: change.layer, index: change.index });
+        break;
+      case "layerReplace":
+        inverted.push({ kind: "layerReplace", before: change.after, after: change.before, index: change.index });
+        break;
+      case "ltScale":
+        inverted.push({ kind: "ltScale", before: change.after, after: change.before });
+        break;
+    }
   }
   return { label: changeSet.label, changes: inverted };
 }

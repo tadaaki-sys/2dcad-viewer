@@ -15,7 +15,12 @@ import { useRecentFiles } from "./hooks/useRecentFiles";
 import { validateDxfFile } from "./io/dxf/validateDxfFile";
 import { isDwgFileName } from "./io/dxf/dwgFormat";
 import type { DxfLoadingStage, DxfWorkerRequest, DxfWorkerResponse } from "./io/dxf/dxfWorkerProtocol";
-import type { CadEntity, CadLayer, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
+import type { CadEntity, CadLayer, CadLineType, CadModel, DocumentInfo, Measurement, Point2D } from "./types/cad";
+import { buildLineTypeTable, createDashFactory } from "./core/style/lineTypes";
+import { LayerManagerPanel } from "./components/LayerManagerPanel";
+import { createLayer, deleteLayer, editLayer, moveToLayer, renameLayer, setLineTypeScale } from "./app/document/layering";
+import type { LayerPatch } from "./app/document/layering";
+import type { LayerPanelTab } from "./app/commands/types";
 import { documentFromCadModel, hasEntity } from "./core/model";
 import { describeHistoryOutcome, DOCUMENT_NOT_READY_MESSAGE, DocumentSession } from "./app/document/documentSession";
 import type { DocumentChange, DocumentSessionState } from "./app/document/documentSession";
@@ -132,6 +137,13 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMeasurementMode, setIsMeasurementMode] = useState(false);
   const [layers, setLayers] = useState<CadLayer[]>([]);
+  // 図面の線種表と、全体の線種尺度(新しい図形の破線を作る・レイヤー管理パネルに見せる)。図面のドキュメントから写す
+  const [lineStyle, setLineStyle] = useState<{ lineTypes: readonly CadLineType[]; ltScale: number }>(() => ({ lineTypes: buildLineTypeTable(undefined), ltScale: 1 }));
+  const dashes = useMemo(() => createDashFactory(lineStyle.lineTypes, lineStyle.ltScale), [lineStyle]);
+  // レイヤーの管理パネル(LAYER・LINETYPE・LINEWEIGHT)
+  const [layerPanelTab, setLayerPanelTab] = useState<LayerPanelTab | null>(null);
+  // 画面の layers(表示用)が、いまのドキュメントのどのレイヤー表の写しか(変わったときだけ、画面の側を更新する)
+  const documentLayersRef = useRef<readonly CadLayer[] | null>(null);
   // 表示中のレイヤー(TRIM・EXTEND で、非表示のレイヤーの図形を、対象にも境界にもしないため)
   const visibleLayerNames = useMemo(() => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)), [layers]);
   // 図面のクリックの、図形を指す許容距離(図面上の長さ。クリックのたびに、画面の拡大率から受け取る)
@@ -185,6 +197,7 @@ export default function App() {
       textStyle: DEFAULT_TEXT_STYLE,
       dimensionStyle: DEFAULT_DIMENSION_STYLE,
       layerTarget: () => ({ ok: false, reason: DOCUMENT_NOT_READY_MESSAGE }),
+      ltScale: 1,
       allocateEntityId: () => {
         throw new Error("図面の準備ができていません");
       },
@@ -199,6 +212,11 @@ export default function App() {
   const commandSession = commands.session;
   // 新しい図形を描くレイヤー(現在のレイヤー)。図面を開くたびに、初期値(レイヤー0など)に戻す
   const [currentLayerName, setCurrentLayerName] = useState<string | null>(null);
+  // 画面に見せる・削除の判断に使う、現在のレイヤー。なくなったとき(作成を Undo したなど)は、初期値(レイヤー0など)にする(ラジオが、どれも選ばれない状態にしない)
+  const activeLayerName = useMemo(
+    () => (currentLayerName !== null && layers.some((layer) => layer.name === currentLayerName) ? currentLayerName : defaultLayerName(layers)),
+    [layers, currentLayerName],
+  );
   // ドキュメントと履歴の準備(元データの読み込み)が終わっていて、編集できるか
   const [isDocumentEditable, setIsDocumentEditable] = useState(false);
   // 元に戻す・やり直しができるか、未保存の変更があるか(ボタンの有効・無効と、未保存の表示・確認に使う)
@@ -234,7 +252,7 @@ export default function App() {
         loadingProgress !== null
           ? { ok: false, reason: "図面を読み込み中です。完了してからお試しください" }
           : isDocumentEditable
-            ? resolveDrawTarget(layers, currentLayerName)
+            ? resolveDrawTarget(layers, currentLayerName, dashes)
             : { ok: false, reason: DOCUMENT_NOT_READY_MESSAGE },
       editing: createAppEditing({
         ready: isDocumentEditable && loadingProgress === null,
@@ -251,9 +269,10 @@ export default function App() {
       },
       textStyle: currentTextStyle(textStyles),
       dimensionStyle: currentDimensionStyle(dimensionStyles),
-      layerTarget: (name) => resolveNamedLayerTarget(layers, name),
+      layerTarget: (name) => resolveNamedLayerTarget(layers, name, dashes),
+      ltScale: lineStyle.ltScale,
     });
-  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress, textStyles, dimensionStyles]);
+  }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress, textStyles, dimensionStyles, dashes, lineStyle.ltScale]);
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
   const commandInputRef = useRef<HTMLInputElement>(null);
@@ -310,6 +329,14 @@ export default function App() {
     setSessionState(change.state);
     // 履歴の破棄・保存済みの記録では、図面は変わらない(状態だけが変わる)
     if (change.kind === "reset" || change.kind === "saved") return;
+    // レイヤー表(作成・変更・削除・表示の切り替え)が変わったときだけ、画面のレイヤー一覧と線種尺度を更新する
+    if (change.document.layers !== documentLayersRef.current) {
+      documentLayersRef.current = change.document.layers;
+      setLayers(change.document.layers.slice());
+    }
+    setLineStyle((previous) => (previous.ltScale === change.document.ltScale ? previous : { lineTypes: change.document.lineTypes, ltScale: change.document.ltScale }));
+    // レイヤーの表示・非表示だけの変更では、図形は変わらないので、描画用のモデルは作り直さない
+    if (change.kind === "view") return;
     setCadModel(renderModelFromDocument(change.document));
     // 消えた図形が選択に残らないようにする(選択が変わらないときは、同じ集合のままにして余計な再描画を避ける)
     setSelectedEntityIds((previous) => {
@@ -374,6 +401,8 @@ export default function App() {
           const session = new DocumentSession(documentFromCadModel(pendingModel));
           session.subscribe(handleDocumentChange);
           documentSessionRef.current = session;
+          documentLayersRef.current = session.document.layers;
+          setLineStyle({ lineTypes: session.document.lineTypes, ltScale: session.document.ltScale });
           setIsDocumentEditable(true);
           setSessionState(session.state);
         }
@@ -423,6 +452,8 @@ export default function App() {
     terminateWorker();
     setFileInfo(null);
     setLayers([]);
+    documentLayersRef.current = null;
+    setLayerPanelTab(null);
     setCadModel(null);
     sourceRef.current = null;
     editabilityRef.current = createEditability(null);
@@ -503,6 +534,13 @@ export default function App() {
   }, []);
 
   const handleToggleLayerVisibility = useCallback((layerName: string) => {
+    // 表示・非表示は、ドキュメントのレイヤー表に持つ(履歴・未保存の状態には入れない表示設定)。レイヤー管理の変更を Undo しても、保たれる
+    const session = documentSessionRef.current;
+    const current = session?.document.layers.find((layer) => layer.name === layerName);
+    if (session !== null && current !== undefined) {
+      session.setLayerVisible(layerName, !current.visible);
+      return;
+    }
     setLayers((prev) =>
       prev.map((layer) => (layer.name === layerName ? { ...layer, visible: !layer.visible } : layer)),
     );
@@ -614,6 +652,68 @@ export default function App() {
     [appendCommandLog],
   );
 
+  /** レイヤー管理パネルからの編集。結果(成功・失敗の説明)を、パネルにもコマンドラインにも見せるため、applyEdit と違って、結果を返す */
+  const runLayerEdit = useCallback(
+    (run: (session: DocumentSession, editability: Editability) => EditOutcome): EditOutcome => {
+      const session = documentSessionRef.current;
+      if (session === null || loadingProgress !== null) {
+        const refused: EditOutcome = { ok: false, message: DOCUMENT_NOT_READY_MESSAGE };
+        appendCommandLog([refused.message]);
+        return refused;
+      }
+      try {
+        const outcome = run(session, editabilityRef.current);
+        const notice = session.takeNotice();
+        appendCommandLog(notice === null ? [outcome.message] : [outcome.message, notice]);
+        return outcome;
+      } catch (error) {
+        console.error("[App] failed to edit layers", error);
+        const failed: EditOutcome = { ok: false, message: "レイヤーの更新に失敗しました。図面を開き直してください" };
+        appendCommandLog([failed.message]);
+        return failed;
+      }
+    },
+    [appendCommandLog, loadingProgress],
+  );
+
+  /** レイヤーを指定している寸法スタイルの名前(レイヤーの名前変更・削除のとき、直すよう知らせる) */
+  const dimensionStylesUsingLayer = useCallback((layerName: string) => dimensionStyles.styles.filter((style) => style.layer === layerName).map((style) => style.name), [dimensionStyles]);
+
+  const handleCreateLayer = useCallback((input: { name: string; color: string }) => runLayerEdit((session) => createLayer(session, input)), [runLayerEdit]);
+  const handleEditLayer = useCallback((name: string, patch: LayerPatch) => runLayerEdit((session) => editLayer(session, name, patch)), [runLayerEdit]);
+  const handleRenameLayer = useCallback(
+    (from: string, to: string) => {
+      const outcome = runLayerEdit((session) => renameLayer(session, from, to));
+      if (!outcome.ok) return outcome;
+      // 現在のレイヤーを、変えた名前に合わせる(名前は、検証で前後の空白を取った値になる)
+      const renamedTo = documentSessionRef.current?.document.layers.find((layer) => layer.name === to.trim())?.name;
+      if (renamedTo !== undefined) setCurrentLayerName((current) => (current === from ? renamedTo : current));
+      const styles = dimensionStylesUsingLayer(from);
+      if (styles.length === 0) return outcome;
+      const warning = `寸法スタイル ${styles.map((s) => `「${s}」`).join("")} が、旧い名前「${from}」のレイヤーを指定しています。寸法スタイルのレイヤーを直してください`;
+      appendCommandLog([warning]);
+      return { ok: true, message: `${outcome.message}。${warning}` };
+    },
+    [runLayerEdit, dimensionStylesUsingLayer, appendCommandLog],
+  );
+  const handleDeleteLayer = useCallback(
+    (name: string) => {
+      const outcome = runLayerEdit((session) => deleteLayer(session, name, activeLayerName));
+      if (!outcome.ok) return outcome;
+      const styles = dimensionStylesUsingLayer(name);
+      if (styles.length === 0) return outcome;
+      const warning = `寸法スタイル ${styles.map((s) => `「${s}」`).join("")} が、削除したレイヤー「${name}」を指定しています。寸法スタイルのレイヤーを直してください`;
+      appendCommandLog([warning]);
+      return { ok: true, message: `${outcome.message}。${warning}` };
+    },
+    [runLayerEdit, activeLayerName, dimensionStylesUsingLayer, appendCommandLog],
+  );
+  const handleMoveSelectedToLayer = useCallback(
+    (name: string) => runLayerEdit((session, editability) => moveToLayer(session, editability, [...selectedIdsRef.current], name)),
+    [runLayerEdit],
+  );
+  const handleSetLtScale = useCallback((value: number) => runLayerEdit((session) => setLineTypeScale(session, value)), [runLayerEdit]);
+
   const executeRequest = useCallback(
     (request: AppRequest) => {
       // 新しい図面を読み込んでいる間は、いまの図面を変更しない(読み込みが終わると、いまの図面と変更は置き換えられるため)
@@ -632,7 +732,9 @@ export default function App() {
         request.type === "filletEntities" ||
         request.type === "chamferEntities" ||
         request.type === "editText" ||
-        request.type === "reassociateDimension";
+        request.type === "reassociateDimension" ||
+        request.type === "setLineTypeScale" ||
+        request.type === "moveToLayer";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -701,6 +803,15 @@ export default function App() {
           break;
         case "reassociateDimension":
           applyEdit((session, editability) => reassociateDimension(session, editability, request.id, request.dimension));
+          break;
+        case "setLineTypeScale":
+          applyEdit((session) => setLineTypeScale(session, request.value));
+          break;
+        case "moveToLayer":
+          applyEdit((session, editability) => moveToLayer(session, editability, request.ids, request.layer));
+          break;
+        case "openLayers":
+          setLayerPanelTab(request.tab);
           break;
         case "openDimensionStyles":
           setShowDimensionStyles(true);
@@ -1118,9 +1229,10 @@ export default function App() {
         >
           <LayerPanel
             layers={layers}
-            currentLayerName={currentLayerName}
+            currentLayerName={activeLayerName}
             onToggleVisibility={handleToggleLayerVisibility}
             onSelectCurrent={setCurrentLayerName}
+            onManage={isDocumentEditable ? () => setLayerPanelTab("layers") : undefined}
           />
         </ResizablePanel>
 
@@ -1171,6 +1283,24 @@ export default function App() {
               initial={activeCommand.textEditor.initial}
               onSubmit={handleTextEditorSubmit}
               onCancel={handleCommandCancel}
+            />
+          )}
+          {layerPanelTab !== null && (
+            <LayerManagerPanel
+              layers={layers}
+              lineTypes={lineStyle.lineTypes}
+              ltScale={lineStyle.ltScale}
+              currentLayerName={activeLayerName}
+              selectedCount={selectedEntityIds.size}
+              tab={layerPanelTab}
+              onTabChange={setLayerPanelTab}
+              onCreate={handleCreateLayer}
+              onEdit={handleEditLayer}
+              onRename={handleRenameLayer}
+              onDelete={handleDeleteLayer}
+              onMoveSelected={handleMoveSelectedToLayer}
+              onSetLtScale={handleSetLtScale}
+              onClose={() => setLayerPanelTab(null)}
             />
           )}
           {showTextStyles && <TextStylePanel table={textStyles} onChange={setTextStyles} onClose={() => setShowTextStyles(false)} />}
@@ -1226,7 +1356,7 @@ export default function App() {
         cursorWorld={cursorWorld}
         stats={cadModel?.stats ?? null}
         isDirty={sessionState.isDirty}
-        currentLayerName={currentLayerName}
+        currentLayerName={activeLayerName}
         snapSettings={snapSettings}
         onToggleSnap={handleToggleSnap}
         onChangeSnapSettings={setSnapSettings}

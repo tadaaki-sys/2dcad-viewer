@@ -21,6 +21,7 @@ import type { CornerMode } from "../core/geometry/fillet";
 import { offsetAt } from "../app/document/offsetting";
 import { trimOrExtendAt } from "../app/document/trimming";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "../app/document/editing";
+import { editLayer, moveToLayer, renameLayer, setLineTypeScale } from "../app/document/layering";
 import type { Editability } from "../app/document/editability";
 import { createSelectionPreview } from "../core/commands/entityPreview";
 import { windowFromCorners } from "../core/geometry/stretch";
@@ -539,5 +540,102 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.assoc.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[assoc perf] ${entry.name}`, JSON.stringify(result));
     }, 900_000);
-  }
+    it(`${entry.name}: layer edits (color / linetype / weight / rename / move / LTSCALE) follow ByLayer figures, then Undo (time recorded; the invariant and the round trip are asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model));
+      const original = session.document.entities;
+      const count = original.length;
+      if (count === 0) return;
+      const layerByName = new Map(session.document.layers.map((layer) => [layer.name, layer]));
+      const THIN = 27;
+
+      // 不変条件: ByLayer の印がある属性は、レイヤーの設定と一致している(レイヤーの編集が、図形を正しく追従させる前提)
+      const violations = (): string[] => {
+        const found: string[] = [];
+        for (const entity of session.document.entities) {
+          const mask = entity.byLayer ?? 0;
+          if (mask === 0) continue;
+          const layer = session.document.layers.find((l) => l.name === entity.layer);
+          if (layer === undefined) {
+            found.push(`${entity.id}: レイヤー ${entity.layer} が無い`);
+            continue;
+          }
+          if ((mask & 1) !== 0 && entity.color !== layer.color) found.push(`${entity.id}: 色 ${entity.color} ≠ ${layer.color}`);
+          if (entity.type === "TEXT") continue;
+          if ((mask & 2) !== 0 && entity.lineDash !== undefined && entity.lineDash.name.toUpperCase() !== (layer.lineType ?? "").toUpperCase()) found.push(`${entity.id}: 線種 ${entity.lineDash.name} ≠ ${layer.lineType}`);
+          if ((mask & 4) !== 0 && entity.type !== "POINT" && entity.type !== "DIMENSION") {
+            const want = layer.lineWeight !== undefined && layer.lineWeight > THIN ? layer.lineWeight : undefined;
+            if (entity.lineWeight !== want) found.push(`${entity.id}: 太さ ${entity.lineWeight} ≠ ${want}`);
+          }
+        }
+        return found;
+      };
+      const marked = original.filter((entity) => (entity.byLayer ?? 0) !== 0).length;
+      const initial = violations();
+      expect(initial.slice(0, 5)).toEqual([]);
+
+      const restored = (): boolean => {
+        const now = session.document.entities;
+        if (now.length !== count) return false;
+        for (let i = 0; i < count; i++) if (now[i] !== original[i]) return false;
+        return session.document.layers.every((layer) => {
+          const was = layerByName.get(layer.name);
+          return was !== undefined && was.color === layer.color && was.lineType === layer.lineType && was.lineWeight === layer.lineWeight;
+        });
+      };
+
+      // 図形がいちばん多いレイヤー
+      const perLayer = new Map<string, number>();
+      for (const entity of original) perLayer.set(entity.layer, (perLayer.get(entity.layer) ?? 0) + 1);
+      const [busiest, busiestCount] = [...perLayer.entries()].sort((a, b) => b[1] - a[1])[0];
+      const result: Record<string, number | string | object> = { entityCount: count, byLayerMarked: marked, busiestLayer: busiest, busiestLayerEntities: busiestCount };
+
+      const colored = time(() => editLayer(session, busiest, { color: layerByName.get(busiest)!.color === "#123456" ? "#654321" : "#123456" }));
+      expect(colored.value.ok).toBe(true);
+      expect(violations().slice(0, 5)).toEqual([]);
+      result.editColorMs = round(colored.ms);
+      expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      const lined = time(() => editLayer(session, busiest, { lineType: "DASHDOT", lineWeight: 100 }));
+      expect(lined.value.ok).toBe(true);
+      expect(violations().slice(0, 5)).toEqual([]);
+      result.editLinetypeAndWeightMs = round(lined.ms);
+      expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      const renamed = time(() => renameLayer(session, busiest, `${busiest}_renamed`));
+      if (busiest !== "0") {
+        expect(renamed.value.ok).toBe(true);
+        expect(session.document.entities.filter((e) => e.layer === busiest)).toHaveLength(0);
+        expect(session.document.entities.filter((e) => e.layer === `${busiest}_renamed`)).toHaveLength(busiestCount);
+        result.renameMs = round(renamed.ms);
+        expect(session.undo().type).toBe("done");
+        expect(restored()).toBe(true);
+      }
+
+      const scaled = time(() => setLineTypeScale(session, session.document.ltScale * 2));
+      expect(scaled.value.ok).toBe(true);
+      result.ltScaleMs = round(scaled.ms);
+      expect(violations().slice(0, 5)).toEqual([]);
+      expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      // 多くの図形を、別のレイヤーへ移す(散らばった5万個まで)
+      const other = session.document.layers.find((layer) => layer.name !== busiest);
+      if (other !== undefined) {
+        const ids: string[] = [];
+        for (let i = 0; i < count && ids.length < 50_000; i += 2) ids.push(original[i].id);
+        const moved = time(() => moveToLayer(session, ALL_EDITABLE, ids, other.name));
+        expect(moved.value.ok || moved.value.message.includes("すでに")).toBe(true);
+        expect(violations().slice(0, 5)).toEqual([]);
+        result.moveToLayerMs = round(moved.ms);
+        result.moveToLayerCount = ids.length;
+        if (moved.value.ok) expect(session.undo().type).toBe("done");
+        expect(restored()).toBe(true);
+      }
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.layers.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[layers perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);  }
 });

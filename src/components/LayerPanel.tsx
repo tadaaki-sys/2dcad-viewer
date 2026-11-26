@@ -7,12 +7,21 @@ type LayerPanelProps = {
   currentLayerName: string | null;
   onToggleVisibility: (layerName: string) => void;
   onSelectCurrent: (layerName: string) => void;
+  /** レイヤー管理パネルを開く(図面が編集できる状態のときだけ渡す。無ければ、ボタンを出さない) */
+  onManage?: () => void;
 };
 
-export function LayerPanel({ layers, currentLayerName, onToggleVisibility, onSelectCurrent }: LayerPanelProps) {
+export function LayerPanel({ layers, currentLayerName, onToggleVisibility, onSelectCurrent, onManage }: LayerPanelProps) {
   return (
     <div className="layer-panel">
-      <div className="layer-panel__title">Layers</div>
+      <div className="layer-panel__title">
+        Layers
+        {onManage !== undefined && (
+          <button type="button" className="layer-panel__manage" data-testid="layer-manage" title="レイヤーの作成・色・線種・線の太さ・名前・削除(LAYER)" onClick={onManage}>
+            管理…
+          </button>
+        )}
+      </div>
       {layers.length === 0 ? (
         <div className="layer-panel__empty">レイヤーがありません</div>
       ) : (

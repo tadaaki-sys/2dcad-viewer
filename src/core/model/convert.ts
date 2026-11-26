@@ -17,6 +17,8 @@ export function documentFromCadModel(model: CadModel): CadDocument {
   return createDocument({
     layers: model.layers,
     entities: model.entities,
+    ...(model.lineTypes === undefined ? {} : { lineTypes: model.lineTypes }),
+    ...(model.ltScale === undefined ? {} : { ltScale: model.ltScale }),
     pointStyle: model.pointStyle,
     importStats: model.stats,
   });
@@ -31,6 +33,8 @@ export function cadModelFromDocument(document: CadDocument, deriveBounds: Derive
     entities: document.entities.slice(),
     entityBounds,
     layers: document.layers.slice(),
+    lineTypes: document.lineTypes.map((lineType) => ({ name: lineType.name, elements: lineType.elements.slice() })),
+    ltScale: document.ltScale,
     pointStyle: document.pointStyle,
     bounds,
     stats: document.importStats ?? {

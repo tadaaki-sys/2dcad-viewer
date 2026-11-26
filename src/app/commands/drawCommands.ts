@@ -3,7 +3,7 @@
 // 描いた分は、終了(Enter・Esc)したときに、まとめて1つの変更(Undoの1段階)になる。
 import type { CommandOutput, PreviewShape, PromptStep } from "../../core/commands";
 import type { Point2D } from "../../types/cad";
-import { isDegenerateRectangle, isSamePoint, makeLine, makePolyline, makeRectangle, rectangleCorners } from "../drawing/newEntities";
+import { drawingStyleOfTarget, isDegenerateRectangle, isSamePoint, makeLine, makePolyline, makeRectangle, rectangleCorners } from "../drawing/newEntities";
 import type { DrawingStyle } from "../drawing/newEntities";
 import { formatCoordinate } from "./format";
 import { NO_DOCUMENT_MESSAGE } from "./types";
@@ -16,7 +16,7 @@ type Output = CommandOutput<AppRequest>;
 export function drawingStyleOf(context: AppCommandContext): { ok: true; style: DrawingStyle } | { ok: false; message: string } {
   if (!context.isDocumentOpen) return { ok: false, message: NO_DOCUMENT_MESSAGE };
   if (!context.drawTarget.ok) return { ok: false, message: context.drawTarget.reason };
-  return { ok: true, style: { layer: context.drawTarget.layer, color: context.drawTarget.color } };
+  return { ok: true, style: drawingStyleOfTarget(context.drawTarget) };
 }
 
 const RECT_ENDED_MESSAGE = "RECT を終了しました(図形は描かれませんでした)";

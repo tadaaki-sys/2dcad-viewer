@@ -15,6 +15,7 @@ export function makeContext(overrides: Partial<AppCommandContext> = {}): AppComm
     textStyle: DEFAULT_TEXT_STYLE,
     dimensionStyle: DEFAULT_DIMENSION_STYLE,
     layerTarget: (name) => (name === "0" ? { ok: true, layer: "0", color: "#ffffff" } : { ok: false, reason: `レイヤー「${name}」がありません` }),
+    ltScale: 1,
     allocateEntityId: () => {
       const id = `n${counter++}`;
       allocated.push(id);
