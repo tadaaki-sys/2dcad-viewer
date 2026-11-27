@@ -98,7 +98,8 @@ function ColorCell({ color, testId, label, onCommit }: { color: string; testId: 
     const handler = () => commit.current(input.value);
     input.addEventListener("change", handler);
     return () => input.removeEventListener("change", handler);
-  }, []);
+    // key={color} で、色が変わるたびに、input が作り直される。新しい要素にも、リスナーを付け直す
+  }, [color]);
   // key で、反映後の色に作り直す(選んだ色が拒否されたとき、元の色に戻す)
   return <input key={color} ref={ref} type="color" className="layer-manager__color" data-testid={testId} aria-label={label} defaultValue={color} />;
 }

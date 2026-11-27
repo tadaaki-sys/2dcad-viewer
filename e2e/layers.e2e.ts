@@ -204,6 +204,18 @@ test.describe("ByLayer figures follow the layer", () => {
     await expect.poll(() => lineColorIs(page, mapping, GREEN)).toBe(true);
   });
 
+  test("a layer color can be changed several times in a row in the panel", async ({ page }) => {
+    const mapping = await openEditable(page);
+    const wallBottom = at(mapping, 500, 0);
+    await openPanel(page);
+    await setColor(page, "WALL", "#0000ff");
+    await expect.poll(() => hasHueNear(page, wallBottom, BLUE, 4)).toBe(true);
+    await setColor(page, "WALL", "#00ff00");
+    await expect.poll(() => hasHueNear(page, wallBottom, GREEN, 4)).toBe(true);
+    await setColor(page, "WALL", "#ff0000");
+    await expect.poll(() => hasHueNear(page, wallBottom, RED, 4)).toBe(true);
+  });
+
   test("an imported figure that follows its layer changes too (the wall: red → blue) and goes back with Undo", async ({ page }) => {
     const mapping = await openEditable(page);
     const wallBottom = at(mapping, 500, 0);

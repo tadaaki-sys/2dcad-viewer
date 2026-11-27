@@ -20,7 +20,14 @@ import { buildLineTypeTable, createDashFactory } from "./core/style/lineTypes";
 import { LayerManagerPanel } from "./components/LayerManagerPanel";
 import { createLayer, deleteLayer, editLayer, moveToLayer, renameLayer, setLineTypeScale } from "./app/document/layering";
 import type { LayerPatch } from "./app/document/layering";
-import type { LayerPanelTab } from "./app/commands/types";
+import type { GripTarget, LayerPanelTab } from "./app/commands/types";
+import { gripCountOf, gripsOf, MAX_GRIP_ENTITIES, MAX_GRIPS } from "./core/grip/grips";
+import { gripKeyOf } from "./cad-view/renderer/gripRender";
+import type { GripMark } from "./cad-view/renderer/gripRender";
+import { addVertexAt, deleteVertexAt, moveGrip, setGeometryProperty, setPolylinesClosed } from "./app/document/gripEditing";
+import { setStyleProperty } from "./app/document/propertyEditing";
+import type { StyleProperty } from "./app/document/propertyEditing";
+import type { GeometryField } from "./core/geometry/propertyGeometry";
 import { documentFromCadModel, hasEntity } from "./core/model";
 import { describeHistoryOutcome, DOCUMENT_NOT_READY_MESSAGE, DocumentSession } from "./app/document/documentSession";
 import type { DocumentChange, DocumentSessionState } from "./app/document/documentSession";
@@ -137,6 +144,9 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMeasurementMode, setIsMeasurementMode] = useState(false);
   const [layers, setLayers] = useState<CadLayer[]>([]);
+  // グリップのクリックで始まる GRIPEDIT が、動かすグリップ(コマンドが始まるときに、1回だけ取り出す)と、動かしている最中のグリップ(赤く描く)
+  const pendingGripRef = useRef<GripTarget | null>(null);
+  const [hotGrip, setHotGrip] = useState<GripMark | null>(null);
   // 図面の線種表と、全体の線種尺度(新しい図形の破線を作る・レイヤー管理パネルに見せる)。図面のドキュメントから写す
   const [lineStyle, setLineStyle] = useState<{ lineTypes: readonly CadLineType[]; ltScale: number }>(() => ({ lineTypes: buildLineTypeTable(undefined), ltScale: 1 }));
   const dashes = useMemo(() => createDashFactory(lineStyle.lineTypes, lineStyle.ltScale), [lineStyle]);
@@ -205,6 +215,8 @@ export default function App() {
   );
   // 編集してよい図形の判断(取り込んだ図形の分類。元データが届いたときに作る)と、いまの選択(コマンドが、始まる時点の最新を読めるように)
   const editabilityRef = useRef<Editability>(createEditability(null));
+  // 描画(グリップ・プロパティ欄)が読む、編集可否の判断。参照(ref)と同じものを、状態にも持つ
+  const [editabilityState, setEditabilityState] = useState<Editability>(() => createEditability(null));
   const selectedIdsRef = useRef<ReadonlySet<string>>(new Set());
   useLayoutEffect(() => {
     selectedIdsRef.current = selectedEntityIds;
@@ -261,6 +273,11 @@ export default function App() {
         getSelection: () => selectedIdsRef.current,
         getVisibleLayerNames: () => visibleLayerNamesRef.current,
         getPickTolerance: () => pickToleranceRef.current,
+        takePendingGrip: () => {
+          const grip = pendingGripRef.current;
+          pendingGripRef.current = null;
+          return grip;
+        },
       }),
       allocateEntityId: () => {
         const session = documentSessionRef.current;
@@ -275,6 +292,16 @@ export default function App() {
   }, [commands, isDocumentOpen, isDocumentEditable, layers, currentLayerName, loadingProgress, textStyles, dimensionStyles, dashes, lineStyle.ltScale]);
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
+  // グリップ(選択した、編集できる図形のつかむ点)。コマンド・測定・読み込みの最中は出さない。選択が多すぎる・グリップが多すぎるときも出さない
+  const gripMarks = useMemo((): GripMark[] => {
+    if (!isDocumentEditable || loadingProgress !== null || activeCommand !== null || isMeasurementMode || selectedEntities.length === 0) return [];
+    const editable = selectedEntities.filter((entity) => editabilityState.isEditable(entity.id));
+    if (editable.length === 0 || editable.length > MAX_GRIP_ENTITIES) return [];
+    let total = 0;
+    for (const entity of editable) total += gripCountOf(entity);
+    if (total > MAX_GRIPS) return [];
+    return editable.flatMap((entity) => gripsOf(entity).map((grip) => ({ key: gripKeyOf(entity.id, grip.index), entityId: entity.id, index: grip.index, kind: grip.kind, point: grip.point })));
+  }, [isDocumentEditable, loadingProgress, activeCommand, isMeasurementMode, selectedEntities, editabilityState]);
   const commandInputRef = useRef<HTMLInputElement>(null);
 
   // ダイナミック入力(カーソル付近の X・Y・長さ・角度の表示と、数値の入力)。
@@ -378,6 +405,7 @@ export default function App() {
         // 元データは、図面の表示を遅らせないよう、続けて届く(sourceメッセージ)。それまでは、前の図面の分を残さない
         sourceRef.current = null;
         editabilityRef.current = createEditability(null);
+        setEditabilityState(editabilityRef.current);
         documentSessionRef.current = null;
         setIsDocumentEditable(false);
         setSessionState(NO_HISTORY_STATE);
@@ -397,6 +425,7 @@ export default function App() {
       } else if (message.type === "source") {
         sourceRef.current = message.source;
         editabilityRef.current = createEditability(editabilitySourceOf(pendingModel, message.source));
+        setEditabilityState(editabilityRef.current);
         if (pendingModel) {
           const session = new DocumentSession(documentFromCadModel(pendingModel));
           session.subscribe(handleDocumentChange);
@@ -457,6 +486,7 @@ export default function App() {
     setCadModel(null);
     sourceRef.current = null;
     editabilityRef.current = createEditability(null);
+    setEditabilityState(editabilityRef.current);
     documentSessionRef.current = null;
     setIsDocumentEditable(false);
     setSessionState(NO_HISTORY_STATE);
@@ -734,7 +764,11 @@ export default function App() {
         request.type === "editText" ||
         request.type === "reassociateDimension" ||
         request.type === "setLineTypeScale" ||
-        request.type === "moveToLayer";
+        request.type === "moveToLayer" ||
+        request.type === "moveGrip" ||
+        request.type === "addVertex" ||
+        request.type === "deleteVertex" ||
+        request.type === "setPolylinesClosed";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -813,6 +847,19 @@ export default function App() {
         case "openLayers":
           setLayerPanelTab(request.tab);
           break;
+        case "moveGrip":
+          applyEdit((session, editability) => moveGrip(session, editability, request.id, request.index, request.point));
+          break;
+        case "addVertex":
+          applyEdit((session, editability) => addVertexAt(session, editability, request.id, request.point));
+          break;
+        case "deleteVertex":
+          // クリックした位置から、頂点までの許容距離は、図形を指す許容距離の2倍(頂点を指しやすく、線分の途中では、遠くの頂点を消さない)
+          applyEdit((session, editability) => deleteVertexAt(session, editability, request.id, request.point, pickToleranceRef.current * 2));
+          break;
+        case "setPolylinesClosed":
+          applyEdit((session, editability) => setPolylinesClosed(session, editability, request.ids, request.closed));
+          break;
         case "openDimensionStyles":
           setShowDimensionStyles(true);
           break;
@@ -874,6 +921,26 @@ export default function App() {
       for (const request of result.requests) executeRequest(request);
     },
     [appendCommandLog, executeRequest],
+  );
+
+  /** グリップをクリックした: そのグリップを動かすコマンド(GRIPEDIT)を始める */
+  const handleGripClick = useCallback(
+    (grip: GripMark) => {
+      pendingGripRef.current = { id: grip.entityId, index: grip.index, point: grip.point };
+      setHotGrip(grip);
+      applyCommandResult(commandSession.run("GRIPEDIT"));
+    },
+    [applyCommandResult, commandSession],
+  );
+
+  /** プロパティ欄からの編集(色・線種・線の太さ・線種尺度・値)。結果を、パネルにも、コマンドラインにも見せる */
+  const handleSetStyleProperty = useCallback(
+    (ids: readonly string[], change: StyleProperty) => runLayerEdit((session, editability) => setStyleProperty(session, editability, ids, change)),
+    [runLayerEdit],
+  );
+  const handleSetGeometryProperty = useCallback(
+    (id: string, field: GeometryField, value: number) => runLayerEdit((session, editability) => setGeometryProperty(session, editability, id, field, value)),
+    [runLayerEdit],
   );
 
   /** 名前を指定してコマンドを動かす(ツールバーのボタンとショートカット用) */
@@ -1260,6 +1327,9 @@ export default function App() {
             trackingSettings={trackingSettings}
             trackingResetKey={commandRevision}
             onCursorMove={handleCursorMove}
+            grips={gripMarks}
+            hotGrip={activeCommand?.name === "GRIPEDIT" ? hotGrip : null}
+            onGripClick={handleGripClick}
           />
           {dynamicMode !== null && (
             <DynamicInput
@@ -1329,7 +1399,21 @@ export default function App() {
           onCollapsedChange={setRightCollapsed}
         >
           <div className="app-cad-layout__right-content">
-            <PropertyPanel entities={selectedEntities} />
+            <PropertyPanel
+              entities={selectedEntities}
+              editor={
+                isDocumentEditable && loadingProgress === null
+                  ? {
+                      editable: selectedEntities.filter((entity) => editabilityState.isEditable(entity.id)),
+                      layers,
+                      lineTypes: lineStyle.lineTypes,
+                      onSetStyle: handleSetStyleProperty,
+                      onSetGeometry: handleSetGeometryProperty,
+                      onMoveToLayer: handleMoveSelectedToLayer,
+                    }
+                  : undefined
+              }
+            />
             <MeasurementPanel
               measurements={measurements}
               selectedMeasurementId={selectedMeasurementId}

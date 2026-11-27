@@ -34,6 +34,8 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
     textOf: NO_EDITING.textOf,
     entityOf: NO_EDITING.entityOf,
     anchorsAt: NO_EDITING.anchorsAt,
+takePendingGrip: NO_EDITING.takePendingGrip,
+createGripPreview: NO_EDITING.createGripPreview,
     ...overrides,
   };
   const context = makeContext({ editing });
@@ -333,6 +335,8 @@ describe("a large selection", () => {
       textOf: NO_EDITING.textOf,
     entityOf: NO_EDITING.entityOf,
     anchorsAt: NO_EDITING.anchorsAt,
+takePendingGrip: NO_EDITING.takePendingGrip,
+createGripPreview: NO_EDITING.createGripPreview,
     };
     const session = createAppCommandSession(() => makeContext({ editing }));
     session.submitText("move");

@@ -5,10 +5,14 @@ import { getEntityPoints } from "../core/geometry/entityGeometry";
 import { layoutDimension } from "../core/dimension/dimensionGeometry";
 import { DIMENSION_KIND_LABELS } from "../core/dimension/dimensionStyle";
 import { BYLAYER_COLOR, BYLAYER_LINETYPE, BYLAYER_LINEWEIGHT, followsLayer } from "../core/style/byLayer";
+import { PropertyEditor } from "./PropertyEditor";
+import type { PropertyEditorProps } from "./PropertyEditor";
 import "./PropertyPanel.css";
 
 type PropertyPanelProps = {
   entities: CadEntity[];
+  /** 編集の入口(Phase 18)。渡さなければ、表示専用。editable は、選択のうち、編集できる図形 */
+  editor?: Omit<PropertyEditorProps, "entities"> & { editable: readonly CadEntity[] };
 };
 
 type Row = { label: string; value: string };
@@ -142,7 +146,7 @@ function Rows({ rows }: { rows: Row[] }) {
   );
 }
 
-export function PropertyPanel({ entities }: PropertyPanelProps) {
+export function PropertyPanel({ entities, editor }: PropertyPanelProps) {
   return (
     <div className="property-panel">
       <div className="property-panel__title">Properties</div>
@@ -160,6 +164,7 @@ export function PropertyPanel({ entities }: PropertyPanelProps) {
           <Rows rows={buildLayerBreakdown(entities)} />
         </>
       )}
+      {editor !== undefined && editor.editable.length > 0 && <PropertyEditor {...editor} entities={editor.editable} />}
     </div>
   );
 }

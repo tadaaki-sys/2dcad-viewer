@@ -89,17 +89,17 @@ test.describe("following the figure", () => {
     await typeCommand(page, "2");
     await expect(log(page)).toContainText("拡大縮小しました");
     expect(await entityCount(page)).toBe(before);
-    await select(page, mapping, 100, 160, "DIMENSION");
+    await select(page, mapping, 60, 160, "DIMENSION");
     await expect(propertyPanel(page)).toContainText(/Measurement\s*320/);
     await expect(propertyPanel(page)).toContainText(/Associativity\s*Associated/);
 
     await undo(page);
     await expect(log(page)).toContainText("元に戻しました: 図形を拡大縮小");
-    await select(page, mapping, 100, 160, "DIMENSION");
+    await select(page, mapping, 60, 160, "DIMENSION");
     await expect(propertyPanel(page)).toContainText(/Measurement\s*160/);
     await page.keyboard.press("Control+y");
     await expect(log(page)).toContainText("やり直しました");
-    await select(page, mapping, 100, 160, "DIMENSION");
+    await select(page, mapping, 60, 160, "DIMENSION");
     await expect(propertyPanel(page)).toContainText(/Measurement\s*320/);
   });
 

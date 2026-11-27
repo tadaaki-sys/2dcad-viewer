@@ -9,6 +9,7 @@ import type { Camera } from "../../core/view/Camera";
 import type { PreviewShape } from "../../core/commands";
 import type { DragSelectionBox, Renderer, RenderParams } from "./Renderer";
 import { drawGrid, drawSnapMarker } from "./snapMarker";
+import { drawGrips } from "./gripRender";
 import { drawTracking } from "./trackingRender";
 import { layoutTextLines, TEXT_LINE_HEIGHT_FACTOR } from "../../core/text/textLayout";
 import { cssFontFamily } from "../../core/text/textStyle";
@@ -483,6 +484,9 @@ export class CanvasRenderer implements Renderer {
     trackingLabel,
     previewShapes,
     spatialIndex,
+    grips,
+    hoverGripKey,
+    hotGrip,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, viewportWidth, viewportHeight);
@@ -656,5 +660,8 @@ export class CanvasRenderer implements Renderer {
     }
 
     if (snapMarker) drawSnapMarker(ctx, camera, snapMarker);
+
+    // グリップ(いちばん上)
+    if ((grips !== undefined && grips.length > 0) || (hotGrip !== undefined && hotGrip !== null)) drawGrips(ctx, camera, grips ?? [], hoverGripKey ?? null, hotGrip ?? null);
   }
 }

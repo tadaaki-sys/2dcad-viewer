@@ -7,7 +7,8 @@ import { BOUNDS_STRIDE, computeAllEntityBounds } from "../../core/spatial/entity
 import { getEntity } from "../../core/model";
 import type { EntityId } from "../../core/model";
 import type { CadEntity } from "../../types/cad";
-import type { AppEditing } from "../commands/types";
+import { createGripPreview } from "../../core/grip/gripPreview";
+import type { AppEditing, GripTarget } from "../commands/types";
 import { resolveEditTargets } from "./editability";
 import { pickEntityAt, pickTargetOf } from "./picking";
 import type { Editability } from "./editability";
@@ -23,6 +24,8 @@ export type AppEditingSources = {
   getVisibleLayerNames: () => ReadonlySet<string>;
   /** 最後に図面をクリックしたときの、図形を指す許容距離(図面上の長さ) */
   getPickTolerance: () => number;
+  /** グリップのクリックで始まった GRIPEDIT が、動かすグリップ(1回だけ取り出せる)。無ければ null */
+  takePendingGrip: () => GripTarget | null;
 }
 
 export function createAppEditing(sources: AppEditingSources): AppEditing {
@@ -82,6 +85,12 @@ export function createAppEditing(sources: AppEditingSources): AppEditing {
     anchorsAt: (points) => {
       const session = sources.getSession();
       return session === null ? points.map(() => null) : findAnchorsAt(session.document.entities, sources.getVisibleLayerNames(), points);
+    },
+    takePendingGrip: () => sources.takePendingGrip(),
+    createGripPreview: (id, index) => {
+      const session = sources.getSession();
+      const entity = session === null ? undefined : getEntity(session.document, id);
+      return entity === undefined ? () => [] : createGripPreview(entity, index);
     },
     entityOf: (id) => {
       const session = sources.getSession();

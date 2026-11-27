@@ -5,6 +5,7 @@ import type { PreviewShape } from "../../core/commands";
 import type { SnapMarker } from "./snapMarker";
 import type { TrackingGuide } from "../../core/tracking/trackingGeometry";
 import type { TrackingLabel } from "./trackingRender";
+import type { GripMark } from "./gripRender";
 
 export type DragSelectionBox = {
   screenMin: Point2D;
@@ -36,6 +37,10 @@ export type RenderParams = {
   previewShapes?: readonly PreviewShape[];
   /** 画面外の図形を描画対象から外すための空間索引。無ければ全図形を走査する */
   spatialIndex: SpatialIndex | null;
+  /** グリップ(選択した図形のつかむ点)。カーソルが乗っているものと、ホット(動かしている最中)のもの。無ければ省略 */
+  grips?: readonly GripMark[];
+  hoverGripKey?: string | null;
+  hotGrip?: GripMark | null;
 };
 
 export interface Renderer {

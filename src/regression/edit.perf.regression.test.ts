@@ -22,6 +22,10 @@ import { offsetAt } from "../app/document/offsetting";
 import { trimOrExtendAt } from "../app/document/trimming";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "../app/document/editing";
 import { editLayer, moveToLayer, renameLayer, setLineTypeScale } from "../app/document/layering";
+import { addVertexAt, deleteVertexAt, moveGrip, setGeometryProperty, setPolylinesClosed } from "../app/document/gripEditing";
+import { setStyleProperty } from "../app/document/propertyEditing";
+import { gripCountOf, gripsOf, MAX_GRIPS } from "../core/grip/grips";
+import { geometryFieldsOf } from "../core/geometry/propertyGeometry";
 import type { Editability } from "../app/document/editability";
 import { createSelectionPreview } from "../core/commands/entityPreview";
 import { windowFromCorners } from "../core/geometry/stretch";
@@ -637,5 +641,99 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.layers.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[layers perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);    it(`${entry.name}: grips, vertex edits and property edits on real figures, then Undo (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      // 履歴の上限(既定 200 段階)を超えて、全部を Undo で戻せることを確かめるため、上限を大きくする
+      const session = new DocumentSession(documentFromCadModel(model), 5_000);
+      const original = session.document.entities;
+      const count = original.length;
+      if (count === 0) return;
+      const restored = (): boolean => {
+        const now = session.document.entities;
+        if (now.length !== count) return false;
+        for (let i = 0; i < count; i++) if (now[i] !== original[i]) return false;
+        return true;
+      };
+      const result: Record<string, number | object> = { entityCount: count };
+
+      // 種類ごとに、最大25個の図形を選ぶ(折れ線は、頂点の多いもの2つを加える)
+      const byType = new Map<string, CadEntity[]>();
+      for (const entity of original) {
+        const list = byType.get(entity.type) ?? [];
+        if (list.length < 25) list.push(entity);
+        byType.set(entity.type, list);
+      }
+      const bigPolylines = original.filter((e) => e.type === "LWPOLYLINE" || e.type === "POLYLINE").sort((a, b) => (b.type === "LWPOLYLINE" || b.type === "POLYLINE" ? b.vertices.length : 0) - (a.type === "LWPOLYLINE" || a.type === "POLYLINE" ? a.vertices.length : 0)).slice(0, 2);
+      const sample = [...[...byType.values()].flat(), ...bigPolylines];
+
+      // 1) グリップの位置の計算(上限の判断を含む)
+      const timedGrips = time(() => sample.map((entity) => gripsOf(entity)));
+      const gripTotal = timedGrips.value.reduce((sum, grips) => sum + grips.length, 0);
+      sample.forEach((entity, i) => expect(gripCountOf(entity), `${entity.type} ${entity.id}`).toBe(timedGrips.value[i].length === gripCountOf(entity) ? timedGrips.value[i].length : -1));
+      result.gripsComputedMs = round(timedGrips.ms);
+      result.gripTotal = gripTotal;
+      result.gripLimit = MAX_GRIPS;
+
+      // 2) グリップを動かす(適用 → 不変条件: 図形の数が変わらない・座標が有限・Undo で元と同一)
+      let moved = 0;
+      let refused = 0;
+      const timedMoves = time(() => {
+        sample.forEach((entity, i) => {
+          for (const grip of timedGrips.value[i].slice(0, 6)) {
+            const outcome = moveGrip(session, ALL_EDITABLE, entity.id, grip.index, { x: grip.point.x + 13.5, y: grip.point.y - 7.25 });
+            if (outcome.ok) {
+              moved++;
+              expect(session.document.entities.length).toBe(count);
+              const bounds = computeAllEntityBounds([session.document.entities[session.document.indexById.get(entity.id)!]]);
+              expect(Array.from(bounds).every(Number.isFinite)).toBe(true);
+            } else refused++;
+          }
+        });
+      });
+      result.gripMoves = moved;
+      result.gripMovesRefused = refused;
+      result.gripMovesMs = round(timedMoves.ms);
+      while (session.canUndo) expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      // 3) 折れ線の頂点の追加・削除・閉じる/開く
+      const polylines = sample.filter((e) => e.type === "LWPOLYLINE" || e.type === "POLYLINE");
+      let vertexOps = 0;
+      const timedVertices = time(() => {
+        for (const entity of polylines) {
+          if (entity.type !== "LWPOLYLINE" && entity.type !== "POLYLINE") continue;
+          const a = entity.vertices[0];
+          const b = entity.vertices[1];
+          if (addVertexAt(session, ALL_EDITABLE, entity.id, { x: (a.x + b.x) / 2 + 0.001, y: (a.y + b.y) / 2 + 0.001 }).ok) vertexOps++;
+          if (deleteVertexAt(session, ALL_EDITABLE, entity.id, a, 1e-6).ok) vertexOps++;
+          if (setPolylinesClosed(session, ALL_EDITABLE, [entity.id], !entity.closed).ok) vertexOps++;
+        }
+      });
+      result.vertexOps = vertexOps;
+      result.vertexOpsMs = round(timedVertices.ms);
+      while (session.canUndo) expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      // 4) プロパティ(色・線種・線の太さ・線種尺度)を、図形の多い選択へ。値を1つ(座標)も変える
+      const ids = original.filter((_, i) => i % 2 === 0).slice(0, 20_000).map((e) => e.id);
+      const timedColor = time(() => setStyleProperty(session, ALL_EDITABLE, ids, { kind: "color", value: "#123456" }));
+      expect(timedColor.value.ok).toBe(true);
+      result.styleColorCount = ids.length;
+      result.styleColorMs = round(timedColor.ms);
+      const timedType = time(() => setStyleProperty(session, ALL_EDITABLE, ids, { kind: "lineType", value: "CENTER" }));
+      result.styleLineTypeMs = round(timedType.ms);
+      const timedBylayer = time(() => setStyleProperty(session, ALL_EDITABLE, ids, { kind: "color", value: "bylayer" }));
+      result.styleByLayerMs = round(timedBylayer.ms);
+      let geometryEdits = 0;
+      for (const entity of sample.slice(0, 60)) {
+        const field = geometryFieldsOf(entity)[0];
+        if (field !== undefined && setGeometryProperty(session, ALL_EDITABLE, entity.id, field, 1234.5).ok) geometryEdits++;
+      }
+      result.geometryEdits = geometryEdits;
+      while (session.canUndo) expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.grips.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[grips perf] ${entry.name}`, JSON.stringify(result));
     }, 900_000);  }
 });

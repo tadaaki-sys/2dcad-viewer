@@ -55,7 +55,18 @@ export type AppRequest =
   /** 全体の線種尺度を変える(LTSCALE)。破線の長さが変わる。1つの依頼が、Undoの1段階 */
   | { type: "setLineTypeScale"; value: number }
   /** 図形を、別のレイヤーへ移す(LAYMOVE)。ByLayer の属性は、移した先に従う。1つの依頼が、Undoの1段階 */
-  | { type: "moveToLayer"; ids: readonly EntityId[]; layer: string };
+  | { type: "moveToLayer"; ids: readonly EntityId[]; layer: string }
+  /** グリップ(図形の中の番号 index)を、point へ動かす(GRIPEDIT)。1つの依頼が、Undoの1段階 */
+  | { type: "moveGrip"; id: EntityId; index: number; point: Point2D }
+  /** 折れ線の、point に最も近い線分に、頂点を足す(VERTEXADD)。1つの依頼が、Undoの1段階 */
+  | { type: "addVertex"; id: EntityId; point: Point2D }
+  /** 折れ線の、point の近くの頂点を削除する(VERTEXDEL)。1つの依頼が、Undoの1段階 */
+  | { type: "deleteVertex"; id: EntityId; point: Point2D }
+  /** 折れ線を、閉じる・開く(PCLOSE・POPEN)。1つの依頼が、Undoの1段階 */
+  | { type: "setPolylinesClosed"; ids: readonly EntityId[]; closed: boolean };
+
+/** グリップを指したクリック(どの図形の、何番のグリップか。point は、そのグリップの位置) */
+export type GripTarget = { id: EntityId; index: number; point: Point2D }
 
 /** レイヤー管理パネルの、見せる部分 */
 export type LayerPanelTab = "layers" | "linetypes" | "lineweights";
@@ -116,6 +127,10 @@ export type AppEditing = {
    * 同じ点に複数の図形が一致するとき(共有する角)は、描画順で最前面の図形
    */
   anchorsAt: (points: readonly Point2D[]) => Array<FoundAnchor | null>;
+  /** グリップのクリックで始まった GRIPEDIT が、動かすグリップ。1回だけ取り出せる(取り出すと空になる)。無ければ null */
+  takePendingGrip: () => GripTarget | null;
+  /** グリップを動かしたあとの形の仮表示を作る関数を返す(カーソルの位置を渡すと、動かした形を返す。動かせない位置では空) */
+  createGripPreview: (id: EntityId, index: number) => (cursor: Point2D) => readonly PreviewShape[];
   /** OFFSET の仮表示を作る関数を返す(距離[null = 通過点]とカーソルの位置を渡すと、写した形を返す) */
   createOffsetPreview: (id: EntityId) => (distance: number | null, cursor: Point2D) => readonly PreviewShape[];
   /** BREAK の仮表示を作る関数を返す(第2点を渡すと、切断したあとに残る形を返す) */
@@ -136,6 +151,8 @@ export const NO_EDITING: AppEditing = {
   textOf: () => null,
   entityOf: () => null,
   anchorsAt: (points) => points.map(() => null),
+  takePendingGrip: () => null,
+  createGripPreview: () => () => [],
 };
 
 /** コマンドを始める時点のアプリの状態 */

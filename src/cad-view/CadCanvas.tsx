@@ -19,6 +19,8 @@ import { buildSpatialIndex } from "../core/spatial/SpatialIndex";
 import { unionOfVisibleEntityBounds } from "../core/spatial/entityBounds";
 import { isTypingTarget } from "../utils/dom";
 import type { PreviewShape } from "../core/commands";
+import { findGripAt } from "./renderer/gripRender";
+import type { GripMark } from "./renderer/gripRender";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -92,6 +94,11 @@ type CadCanvasProps = {
   trackingResetKey?: number;
   /** カーソルの位置(図面上の点は吸着後)。screenPoint は、キャンバスの左上からのピクセル位置(カーソル付近の表示用) */
   onCursorMove?: (worldPoint: Point2D | null, screenPoint: Point2D | null) => void;
+  /** グリップ(選択した図形のつかむ点)。コマンドの最中・測定中などは、空にする。クリックすると onGripClick が呼ばれ、選択の操作は始まらない */
+  grips?: readonly GripMark[];
+  /** ホット(動かしている最中)のグリップ。赤で描く */
+  hotGrip?: GripMark | null;
+  onGripClick?: (grip: GripMark) => void;
 };
 
 function resizeCanvasToContainer(
@@ -137,6 +144,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     trackingSettings,
     trackingResetKey = 0,
     onCursorMove,
+    grips,
+    hotGrip = null,
+    onGripClick,
   },
   ref,
 ) {
@@ -148,6 +158,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
   const overlapCycleRef = useRef<OverlapCycleState | null>(null);
   const pendingMeasurementPointRef = useRef<Point2D | null>(null);
   const snapMarkerRef = useRef<SnapMarker | null>(null);
+  // カーソルが乗っているグリップの名前(強調して描く)
+  const hoverGripKeyRef = useRef<string | null>(null);
   // 作図中のゴム紐と、そのもとになったカーソル位置(図面上。吸着後)
   const previewRef = useRef<readonly PreviewShape[]>([]);
   const lastPointerWorldRef = useRef<Point2D | null>(null);
@@ -207,6 +219,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     snapFromPoint,
     trackingSettings,
     onCursorMove,
+    grips,
+    hotGrip,
+    onGripClick,
   });
   stateRef.current = {
     snapEnabledTypes,
@@ -229,6 +244,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     snapFromPoint,
     trackingSettings,
     onCursorMove,
+    grips,
+    hotGrip,
+    onGripClick,
   };
 
   function draw() {
@@ -271,6 +289,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       trackingLabel: trackingLabelRef.current,
       previewShapes: previewRef.current,
       spatialIndex: currentSpatialIndex,
+      grips: stateRef.current.grips,
+      hoverGripKey: hoverGripKeyRef.current,
+      hotGrip: stateRef.current.hotGrip,
     });
 
     const renderEnd = performance.now();
@@ -670,6 +691,19 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         updatePanCursor();
         return;
       }
+      // グリップをクリックしたら、そのグリップを動かすコマンドを始める(選択の操作は始めない)。グリップは、コマンド・測定の最中は、出ない
+      if (event.button === LEFT_MOUSE_BUTTON && !stateRef.current.pointPickEnabled && !stateRef.current.measurementModeEnabled) {
+        const gripList = stateRef.current.grips;
+        if (gripList !== undefined && gripList.length > 0 && stateRef.current.onGripClick !== undefined) {
+          const hit = findGripAt(gripList, cameraRef.current, getCanvasRelativePoint(canvas!, event.clientX, event.clientY));
+          if (hit !== null) {
+            event.preventDefault();
+            hoverGripKeyRef.current = null;
+            stateRef.current.onGripClick(hit);
+            return;
+          }
+        }
+      }
       // コマンドが点の指示を待っているときは、クリックをコマンドへ渡す(測定・選択より優先)
       if (event.button === LEFT_MOUSE_BUTTON && stateRef.current.pointPickEnabled) {
         event.preventDefault();
@@ -762,6 +796,16 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
     /** カーソル(画面の位置)に対する、吸着・目印・ゴム紐・座標表示を更新する */
     function applyPointer(clientX: number, clientY: number) {
+      // グリップの上にカーソルがあれば、強調する(グリップが無いときは、何もしない)
+      const gripList = stateRef.current.grips;
+      const hoverKey =
+        gripList !== undefined && gripList.length > 0 && !isPanning && !stateRef.current.pointPickEnabled
+          ? (findGripAt(gripList, cameraRef.current, getCanvasRelativePoint(canvas!, clientX, clientY))?.key ?? null)
+          : null;
+      if (hoverKey !== hoverGripKeyRef.current) {
+        hoverGripKeyRef.current = hoverKey;
+        requestDraw();
+      }
       if (!stateRef.current.measurementModeEnabled && !stateRef.current.pointPickEnabled) {
         updateSnapMarker(null);
         setTrackingVisuals(null);
