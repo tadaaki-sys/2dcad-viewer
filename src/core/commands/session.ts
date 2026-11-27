@@ -28,6 +28,8 @@ export type ActiveCommand = {
   rawPoints: boolean;
   /** 文字の入力パネルを出す段階なら、その指定(複数行か・最初の文字)。ふつうの段階は null */
   textEditor: { multiline: boolean; initial: string } | null;
+  /** 選択を待つ段階で、グループ単位に広げず、図形そのものを選ばせるか */
+  individualSelection: boolean;
 };
 
 export type SessionResult<R> = {
@@ -223,6 +225,7 @@ export class CommandSession<R, C> {
       numberMeaning: step.expect === "point" && step.numberMeaning !== undefined ? step.numberMeaning : "length",
       rawPoints: step.expect === "point" && step.rawPoints === true,
       textEditor: step.expect === "text" && step.editor !== undefined ? { multiline: step.editor.multiline, initial: step.editor.initial ?? "" } : null,
+      individualSelection: step.expect === "selection" && step.individualSelection === true,
     };
   }
 

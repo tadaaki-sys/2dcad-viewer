@@ -3,17 +3,47 @@
 import type { CadDocument } from "../model/document";
 import { parseNewEntityCounter } from "../model/ids";
 import type { EntityId } from "../model/ids";
-import type { CadEntity, CadLayer } from "../../types/cad";
+import type { CadEntity, CadGroup, CadLayer } from "../../types/cad";
 import type { Change, ChangeSet } from "./changeSet";
 
 export type ApplyResult = { ok: true; document: CadDocument } | { ok: false; error: string };
 
-/** layers・ltScale は、この変更でレイヤー表・線種尺度が変わったときだけ入る */
-type Applied = { ok: true; entities: CadEntity[]; nextNewId: number; layers?: CadLayer[]; ltScale?: number } | { ok: false; error: string };
+/** layers・ltScale・groups は、この変更でレイヤー表・線種尺度・グループ表が変わったときだけ入る */
+type Applied = { ok: true; entities: CadEntity[]; nextNewId: number; layers?: CadLayer[]; ltScale?: number; groups?: CadGroup[] } | { ok: false; error: string };
 
-/** レイヤーの定義(名前・色・線種・線の太さ)が同じか。表示・非表示は履歴の対象外なので、比べない */
+/** レイヤーの定義(名前・色・線種・線の太さ・ロック)が同じか。表示・非表示は履歴の対象外なので、比べない */
 export function sameLayerDefinition(a: CadLayer, b: CadLayer): boolean {
-  return a.name === b.name && a.color === b.color && a.lineType === b.lineType && a.lineWeight === b.lineWeight;
+  return a.name === b.name && a.color === b.color && a.lineType === b.lineType && a.lineWeight === b.lineWeight && (a.locked === true) === (b.locked === true);
+}
+
+/** グループが同じか(名前と、図形の一覧が、同じ順で同じ) */
+export function sameGroup(a: CadGroup, b: CadGroup): boolean {
+  if (a.name !== b.name || a.ids.length !== b.ids.length) return false;
+  for (let i = 0; i < a.ids.length; i++) if (a.ids[i] !== b.ids[i]) return false;
+  return true;
+}
+
+/**
+ * グループ表の整合を確かめる(Phase 19): どのグループの図形も、図面にあること。グループ表が変わったときは、
+ * 1つの図形が2つのグループに入っていないことも。グループ表が変わった・図形が削除された変更のときだけ、確かめる。
+ */
+function checkGroups(original: CadDocument, result: ApplyResult, changes: readonly Change[]): ApplyResult {
+  if (!result.ok) return result;
+  const document = result.document;
+  if (document.groups.length === 0) return result;
+  const groupsChanged = document.groups !== original.groups;
+  if (!groupsChanged && !changes.some((c) => c.kind === "remove")) return result;
+  const seen = new Set<string>();
+  for (const group of document.groups) {
+    for (const id of group.ids) {
+      if (!document.indexById.has(id)) return fail(`グループ「${group.name}」の図形 ${id} が、図面に無くなります`);
+      if (groupsChanged) {
+        if (seen.has(id)) return fail(`図形 ${id} が、2つのグループに入ることになります`);
+        seen.add(id);
+      }
+    }
+  }
+  return result;
 }
 
 function fail(error: string): { ok: false; error: string } {
@@ -34,12 +64,36 @@ function fail(error: string): { ok: false; error: string } {
 export function applyChangeSet(document: CadDocument, changeSet: ChangeSet): ApplyResult {
   if (changeSet.changes.length === 0) return fail("変更がありません");
   const bulk = applyBulk(document, changeSet.changes);
-  if (bulk !== null) return finish(document, bulk);
-  return applyBulkThenReplaces(document, changeSet.changes) ?? finish(document, applySequentially(document, changeSet.changes));
+  const result =
+    bulk !== null
+      ? finish(document, bulk)
+      : (applyBulkThenReplaces(document, changeSet.changes) ?? applyBulkRemoveThenAdd(document, changeSet.changes) ?? finish(document, applySequentially(document, changeSet.changes)));
+  return checkGroups(document, result, changeSet.changes);
 }
 
 /**
- * 削除だけ(または追加だけ)の大きな変更のあとに、置き換えが続く変更(連動寸法の追従が、置き換えを足したとき)を、
+ * 削除だけの並びのあとに、追加だけの並びが続く変更(描画順の大きな入れ替え: 図形を取り出して、別の位置に入れ直す。Phase 19)を、
+ * 前半・後半とも1回の走査で適用する。1件ずつの splice だと「図形数 × 動かす数」の時間になるため。
+ * 条件に合わない・失敗するときは null(1件ずつの適用に任せる。エラーの文言もそちらが出す)。
+ */
+function applyBulkRemoveThenAdd(document: CadDocument, changes: readonly Change[]): ApplyResult | null {
+  if (changes[0].kind !== "remove") return null;
+  let split = 0;
+  while (split < changes.length && changes[split].kind === "remove") split++;
+  if (split === changes.length) return null;
+  for (let i = split; i < changes.length; i++) if (changes[i].kind !== "add") return null;
+  const removed = applyBulk(document, changes.slice(0, split));
+  if (removed === null) return null;
+  const middle = finish(document, removed);
+  if (!middle.ok) return null;
+  const added = applyBulk(middle.document, changes.slice(split));
+  if (added === null) return null;
+  const result = finish(middle.document, added);
+  return result.ok ? result : null;
+}
+
+/**
+ * 削除だけ(または追加だけ)の大きな変更のあとに、置き換え・グループ表の変更が続く変更(連動寸法の追従・グループの整理が足したとき)を、
  * 前半は1回の走査(applyBulk)、後半は1件ずつ、で適用する。多数の図形の削除が、置き換えが1つ付いただけで、遅い経路に落ちないように。
  * 前半が高速経路の条件に合わない・失敗するときは null(1件ずつの適用に任せる。エラーの文言もそちらが出す)。
  */
@@ -49,7 +103,11 @@ function applyBulkThenReplaces(document: CadDocument, changes: readonly Change[]
   let split = 0;
   while (split < changes.length && changes[split].kind === kind) split++;
   if (split === changes.length) return null;
-  for (let i = split; i < changes.length; i++) if (changes[i].kind !== "replace") return null;
+  // 後半は、置き換え(連動寸法の追従)と、グループ表の変更(削除に伴うグループの整理・複写したグループ。Phase 19)だけ
+  for (let i = split; i < changes.length; i++) {
+    const tailKind = changes[i].kind;
+    if (tailKind !== "replace" && tailKind !== "groupAdd" && tailKind !== "groupRemove" && tailKind !== "groupReplace") return null;
+  }
   const bulk = applyBulk(document, changes.slice(0, split));
   if (bulk === null) return null;
   const middle = finish(document, bulk);
@@ -62,7 +120,7 @@ function applyBulkThenReplaces(document: CadDocument, changes: readonly Change[]
 /** 1件ずつ順に適用する方法だけで適用する(高速経路を通らない)。高速経路と結果が同じことを、テストで確かめるために使う */
 export function applyChangeSetSequentially(document: CadDocument, changeSet: ChangeSet): ApplyResult {
   if (changeSet.changes.length === 0) return fail("変更がありません");
-  return finish(document, applySequentially(document, changeSet.changes));
+  return checkGroups(document, finish(document, applySequentially(document, changeSet.changes)), changeSet.changes);
 }
 
 function finish(document: CadDocument, applied: Applied): ApplyResult {
@@ -72,13 +130,14 @@ function finish(document: CadDocument, applied: Applied): ApplyResult {
   for (let i = 0; i < entities.length; i++) indexById.set(entities[i].id, i);
   if (indexById.size !== entities.length) return fail("適用すると図形IDが重複します");
   const next: CadDocument = { ...document, entities, indexById, nextNewId };
-  if (applied.layers === undefined && applied.ltScale === undefined) return { ok: true, document: next };
+  if (applied.layers === undefined && applied.ltScale === undefined && applied.groups === undefined) return { ok: true, document: next };
   return {
     ok: true,
     document: {
       ...next,
       ...(applied.layers === undefined ? {} : { layers: applied.layers, layerIndexByName: layerIndexOf(applied.layers) }),
       ...(applied.ltScale === undefined ? {} : { ltScale: applied.ltScale }),
+      ...(applied.groups === undefined ? {} : { groups: applied.groups }),
     },
   };
 }
@@ -164,6 +223,7 @@ function applySequentially(document: CadDocument, changes: readonly Change[]): A
   // (Undo は変更を逆順に適用するので、図形の置き換えが、レイヤー表の変更より先に来ることがある)
   let layers: CadLayer[] | null = null;
   let ltScale: number | undefined;
+  let groups: CadGroup[] | null = null;
   const structural = changes.some((c) => c.kind === "layerAdd" || c.kind === "layerRemove" || (c.kind === "layerReplace" && c.before.name !== c.after.name));
   const layerExists = (name: string) => document.layerIndexByName.has(name);
 
@@ -191,6 +251,29 @@ function applySequentially(document: CadDocument, changes: readonly Change[]): A
         }
         // 表示・非表示は履歴の対象外。いまの表示状態を引き継ぐ
         layers[index] = { ...change.after, visible: layers[index].visible };
+      }
+      continue;
+    }
+    if (change.kind === "groupAdd" || change.kind === "groupRemove" || change.kind === "groupReplace") {
+      if (groups === null) groups = document.groups.slice();
+      const index = change.index;
+      if (!Number.isInteger(index) || index < 0) return fail(`${where}: 位置が正しくありません: ${index}`);
+      if (change.kind === "groupAdd") {
+        if (index > groups.length) return fail(`${where}: 位置が範囲外です: ${index}`);
+        if (change.group.ids.length === 0) return fail(`${where}: 図形の無いグループは作れません: ${change.group.name}`);
+        // グループ名は、大文字小文字を区別しない(GROUPEDIT などの名前の検索と、同じ規則)
+        if (groups.some((g) => g.name.toUpperCase() === change.group.name.toUpperCase())) return fail(`${where}: グループ名がすでに使われています: ${change.group.name}`);
+        groups.splice(index, 0, change.group);
+      } else if (change.kind === "groupRemove") {
+        if (index >= groups.length) return fail(`${where}: 位置が範囲外です: ${index}`);
+        if (!sameGroup(groups[index], change.group)) return fail(`${where}: その位置のグループが、削除しようとしたグループと一致しません: ${change.group.name}`);
+        groups.splice(index, 1);
+      } else {
+        if (index >= groups.length) return fail(`${where}: 位置が範囲外です: ${index}`);
+        if (!sameGroup(groups[index], change.before)) return fail(`${where}: その位置のグループが、置き換えようとしたグループと一致しません: ${change.before.name}`);
+        if (change.after.ids.length === 0) return fail(`${where}: 図形の無いグループにはできません(削除してください): ${change.after.name}`);
+        if (change.after.name !== change.before.name && groups.some((g, i) => i !== index && g.name.toUpperCase() === change.after.name.toUpperCase())) return fail(`${where}: グループ名がすでに使われています: ${change.after.name}`);
+        groups[index] = change.after;
       }
       continue;
     }
@@ -260,5 +343,6 @@ function applySequentially(document: CadDocument, changes: readonly Change[]): A
     nextNewId,
     ...(layers === null ? {} : { layers }),
     ...(ltScale === undefined ? {} : { ltScale }),
+    ...(groups === null ? {} : { groups }),
   };
 }

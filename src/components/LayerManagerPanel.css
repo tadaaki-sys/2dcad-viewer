@@ -159,3 +159,12 @@
   justify-content: flex-end;
   margin-top: 8px;
 }
+
+.layer-manager__lock {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}

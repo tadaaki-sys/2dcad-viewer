@@ -11,6 +11,8 @@ export type LayerStyle = {
   lineWeight: number | null;
   off: boolean;
   frozen: boolean;
+  /** ロック(状態フラグ 70 のビット 4)。Phase 19 */
+  locked: boolean;
 };
 
 /**
@@ -32,17 +34,19 @@ export function extractLayerStyles(dxfText: string): Map<string, LayerStyle> {
   let currentLineWeight: number | null = null;
   let currentOff = false;
   let currentFrozen = false;
+  let currentLocked = false;
   let inLayerRecord = false;
 
   const flush = () => {
     if (inLayerRecord && currentName !== null) {
-      layerStyles.set(currentName, { lineType: currentLineType, lineWeight: currentLineWeight, off: currentOff, frozen: currentFrozen });
+      layerStyles.set(currentName, { lineType: currentLineType, lineWeight: currentLineWeight, off: currentOff, frozen: currentFrozen, locked: currentLocked });
     }
     currentName = null;
     currentLineType = null;
     currentLineWeight = null;
     currentOff = false;
     currentFrozen = false;
+    currentLocked = false;
   };
 
   for (let i = 0; i + 1 < tableLines.length; i += 2) {
@@ -59,6 +63,7 @@ export function extractLayerStyles(dxfText: string): Map<string, LayerStyle> {
       currentOff = Number(value) < 0;
     } else if (inLayerRecord && code === "70") {
       currentFrozen = (Number(value) & 1) !== 0;
+      currentLocked = (Number(value) & 4) !== 0;
     } else if (inLayerRecord && code === "370") {
       const weight = Number(value);
       currentLineWeight = Number.isFinite(weight) ? weight : null;

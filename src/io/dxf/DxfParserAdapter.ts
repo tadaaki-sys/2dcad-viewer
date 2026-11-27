@@ -492,6 +492,8 @@ function buildLayers(
     const lineType = style?.lineType?.trim();
     if (lineType && lineType.toUpperCase() !== "CONTINUOUS" && lineType.toUpperCase() !== "BYLAYER" && lineType.toUpperCase() !== "BYBLOCK") layer.lineType = lineType;
     if (style?.lineWeight !== undefined && style.lineWeight !== null && style.lineWeight >= 0 && Number.isFinite(style.lineWeight)) layer.lineWeight = style.lineWeight;
+    // ロック(Phase 19)。ロックされていないレイヤーは、項目を持たない
+    if (style?.locked === true) layer.locked = true;
     return layer;
   });
   return layers.sort((a, b) => a.name.localeCompare(b.name));

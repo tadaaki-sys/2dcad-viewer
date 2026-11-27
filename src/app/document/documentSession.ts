@@ -4,6 +4,7 @@ import { allocateEntityId } from "../../core/model";
 import type { CadDocument, EntityId } from "../../core/model";
 import { applyChangeSet, DocumentHistory } from "../../core/history";
 import { planAssociation } from "./associativity";
+import { planGroupMaintenance } from "./grouping";
 import type { ChangeSet, HistoryOutcome } from "../../core/history";
 
 /** 画面が、ボタンの有効・無効や、未保存の表示に使う状態 */
@@ -109,13 +110,16 @@ export class DocumentSession {
       // 追従を計算できないときは、中途半端に適用しない(寸法が、図形と食い違ったままにならないように)
       return { ok: false, error: `連動寸法の追従を計算できませんでした: ${error instanceof Error ? error.message : String(error)}` };
     }
-    const result = applyChangeSet(this.current, planned.changeSet);
+    // 図形の削除に伴う、グループの整理(Phase 19)。削除された図形を、グループから外す
+    const grouped = planGroupMaintenance(this.current, planned.changeSet);
+    const notice = [planned.notice, grouped.notice].filter((n): n is string => n !== null).join("。") || null;
+    const result = applyChangeSet(this.current, grouped.changeSet);
     if (!result.ok) return { ok: false, error: result.error };
     this.current = result.document;
-    this.history.record(planned.changeSet);
-    this.pendingNotice = planned.notice;
+    this.history.record(grouped.changeSet);
+    this.pendingNotice = notice;
     this.notify({ kind: "apply", label: changeSet.label, document: this.current, state: this.state });
-    return planned.notice === null ? { ok: true } : { ok: true, notice: planned.notice };
+    return notice === null ? { ok: true } : { ok: true, notice };
   }
 
   /** 直前の apply が、知らせること(参照が切れた、など)を取り出す。取り出すと、空になる */

@@ -9,6 +9,7 @@ import type { StretchWindow } from "../../core/geometry/stretch";
 import { composeAffine, IDENTITY_MATRIX, isIdentity, isSimilarity, transformEntityGeometry } from "../../core/geometry/transform";
 import type { Affine2D, CadEntity, SourceRecord } from "../../types/cad";
 import { isNewEntityId, resolveEditTargets } from "./editability";
+import { groupsForCopies } from "./grouping";
 import type { Editability } from "./editability";
 import type { DocumentSession } from "./documentSession";
 
@@ -125,7 +126,11 @@ export function copyEntities(
     return { ok: false, message: `複写できませんでした: ${error instanceof Error ? error.message : String(error)}` };
   }
   const copies: CadEntity[] = shaped.map((entity) => ({ ...entity, id: session.allocateEntityId() }));
-  const outcome = session.apply(addEntitiesChangeSet(session.document, copies, label));
+  // グループの全員を複写したなら、複写先も、同じ形の名前なしグループにする(Phase 19。複写1回ごとに1つ。同じ変更の中で)
+  const sourceIds = new Set(sources.map((source) => source.id));
+  const copyIdOf = matrices.map((_, m) => new Map(sources.map((source, s) => [source.id, copies[m * sources.length + s].id])));
+  const added = addEntitiesChangeSet(session.document, copies, label);
+  const outcome = session.apply({ label, changes: [...added.changes, ...groupsForCopies(session.document, sourceIds, copyIdOf)] });
   if (!outcome.ok) return { ok: false, message: `複写できませんでした: ${outcome.error}` };
   return { ok: true, message: `${sources.length}個の図形を${matrices.length}回、複写しました(合計 ${copies.length} 個を追加)${skippedNote(targets.skipped, targets.reason)}` };
 }

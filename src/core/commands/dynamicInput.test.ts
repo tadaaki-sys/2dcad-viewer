@@ -25,6 +25,7 @@ const active = (overrides: Partial<ActiveCommand> = {}): ActiveCommand => ({
   numberMeaning: "length",
   rawPoints: false,
   textEditor: null,
+  individualSelection: false,
   ...overrides,
 });
 

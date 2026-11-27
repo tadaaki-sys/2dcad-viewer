@@ -28,6 +28,14 @@ import { addVertexAt, deleteVertexAt, moveGrip, setGeometryProperty, setPolyline
 import { setStyleProperty } from "./app/document/propertyEditing";
 import type { StyleProperty } from "./app/document/propertyEditing";
 import type { GeometryField } from "./core/geometry/propertyGeometry";
+import { withLockedLayers } from "./app/document/editability";
+import { reorderEntities, textToFront } from "./app/document/reorder";
+import { createGroup, editGroup, renameGroup, ungroup } from "./app/document/grouping";
+import { expandSelectionChange } from "./core/group/groups";
+import type { SelectionChangeMode } from "./core/group/groups";
+import { setLayerLocked } from "./app/document/layering";
+import { GroupPanel } from "./components/GroupPanel";
+import type { CadGroup } from "./types/cad";
 import { documentFromCadModel, hasEntity } from "./core/model";
 import { describeHistoryOutcome, DOCUMENT_NOT_READY_MESSAGE, DocumentSession } from "./app/document/documentSession";
 import type { DocumentChange, DocumentSessionState } from "./app/document/documentSession";
@@ -147,6 +155,12 @@ export default function App() {
   // グリップのクリックで始まる GRIPEDIT が、動かすグリップ(コマンドが始まるときに、1回だけ取り出す)と、動かしている最中のグリップ(赤く描く)
   const pendingGripRef = useRef<GripTarget | null>(null);
   const [hotGrip, setHotGrip] = useState<GripMark | null>(null);
+  // グループ単位の選択(PICKSTYLE。Phase 19)。初期はオン。選択の変更のたびに読むので、参照にも写す
+  const [pickStyle, setPickStyle] = useState(true);
+  const pickStyleRef = useRef(true);
+  // グループの一覧のパネル(GROUPS)と、画面が読むグループ表(ドキュメントから写す)
+  const [showGroups, setShowGroups] = useState(false);
+  const [groups, setGroups] = useState<readonly CadGroup[]>([]);
   // 図面の線種表と、全体の線種尺度(新しい図形の破線を作る・レイヤー管理パネルに見せる)。図面のドキュメントから写す
   const [lineStyle, setLineStyle] = useState<{ lineTypes: readonly CadLineType[]; ltScale: number }>(() => ({ lineTypes: buildLineTypeTable(undefined), ltScale: 1 }));
   const dashes = useMemo(() => createDashFactory(lineStyle.lineTypes, lineStyle.ltScale), [lineStyle]);
@@ -269,7 +283,7 @@ export default function App() {
       editing: createAppEditing({
         ready: isDocumentEditable && loadingProgress === null,
         getSession: () => documentSessionRef.current,
-        getEditability: () => editabilityRef.current,
+        getEditability: () => withLockedLayers(editabilityRef.current, () => documentSessionRef.current?.document ?? null),
         getSelection: () => selectedIdsRef.current,
         getVisibleLayerNames: () => visibleLayerNamesRef.current,
         getPickTolerance: () => pickToleranceRef.current,
@@ -293,15 +307,38 @@ export default function App() {
   const [commandLog, setCommandLog] = useState<string[]>([]);
   const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(null);
   // グリップ(選択した、編集できる図形のつかむ点)。コマンド・測定・読み込みの最中は出さない。選択が多すぎる・グリップが多すぎるときも出さない
+  // ロックされたレイヤー(Phase 19)。図形を選べず、編集できない(グリップ・プロパティの編集欄にも出さない)
+  const lockedLayerNames = useMemo(() => new Set(layers.filter((layer) => layer.locked === true).map((layer) => layer.name)), [layers]);
+  // レイヤーをロックしたら、そのレイヤーの図形を、選択から外す(ロックした図形は選べない、という決まりを、選んであった図形にも当てる)
+  useEffect(() => {
+    if (lockedLayerNames.size === 0) return;
+    const session = documentSessionRef.current;
+    if (session === null) return;
+    const document = session.document;
+    setSelectedEntityIds((previous) => {
+      if (previous.size === 0) return previous;
+      const kept = new Set<string>();
+      for (const id of previous) {
+        const index = document.indexById.get(id);
+        if (index === undefined || !lockedLayerNames.has(document.entities[index].layer)) kept.add(id);
+      }
+      return kept.size === previous.size ? previous : kept;
+    });
+  }, [lockedLayerNames]);
+  // 選択を待つ段階が、グループ単位に広げない段階(GROUPEDIT で図形を選ぶとき)か。選択の変更の処理(handleSelectionChange)が見る
+  const individualSelectionRef = useRef(false);
+  useEffect(() => {
+    individualSelectionRef.current = activeCommand?.individualSelection === true;
+  }, [activeCommand]);
   const gripMarks = useMemo((): GripMark[] => {
     if (!isDocumentEditable || loadingProgress !== null || activeCommand !== null || isMeasurementMode || selectedEntities.length === 0) return [];
-    const editable = selectedEntities.filter((entity) => editabilityState.isEditable(entity.id));
+    const editable = selectedEntities.filter((entity) => editabilityState.isEditable(entity.id) && !lockedLayerNames.has(entity.layer));
     if (editable.length === 0 || editable.length > MAX_GRIP_ENTITIES) return [];
     let total = 0;
     for (const entity of editable) total += gripCountOf(entity);
     if (total > MAX_GRIPS) return [];
     return editable.flatMap((entity) => gripsOf(entity).map((grip) => ({ key: gripKeyOf(entity.id, grip.index), entityId: entity.id, index: grip.index, kind: grip.kind, point: grip.point })));
-  }, [isDocumentEditable, loadingProgress, activeCommand, isMeasurementMode, selectedEntities, editabilityState]);
+  }, [isDocumentEditable, loadingProgress, activeCommand, isMeasurementMode, selectedEntities, editabilityState, lockedLayerNames]);
   const commandInputRef = useRef<HTMLInputElement>(null);
 
   // ダイナミック入力(カーソル付近の X・Y・長さ・角度の表示と、数値の入力)。
@@ -362,6 +399,7 @@ export default function App() {
       setLayers(change.document.layers.slice());
     }
     setLineStyle((previous) => (previous.ltScale === change.document.ltScale ? previous : { lineTypes: change.document.lineTypes, ltScale: change.document.ltScale }));
+    setGroups(change.document.groups);
     // レイヤーの表示・非表示だけの変更では、図形は変わらないので、描画用のモデルは作り直さない
     if (change.kind === "view") return;
     setCadModel(renderModelFromDocument(change.document));
@@ -431,6 +469,7 @@ export default function App() {
           session.subscribe(handleDocumentChange);
           documentSessionRef.current = session;
           documentLayersRef.current = session.document.layers;
+          setGroups(session.document.groups);
           setLineStyle({ lineTypes: session.document.lineTypes, ltScale: session.document.ltScale });
           setIsDocumentEditable(true);
           setSessionState(session.state);
@@ -483,6 +522,8 @@ export default function App() {
     setLayers([]);
     documentLayersRef.current = null;
     setLayerPanelTab(null);
+    setShowGroups(false);
+    setGroups([]);
     setCadModel(null);
     sourceRef.current = null;
     editabilityRef.current = createEditability(null);
@@ -541,8 +582,21 @@ export default function App() {
     }
   }, []);
 
-  const handleSelectionChange = useCallback((entityIds: ReadonlySet<string>) => {
-    setSelectedEntityIds(entityIds);
+  const handleSelectionChange = useCallback((entityIds: ReadonlySet<string>, mode: SelectionChangeMode = "replace") => {
+    // グループ単位の選択(Phase 19): 選び足した図形のグループの全員を足し、外した図形のグループの全員を外す
+    const session = documentSessionRef.current;
+    if (session === null || !pickStyleRef.current || individualSelectionRef.current || session.document.groups.length === 0) {
+      setSelectedEntityIds(entityIds);
+      return;
+    }
+    const document = session.document;
+    const selectable = (id: string): boolean => {
+      const index = document.indexById.get(id);
+      if (index === undefined) return false;
+      const layer = document.layers[document.layerIndexByName.get(document.entities[index].layer) ?? -1];
+      return layer !== undefined && layer.visible && layer.locked !== true;
+    };
+    setSelectedEntityIds((previous) => expandSelectionChange(document.groups, previous, entityIds, selectable, mode));
   }, []);
 
   const handleMeasurementComplete = useCallback((newMeasurement: Measurement) => {
@@ -652,7 +706,7 @@ export default function App() {
         return;
       }
       try {
-        appendCommandLog([reorderSelection(session, editabilityRef.current, selectedEntityIds, direction)]);
+        appendCommandLog([reorderSelection(session, withLockedLayers(editabilityRef.current, () => session.document), selectedEntityIds, direction)]);
       } catch (error) {
         console.error("[App] failed to update the view after reordering", error);
         appendCommandLog(["表示の更新に失敗しました。図面を開き直してください"]);
@@ -670,7 +724,7 @@ export default function App() {
         return;
       }
       try {
-        const message = run(session, editabilityRef.current).message;
+        const message = run(session, withLockedLayers(editabilityRef.current, () => session.document)).message;
         // 連動寸法の追従で知らせること(参照が切れた・関連付けを解除した)も、続けて知らせる
         const notice = session.takeNotice();
         appendCommandLog(notice === null ? [message] : [message, notice]);
@@ -692,7 +746,7 @@ export default function App() {
         return refused;
       }
       try {
-        const outcome = run(session, editabilityRef.current);
+        const outcome = run(session, withLockedLayers(editabilityRef.current, () => session.document));
         const notice = session.takeNotice();
         appendCommandLog(notice === null ? [outcome.message] : [outcome.message, notice]);
         return outcome;
@@ -743,6 +797,37 @@ export default function App() {
     [runLayerEdit],
   );
   const handleSetLtScale = useCallback((value: number) => runLayerEdit((session) => setLineTypeScale(session, value)), [runLayerEdit]);
+  // レイヤーのロック(Phase 19)。レイヤー管理パネルのチェックと、左の Layers 欄の鍵
+  const handleSetLayerLocked = useCallback((name: string, locked: boolean) => runLayerEdit((session) => setLayerLocked(session, name, locked)), [runLayerEdit]);
+  const handleToggleLayerLock = useCallback(
+    (name: string) => {
+      const layer = documentSessionRef.current?.document.layers.find((l) => l.name === name);
+      if (layer !== undefined) handleSetLayerLocked(name, layer.locked !== true);
+    },
+    [handleSetLayerLocked],
+  );
+  // グループの一覧のパネル(Phase 19)
+  const handleSelectGroup = useCallback((group: CadGroup) => {
+    const session = documentSessionRef.current;
+    if (session === null) return;
+    const document = session.document;
+    // 選べる図形(表示中・ロックされていないレイヤー)だけを選ぶ
+    const ids = group.ids.filter((id) => {
+      const index = document.indexById.get(id);
+      if (index === undefined) return false;
+      const layer = document.layers[document.layerIndexByName.get(document.entities[index].layer) ?? -1];
+      return layer !== undefined && layer.visible && layer.locked !== true;
+    });
+    setSelectedEntityIds(new Set(ids));
+  }, []);
+  const handleRenameGroup = useCallback((from: string, to: string) => runLayerEdit((session) => renameGroup(session, from, to)), [runLayerEdit]);
+  const handleUngroupFromPanel = useCallback((group: CadGroup) => runLayerEdit((session) => ungroup(session, group.ids)), [runLayerEdit]);
+  const handleTogglePickStyle = useCallback(() => {
+    const next = !pickStyleRef.current;
+    pickStyleRef.current = next;
+    setPickStyle(next);
+    appendCommandLog([`グループ単位の選択(PICKSTYLE): ${next ? "オン" : "オフ"}`]);
+  }, [appendCommandLog]);
 
   const executeRequest = useCallback(
     (request: AppRequest) => {
@@ -768,7 +853,12 @@ export default function App() {
         request.type === "moveGrip" ||
         request.type === "addVertex" ||
         request.type === "deleteVertex" ||
-        request.type === "setPolylinesClosed";
+        request.type === "setPolylinesClosed" ||
+        request.type === "drawOrder" ||
+        request.type === "textToFront" ||
+        request.type === "createGroup" ||
+        request.type === "ungroup" ||
+        request.type === "editGroup";
       if (changesDocument && loadingProgress !== null) {
         appendCommandLog(["図面を読み込み中です。完了してからお試しください"]);
         return;
@@ -860,6 +950,27 @@ export default function App() {
         case "setPolylinesClosed":
           applyEdit((session, editability) => setPolylinesClosed(session, editability, request.ids, request.closed));
           break;
+        case "drawOrder":
+          applyEdit((session, editability) => reorderEntities(session, editability, request.ids, request.placement));
+          break;
+        case "textToFront":
+          applyEdit((session, editability) => textToFront(session, editability));
+          break;
+        case "createGroup":
+          applyEdit((session, editability) => createGroup(session, editability, request.ids, request.name));
+          break;
+        case "ungroup":
+          applyEdit((session, editability) => ungroup(session, request.ids, editability));
+          break;
+        case "editGroup":
+          applyEdit((session, editability) => editGroup(session, editability, request.name, request.ids, request.mode));
+          break;
+        case "openGroups":
+          setShowGroups(true);
+          break;
+        case "togglePickStyle":
+          handleTogglePickStyle();
+          break;
         case "openDimensionStyles":
           setShowDimensionStyles(true);
           break;
@@ -896,6 +1007,7 @@ export default function App() {
       visibleLayerNames,
       snapSettings,
       trackingSettings,
+      handleTogglePickStyle,
     ],
   );
 
@@ -1101,6 +1213,13 @@ export default function App() {
         commandInputRef.current?.focus();
         return;
       }
+      // Ctrl+Shift+A: グループ単位の選択の、オン・オフ(PICKSTYLE。Phase 19)。実行中のコマンドは、終わらせない
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.key.toUpperCase() === "A") {
+        if (!isDocumentOpen) return;
+        event.preventDefault();
+        handleTogglePickStyle();
+        return;
+      }
       const historyShortcut = historyShortcutOf(event);
       if (historyShortcut !== null) {
         if (!isDocumentOpen) return;
@@ -1181,6 +1300,7 @@ export default function App() {
     handleToggleSnap,
     handleToggleTracking,
     confirmSelectionStep,
+    handleTogglePickStyle,
   ]);
 
   /** コマンドラインの入力欄でのCtrl+Z。作図中なら「1点戻す(U)」として受け取る。受け取れないときは false(入力欄の文字の取り消し) */
@@ -1300,6 +1420,7 @@ export default function App() {
             onToggleVisibility={handleToggleLayerVisibility}
             onSelectCurrent={setCurrentLayerName}
             onManage={isDocumentEditable ? () => setLayerPanelTab("layers") : undefined}
+            onToggleLock={isDocumentEditable ? handleToggleLayerLock : undefined}
           />
         </ResizablePanel>
 
@@ -1370,7 +1491,19 @@ export default function App() {
               onDelete={handleDeleteLayer}
               onMoveSelected={handleMoveSelectedToLayer}
               onSetLtScale={handleSetLtScale}
+              onSetLocked={handleSetLayerLocked}
               onClose={() => setLayerPanelTab(null)}
+            />
+          )}
+          {showGroups && (
+            <GroupPanel
+              groups={groups}
+              pickStyle={pickStyle}
+              onSelect={handleSelectGroup}
+              onRename={handleRenameGroup}
+              onUngroup={handleUngroupFromPanel}
+              onTogglePickStyle={handleTogglePickStyle}
+              onClose={() => setShowGroups(false)}
             />
           )}
           {showTextStyles && <TextStylePanel table={textStyles} onChange={setTextStyles} onClose={() => setShowTextStyles(false)} />}
@@ -1404,7 +1537,7 @@ export default function App() {
               editor={
                 isDocumentEditable && loadingProgress === null
                   ? {
-                      editable: selectedEntities.filter((entity) => editabilityState.isEditable(entity.id)),
+                      editable: selectedEntities.filter((entity) => editabilityState.isEditable(entity.id) && !lockedLayerNames.has(entity.layer)),
                       layers,
                       lineTypes: lineStyle.lineTypes,
                       onSetStyle: handleSetStyleProperty,

@@ -6,6 +6,7 @@ import type { Affine2D, CadDimension, CadEntity, LineDash, Point2D } from "../..
 import type { FoundAnchor } from "../../core/dimension/dimensionRefs";
 import type { TextStyle } from "../../core/text/textStyle";
 import type { DimensionStyle } from "../../core/dimension/dimensionStyle";
+import type { DrawOrderPlacement } from "../../core/history";
 
 /** コマンドが、アプリに頼むこと */
 export type AppRequest =
@@ -63,7 +64,21 @@ export type AppRequest =
   /** 折れ線の、point の近くの頂点を削除する(VERTEXDEL)。1つの依頼が、Undoの1段階 */
   | { type: "deleteVertex"; id: EntityId; point: Point2D }
   /** 折れ線を、閉じる・開く(PCLOSE・POPEN)。1つの依頼が、Undoの1段階 */
-  | { type: "setPolylinesClosed"; ids: readonly EntityId[]; closed: boolean };
+  | { type: "setPolylinesClosed"; ids: readonly EntityId[]; closed: boolean }
+  /** 図形の描画順を変える(DRAWORDER。Phase 19): 最前面・最背面・基準の図形の上・下。1つの依頼が、Undoの1段階 */
+  | { type: "drawOrder"; ids: readonly EntityId[]; placement: DrawOrderPlacement }
+  /** 文字・寸法を、まとめて最前面へ(TEXTTOFRONT)。1つの依頼が、Undoの1段階 */
+  | { type: "textToFront" }
+  /** 図形で、グループを作る(GROUP)。name が null なら、名前なし。1つの依頼が、Undoの1段階 */
+  | { type: "createGroup"; ids: readonly EntityId[]; name: string | null }
+  /** 図形が入っているグループを、解除する(UNGROUP)。1つの依頼が、Undoの1段階 */
+  | { type: "ungroup"; ids: readonly EntityId[] }
+  /** グループに図形を足す・外す(GROUPEDIT)。1つの依頼が、Undoの1段階 */
+  | { type: "editGroup"; name: string; ids: readonly EntityId[]; mode: "add" | "remove" }
+  /** グループの一覧のパネルを開く(GROUPS) */
+  | { type: "openGroups" }
+  /** グループ単位の選択の、オン・オフ(PICKSTYLE・Ctrl+Shift+A) */
+  | { type: "togglePickStyle" };
 
 /** グリップを指したクリック(どの図形の、何番のグリップか。point は、そのグリップの位置) */
 export type GripTarget = { id: EntityId; index: number; point: Point2D }
@@ -96,7 +111,8 @@ export type PickResult = { ok: true; id: EntityId } | { ok: false; message: stri
  * 図形を探すときの、対象の種類: curve = 線・円弧・円・折れ線(既定)、chain = 線・折れ線(FILLET・CHAMFER)、text = 文字(TEXTEDIT)、
  * circular = 円・円弧(半径・直径の寸法)、line = 線(角度の寸法)、dimension = 寸法(DIMREASSOC)
  */
-export type PickKind = "curve" | "chain" | "text" | "circular" | "line" | "dimension";
+/** reference = どの種類でもよく、編集できない図形(ロック・読み取り専用)でもよい(描画順の基準など、図形を変えない指定) */
+export type PickKind = "curve" | "chain" | "text" | "circular" | "line" | "dimension" | "any" | "reference";
 
 /** 編集コマンド(MOVE・COPY・ROTATE・DELETE・MIRROR・SCALE・STRETCH・OFFSET・BREAK・FILLET・CHAMFER)が使う、図面の編集に関する情報。画面の側が、いまの図面と選択から作る */
 export type AppEditing = {
@@ -127,6 +143,8 @@ export type AppEditing = {
    * 同じ点に複数の図形が一致するとき(共有する角)は、描画順で最前面の図形
    */
   anchorsAt: (points: readonly Point2D[]) => Array<FoundAnchor | null>;
+  /** 図形が入っているグループの名前(Phase 19)。入っていなければ null */
+  groupNameOf: (id: EntityId) => string | null;
   /** グリップのクリックで始まった GRIPEDIT が、動かすグリップ。1回だけ取り出せる(取り出すと空になる)。無ければ null */
   takePendingGrip: () => GripTarget | null;
   /** グリップを動かしたあとの形の仮表示を作る関数を返す(カーソルの位置を渡すと、動かした形を返す。動かせない位置では空) */
@@ -153,6 +171,7 @@ export const NO_EDITING: AppEditing = {
   anchorsAt: (points) => points.map(() => null),
   takePendingGrip: () => null,
   createGripPreview: () => () => [],
+  groupNameOf: () => null,
 };
 
 /** コマンドを始める時点のアプリの状態 */

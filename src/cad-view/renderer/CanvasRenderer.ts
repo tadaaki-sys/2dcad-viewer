@@ -464,6 +464,27 @@ function drawMeasurement(
   ctx.restore();
 }
 
+/** ロックされたレイヤーの図形の色: 背景(黒)へ半分寄せる(AutoCAD の既定のロックの薄さ 50% と同じ) */
+export function fadeColor(color: string): string {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(color);
+  if (match === null) return color;
+  const value = parseInt(match[1], 16);
+  const half = (shift: number) => Math.round(((value >> shift) & 0xff) / 2);
+  return `#${((half(16) << 16) | (half(8) << 8) | half(0)).toString(16).padStart(6, "0")}`;
+}
+
+const fadedCache = new WeakMap<CadEntity, CadEntity>();
+
+/** 色だけを薄くした図形の写し(同じ図形には、同じ写しを使う。寸法の形の計算の結果を、使い回せるように) */
+function fadedCopy(entity: CadEntity): CadEntity {
+  let copy = fadedCache.get(entity);
+  if (copy === undefined) {
+    copy = { ...entity, color: fadeColor(entity.color) } as CadEntity;
+    fadedCache.set(entity, copy);
+  }
+  return copy;
+}
+
 export class CanvasRenderer implements Renderer {
   render({
     ctx,
@@ -487,6 +508,7 @@ export class CanvasRenderer implements Renderer {
     grips,
     hoverGripKey,
     hotGrip,
+    lockedLayerNames,
   }: RenderParams): void {
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, viewportWidth, viewportHeight);
@@ -531,8 +553,10 @@ export class CanvasRenderer implements Renderer {
 
     for (let n = 0; n < candidateCount; n++) {
       const i = candidateIndices ? candidateIndices[n] : n;
-      const entity = entities[i];
-      if (!visibleLayerNames.has(entity.layer)) continue;
+      const original = entities[i];
+      if (!visibleLayerNames.has(original.layer)) continue;
+      // ロックされたレイヤーの図形は、薄い色で描く(色を変えた写しを使う。図面のデータは変えない)
+      const entity = lockedLayerNames !== undefined && lockedLayerNames.size > 0 && lockedLayerNames.has(original.layer) ? fadedCopy(original) : original;
       if (hasSelection && selectedEntityIds.has(entity.id)) {
         selectedEntities.push(entity);
         continue;

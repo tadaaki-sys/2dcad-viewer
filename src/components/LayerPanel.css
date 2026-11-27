@@ -74,3 +74,33 @@
   cursor: pointer;
   accent-color: var(--color-accent);
 }
+
+.layer-panel__name--locked {
+  color: var(--color-text-muted);
+}
+
+.layer-panel__lock {
+  flex-shrink: 0;
+  min-width: 22px;
+  padding: 0 3px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.layer-panel__lock--on {
+  border-color: var(--color-border);
+  color: #ffa31a;
+}
+
+/* 記号は CSS で描く(行の文字は、レイヤー名だけのままにする) */
+.layer-panel__lock::before {
+  content: "・";
+}
+
+.layer-panel__lock--on::before {
+  content: "鍵";
+}

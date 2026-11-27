@@ -1,6 +1,6 @@
 // ドキュメントモデル(編集の正本)。React・DOM・DXFパーサーに依存しない(src/core/boundary.test.ts で確認している)。
 // Phase 1a では、読み取りの関数だけを持つ。変更(追加・削除・移動)は、コマンドとUndoの Phase で足す。
-import type { CadEntity, CadLayer, CadLineType, CadModelStats, CadPointStyle } from "../../types/cad";
+import type { CadEntity, CadGroup, CadLayer, CadLineType, CadModelStats, CadPointStyle } from "../../types/cad";
 import { buildLineTypeTable } from "../style/lineTypes";
 import { newEntityId } from "./ids";
 import type { EntityId } from "./ids";
@@ -24,6 +24,8 @@ export type CadDocument = {
   readonly lineTypes: readonly CadLineType[];
   /** 全体の線種尺度($LTSCALE)。破線の長さは、線種の要素にこの値と図形ごとの尺度を掛けたもの */
   readonly ltScale: number;
+  /** グループ表(Phase 19)。どのグループの ID も、図面にある図形を指す(適用のたびに確かめる) */
+  readonly groups: readonly CadGroup[];
   readonly pointStyle: CadPointStyle;
   /** 取り込み時の統計(未対応の図形の件数など)。新規に作ったドキュメントでは null */
   readonly importStats: CadModelStats | null;
@@ -38,6 +40,8 @@ export type CreateDocumentInput = {
   lineTypes?: readonly CadLineType[];
   /** 全体の線種尺度。省略・不正な値は 1 */
   ltScale?: number;
+  /** グループ表。省略すると、グループなし */
+  groups?: readonly CadGroup[];
   pointStyle?: CadPointStyle;
   importStats?: CadModelStats | null;
 };
@@ -65,6 +69,7 @@ export function createDocument(input: CreateDocumentInput): CadDocument {
     layerIndexByName,
     lineTypes: buildLineTypeTable(input.lineTypes),
     ltScale: typeof input.ltScale === "number" && input.ltScale > 0 && Number.isFinite(input.ltScale) ? input.ltScale : 1,
+    groups: input.groups ?? [],
     pointStyle: input.pointStyle ?? DEFAULT_POINT_STYLE,
     importStats: input.importStats ?? null,
     nextNewId: 0,

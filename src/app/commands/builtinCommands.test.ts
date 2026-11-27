@@ -16,7 +16,7 @@ function session(isDocumentOpen = true) {
 describe("built-in commands", () => {
   it("registers every command without name conflicts", () => {
     const registry = createAppCommandRegistry();
-    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "MOVE", "COPY", "ROTATE", "DELETE", "MIRROR", "SCALE", "STRETCH", "TRIM", "EXTEND", "OFFSET", "BREAK", "FILLET", "CHAMFER", "TEXT", "MTEXT", "TEXTEDIT", "TEXTSTYLE", "DIMHORIZONTAL", "DIMVERTICAL", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "DIMREASSOC", "DIMSTYLE", "LAYER", "LINETYPE", "LINEWEIGHT", "LTSCALE", "LAYMOVE", "GRIPEDIT", "VERTEXADD", "VERTEXDEL", "PCLOSE", "POPEN", "TOFRONT", "TOBACK", "OSNAP", "SNAP", "GRID", "ORTHO", "POLAR", "OTRACK", "ID"]);
+    expect(registry.list().map((d) => d.name)).toEqual(["OPEN", "CLOSE", "FIT", "MEASURE", "FULLSCREEN", "UNDO", "REDO", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "MOVE", "COPY", "ROTATE", "DELETE", "MIRROR", "SCALE", "STRETCH", "TRIM", "EXTEND", "OFFSET", "BREAK", "FILLET", "CHAMFER", "TEXT", "MTEXT", "TEXTEDIT", "TEXTSTYLE", "DIMHORIZONTAL", "DIMVERTICAL", "DIMALIGNED", "DIMRADIUS", "DIMDIAMETER", "DIMANGULAR", "DIMREASSOC", "DIMSTYLE", "LAYER", "LINETYPE", "LINEWEIGHT", "LTSCALE", "LAYMOVE", "GRIPEDIT", "VERTEXADD", "VERTEXDEL", "PCLOSE", "POPEN", "GROUP", "UNGROUP", "GROUPEDIT", "GROUPS", "PICKSTYLE", "DRAWORDER", "TEXTTOFRONT", "TOFRONT", "TOBACK", "OSNAP", "SNAP", "GRID", "ORTHO", "POLAR", "OTRACK", "ID"]);
     expect(BUILTIN_COMMANDS.every((d) => d.description.length > 0)).toBe(true);
   });
 
@@ -66,6 +66,7 @@ describe("built-in commands", () => {
       numberMeaning: "length",
       rawPoints: false,
       textEditor: null,
+      individualSelection: false,
     });
     const done = s.submitPoint({ x: 1234.5678, y: -0.0001 });
     expect(done.messages).toEqual(["X = 1234.6, Y = 0.0"]);

@@ -2,7 +2,7 @@
 // 取り込んだ図形の分類(ブロックの中身・寸法は読み取り専用、など)は io/ にあるので、画面の側(App.tsx)が、その分類を
 // このファイルの型(EditabilitySource)に直して渡す(app/ は io/ を読めないため)。
 import { parseNewEntityCounter } from "../../core/model";
-import type { EntityId } from "../../core/model";
+import type { CadDocument, EntityId } from "../../core/model";
 
 /** 取り込んだ図形の分類。画面の側が、元データ(io/dxf/source.ts)から作る */
 export type EditabilitySource = {
@@ -72,4 +72,24 @@ export function resolveEditTargets(editability: Editability, ids: Iterable<Entit
     }
   }
   return { editable, skipped, reason };
+}
+
+/**
+ * ロックされたレイヤー(Phase 19)の図形も、編集できないものとして扱う判断を作る。図形の取り込みの分類(base)の判断を先に使い、
+ * それで編集できる図形でも、そのレイヤーがロックされていれば、理由を返す。getDocument は、いまの図面(無ければ null)。
+ * 編集のコマンド・グリップ・プロパティ・描画順の、どの入口も、この判断を通すので、ロックが漏れなく効く。
+ */
+export function withLockedLayers(base: Editability, getDocument: () => CadDocument | null): Editability {
+  const reasonFor = (id: EntityId): string | null => {
+    const reason = base.reasonFor(id);
+    if (reason !== null) return reason;
+    const document = getDocument();
+    if (document === null) return null;
+    const index = document.indexById.get(id);
+    if (index === undefined) return null;
+    const layerName = document.entities[index].layer;
+    const layer = document.layers[document.layerIndexByName.get(layerName) ?? -1];
+    return layer !== undefined && layer.locked === true ? `レイヤー「${layerName}」はロックされています` : null;
+  };
+  return { isEditable: (id) => reasonFor(id) === null, reasonFor };
 }

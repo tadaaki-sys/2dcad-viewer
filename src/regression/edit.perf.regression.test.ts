@@ -21,9 +21,13 @@ import type { CornerMode } from "../core/geometry/fillet";
 import { offsetAt } from "../app/document/offsetting";
 import { trimOrExtendAt } from "../app/document/trimming";
 import { copyEntities, deleteEntities, stretchEntities, transformEntities } from "../app/document/editing";
-import { editLayer, moveToLayer, renameLayer, setLineTypeScale } from "../app/document/layering";
+import { editLayer, moveToLayer, renameLayer, setLayerLocked, setLineTypeScale } from "../app/document/layering";
 import { addVertexAt, deleteVertexAt, moveGrip, setGeometryProperty, setPolylinesClosed } from "../app/document/gripEditing";
 import { setStyleProperty } from "../app/document/propertyEditing";
+import { createGroup } from "../app/document/grouping";
+import { reorderEntities, textToFront } from "../app/document/reorder";
+import { withLockedLayers } from "../app/document/editability";
+import { expandSelectionChange } from "../core/group/groups";
 import { gripCountOf, gripsOf, MAX_GRIPS } from "../core/grip/grips";
 import { geometryFieldsOf } from "../core/geometry/propertyGeometry";
 import type { Editability } from "../app/document/editability";
@@ -735,5 +739,66 @@ describe.skipIf(!REAL_ENABLED || manifest.length === 0)("edit timings on real dr
       fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
       fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.grips.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
       console.log(`[grips perf] ${entry.name}`, JSON.stringify(result));
+    }, 900_000);    it(`${entry.name}: groups, layer lock and draw order on real figures, then Undo (time recorded; the round trip is asserted)`, async () => {
+      const { model } = await loadDrawing(entry.path);
+      const session = new DocumentSession(documentFromCadModel(model), 5_000);
+      const original = session.document.entities;
+      const count = original.length;
+      if (count < 4) return;
+      const restored = (): boolean => {
+        const now = session.document.entities;
+        if (now.length !== count) return false;
+        for (let i = 0; i < count; i++) if (now[i] !== original[i]) return false;
+        return session.document.groups.length === 0;
+      };
+      const result: Record<string, number | object> = { entityCount: count };
+
+      // 1) 大きなグループ(散らばった最大1万図形)の作成・選択の拡張・メンバーの削除(グループの整理)
+      const members = original.filter((_, i) => i % 3 === 0).slice(0, 10_000).map((e) => e.id);
+      const created = time(() => createGroup(session, ALL_EDITABLE, members, "BIG"));
+      expect(created.value.ok).toBe(true);
+      result.groupMembers = members.length;
+      result.createGroupMs = round(created.ms);
+      const expanded = time(() => expandSelectionChange(session.document.groups, new Set(), new Set([members[0]]), () => true, "replace"));
+      expect(expanded.value.size).toBe(members.length);
+      result.expandSelectionMs = round(expanded.ms);
+      const removing = members.slice(0, Math.ceil(members.length / 2));
+      const removed = time(() => deleteEntities(session, ALL_EDITABLE, removing, "削除"));
+      expect(removed.value.ok).toBe(true);
+      expect(session.document.groups[0].ids.length).toBe(members.length - removing.length);
+      result.deleteHalfOfGroupMs = round(removed.ms);
+      while (session.canUndo) expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      // 2) 描画順: 散らばった最大5万図形を最前面へ・基準の上へ、文字・寸法を最前面へ
+      const moving = original.filter((_, i) => i % 2 === 1).slice(0, 50_000).map((e) => e.id);
+      const front = time(() => reorderEntities(session, ALL_EDITABLE, moving, { kind: "front" }));
+      expect(front.value.ok).toBe(true);
+      expect(session.document.entities.length).toBe(count);
+      result.drawOrderFrontCount = moving.length;
+      result.drawOrderFrontMs = round(front.ms);
+      const above = time(() => reorderEntities(session, ALL_EDITABLE, moving.slice(0, 1_000), { kind: "above", referenceId: original[0].id }));
+      result.drawOrderAboveMs = round(above.ms);
+      const texts = time(() => textToFront(session, ALL_EDITABLE));
+      result.textToFrontMs = round(texts.ms);
+      while (session.canUndo) expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+
+      // 3) レイヤーのロック: ロックしたレイヤーの図形は、移動から除かれる(図面は変わらない)。判断の時間も記録する
+      const layer = original[0].layer;
+      expect(setLayerLocked(session, layer, true).ok).toBe(true);
+      const locked = withLockedLayers(ALL_EDITABLE, () => session.document);
+      const sameLayer = original.filter((e) => e.layer === layer).slice(0, 50_000).map((e) => e.id);
+      const judged = time(() => sameLayer.filter((id) => locked.isEditable(id)).length);
+      expect(judged.value).toBe(0);
+      result.lockJudgeCount = sameLayer.length;
+      result.lockJudgeMs = round(judged.ms);
+      const refused = transformEntities(session, locked, sameLayer.slice(0, 1_000), translationMatrix(10, 10), "移動", "移動");
+      expect(refused.ok).toBe(false);
+      while (session.canUndo) expect(session.undo().type).toBe("done");
+      expect(restored()).toBe(true);
+      fs.mkdirSync(path.join(REGRESSION_DIR, "perf"), { recursive: true });
+      fs.writeFileSync(path.join(REGRESSION_DIR, "perf", `${entry.name}.groups.json`), JSON.stringify(result, null, 2) + "\n", "utf8");
+      console.log(`[groups perf] ${entry.name}`, JSON.stringify(result));
     }, 900_000);  }
 });

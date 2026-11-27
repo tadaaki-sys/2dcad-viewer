@@ -16,6 +16,17 @@ export type CadLayer = {
   lineType?: string;
   /** レイヤーの線の太さ(1/100mm)。無ければ既定(細線)。Phase 17 */
   lineWeight?: number;
+  /** true なら、ロックされたレイヤー(図形を選べず、編集できない。薄く表示し、スナップはできる)。無ければロックされていない。Phase 19 */
+  locked?: boolean;
+};
+
+/**
+ * 名前付きのグループ(Phase 19)。ids は、グループに入っている図形の ID(描画順とは関係のない、入れた順)。
+ * 1つの図形は、1つのグループにだけ入る。名前が "*" で始まるものは、名前を付けずに作ったグループ(複写したグループなど)。
+ */
+export type CadGroup = {
+  name: string;
+  ids: readonly string[];
 };
 
 /** 線種の定義。elements は DXF の LTYPE と同じ要素列(正=線、負=空き、0=点)。長さは図面の単位(mm)で、全体の線種尺度(ltScale)を掛ける前の値 */

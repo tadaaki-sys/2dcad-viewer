@@ -10,6 +10,9 @@ import type { DocumentSession } from "./documentSession";
 
 export type PickOutcome = { ok: true; entity: CadEntity } | { ok: false; message: string };
 
+/** どの図形も「編集できる」とみなす(図形を変えない指定、描画順の基準などで使う。表示されているレイヤーの図形だけが当たる) */
+export const ANY_EDITABILITY: Editability = { isEditable: () => true, reasonFor: () => null };
+
 /** 線・円弧・円・折れ線(TRIM・OFFSET・BREAK の対象の種類) */
 export const CURVE_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["LINE", "ARC", "CIRCLE", "LWPOLYLINE", "POLYLINE"]);
 
@@ -22,9 +25,12 @@ const TEXT_LABEL = "文字(TEXT・MTEXT)";
 const CIRCULAR_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["CIRCLE", "ARC"]);
 const LINE_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["LINE"]);
 const DIMENSION_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["DIMENSION"]);
+/** どの種類の図形でも(描画順の基準の図形など) */
+const ANY_TYPES: ReadonlySet<CadEntity["type"]> = new Set(["LINE", "ARC", "CIRCLE", "LWPOLYLINE", "POLYLINE", "ELLIPSE", "SPLINE", "TEXT", "POINT", "DIMENSION"]);
 
 /** pickEntityAt に渡す、対象の種類と呼び名(kind: curve = 線・円弧・円・折れ線、chain = 線・折れ線、text = 文字、circular = 円・円弧、line = 線) */
-export function pickTargetOf(kind: "curve" | "chain" | "text" | "circular" | "line" | "dimension"): { types: ReadonlySet<CadEntity["type"]>; label: string } {
+export function pickTargetOf(kind: "curve" | "chain" | "text" | "circular" | "line" | "dimension" | "any" | "reference"): { types: ReadonlySet<CadEntity["type"]>; label: string } {
+  if (kind === "any" || kind === "reference") return { types: ANY_TYPES, label: "図形" };
   if (kind === "text") return { types: TEXT_TYPES, label: TEXT_LABEL };
   if (kind === "circular") return { types: CIRCULAR_TYPES, label: "円・円弧" };
   if (kind === "line") return { types: LINE_TYPES, label: "線(LINE)" };

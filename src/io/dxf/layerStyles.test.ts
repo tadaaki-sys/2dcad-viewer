@@ -21,9 +21,9 @@ describe("extractLayerStyles", () => {
       "0|LAYER|2|寸法|70|0|62|3|6|DASHED2|370|18",
     ]);
     const map = extractLayerStyles(text);
-    expect(map.get("CENTER_LINES")).toEqual({ lineType: "CENTER", lineWeight: 50, off: false, frozen: false });
-    expect(map.get("0")).toEqual({ lineType: "Continuous", lineWeight: -3, off: false, frozen: false });
-    expect(map.get("寸法")).toEqual({ lineType: "DASHED2", lineWeight: 18, off: false, frozen: false });
+    expect(map.get("CENTER_LINES")).toEqual({ lineType: "CENTER", lineWeight: 50, off: false, frozen: false, locked: false });
+    expect(map.get("0")).toEqual({ lineType: "Continuous", lineWeight: -3, off: false, frozen: false, locked: false });
+    expect(map.get("寸法")).toEqual({ lineType: "DASHED2", lineWeight: 18, off: false, frozen: false, locked: false });
     expect(map.size).toBe(3);
   });
 
@@ -33,24 +33,24 @@ describe("extractLayerStyles", () => {
       "0|LAYER|2|NEXT|70|0|62|1|6|DASHED|370|25",
     ]);
     const map = extractLayerStyles(text);
-    expect(map.get("MY_ENDTAB_LAYER")).toEqual({ lineType: "CENTER", lineWeight: 50, off: false, frozen: false });
-    expect(map.get("NEXT")).toEqual({ lineType: "DASHED", lineWeight: 25, off: false, frozen: false });
+    expect(map.get("MY_ENDTAB_LAYER")).toEqual({ lineType: "CENTER", lineWeight: 50, off: false, frozen: false, locked: false });
+    expect(map.get("NEXT")).toEqual({ lineType: "DASHED", lineWeight: 25, off: false, frozen: false, locked: false });
   });
 
   it("reports null for properties a layer record does not specify", () => {
     const map = extractLayerStyles(dxfWithLayerTable(["0|LAYER|2|A|70|0|62|7", "0|LAYER|2|B|70|0|370|25"]));
-    expect(map.get("A")).toEqual({ lineType: null, lineWeight: null, off: false, frozen: false });
-    expect(map.get("B")).toEqual({ lineType: null, lineWeight: 25, off: false, frozen: false });
+    expect(map.get("A")).toEqual({ lineType: null, lineWeight: null, off: false, frozen: false, locked: false });
+    expect(map.get("B")).toEqual({ lineType: null, lineWeight: 25, off: false, frozen: false, locked: false });
   });
 
   it("does not read groups from other tables", () => {
     const map = extractLayerStyles(dxfWithLayerTable(["0|LAYER|2|A|6|HIDDEN|370|13"]));
-    expect([...map.values()]).toEqual([{ lineType: "HIDDEN", lineWeight: 13, off: false, frozen: false }]);
+    expect([...map.values()]).toEqual([{ lineType: "HIDDEN", lineWeight: 13, off: false, frozen: false, locked: false }]);
   });
 
   it("works with CRLF line endings and padded group codes", () => {
     const text = dxfWithLayerTable(["0|LAYER|2|A|6|PHANTOM|370|35"], "\r\n").replace(/^0\r\n/gm, "  0\r\n");
-    expect(extractLayerStyles(text).get("A")).toEqual({ lineType: "PHANTOM", lineWeight: 35, off: false, frozen: false });
+    expect(extractLayerStyles(text).get("A")).toEqual({ lineType: "PHANTOM", lineWeight: 35, off: false, frozen: false, locked: false });
   });
 
   it("reads the OFF state (negative color) and the frozen flag (bit 1) of each layer", () => {

@@ -23,6 +23,8 @@ type LayerManagerPanelProps = {
   onDelete: (name: string) => EditOutcome;
   onMoveSelected: (name: string) => EditOutcome;
   onSetLtScale: (value: number) => EditOutcome;
+  /** レイヤーのロックの切り替え(Phase 19) */
+  onSetLocked: (name: string, locked: boolean) => EditOutcome;
   onClose: () => void;
 };
 
@@ -104,7 +106,7 @@ function ColorCell({ color, testId, label, onCommit }: { color: string; testId: 
   return <input key={color} ref={ref} type="color" className="layer-manager__color" data-testid={testId} aria-label={label} defaultValue={color} />;
 }
 
-function LayersTab({ layers, lineTypes, currentLayerName, selectedCount, onCreate, onEdit, onRename, onDelete, onMoveSelected, run }: TabProps) {
+function LayersTab({ layers, lineTypes, currentLayerName, selectedCount, onCreate, onEdit, onRename, onDelete, onMoveSelected, onSetLocked, run }: TabProps) {
   const [newName, setNewName] = useState("");
   const [renaming, setRenaming] = useState<{ from: string; text: string } | null>(null);
   const enterToSubmit = (action: () => void) => (event: KeyboardEvent<HTMLInputElement>) => {
@@ -164,6 +166,10 @@ function LayersTab({ layers, lineTypes, currentLayerName, selectedCount, onCreat
               ))}
               {layer.lineWeight !== undefined && !STANDARD_LINE_WEIGHTS.includes(layer.lineWeight) && <option value={layer.lineWeight}>{lineWeightLabel(layer.lineWeight)}(標準外)</option>}
             </select>
+            <label className="layer-manager__lock" title="ロック(図形を選べず、編集できない。薄く表示し、スナップはできる)">
+              <input type="checkbox" data-testid={`layer-lock-${layer.name}`} checked={layer.locked === true} onChange={(event) => run(onSetLocked(layer.name, event.target.checked))} />
+              鍵
+            </label>
             <button type="button" title="名前を変える" data-testid={`layer-rename-${layer.name}`} onClick={() => setRenaming(renaming?.from === layer.name ? null : { from: layer.name, text: layer.name })}>
               名前
             </button>

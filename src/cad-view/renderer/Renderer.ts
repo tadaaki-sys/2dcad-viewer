@@ -41,6 +41,8 @@ export type RenderParams = {
   grips?: readonly GripMark[];
   hoverGripKey?: string | null;
   hotGrip?: GripMark | null;
+  /** ロックされたレイヤー(Phase 19)。その図形は、薄く(背景へ半分寄せた色で)描く。無ければ省略 */
+  lockedLayerNames?: ReadonlySet<string>;
 };
 
 export interface Renderer {

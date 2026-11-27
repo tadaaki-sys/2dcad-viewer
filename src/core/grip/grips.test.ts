@@ -203,8 +203,9 @@ describe("a grip moved to a huge place does not produce non-finite geometry", ()
     const edge: CadEntity = { ...base, id: "c", type: "CIRCLE", center: pt(1.7e308, 0), radius: 5 };
     expect(applyGrip(edge, 0, pt(1.79e308, 0)).ok).toBe(true); // まだ収まる
     expect(applyGrip({ ...edge, center: pt(1.7e308, 1.7e308) } as CadEntity, 0, pt(-1.7e308, 1.79e308)).ok).toBe(false);
-    const line2: CadEntity = { ...base, id: "l", type: "LINE", start: pt(1.7e308, 0), end: pt(1.7e308, 10) };
-    expect(applyGrip(line2, 2, pt(3.3e308, 5)).ok).toBe(false);
+    // 中点 (1.35e308, 0) を (1.75e308, 0) へ: 終点が 1.7e308 + 0.4e308 で桁あふれする
+    const line2: CadEntity = { ...base, id: "l", type: "LINE", start: pt(1.0e308, 0), end: pt(1.7e308, 0) };
+    expect(applyGrip(line2, 2, pt(1.75e308, 0)).ok).toBe(false);
   });
 
   it("translating by a huge amount is refused", () => {

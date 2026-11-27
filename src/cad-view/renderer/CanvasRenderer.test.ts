@@ -3,7 +3,7 @@ import type { CadEntity, CadModel } from "../../types/cad";
 import { Camera } from "../../core/view/Camera";
 import { computeAllEntityBounds, unionOfEntityBounds } from "../../core/spatial/entityBounds";
 import { buildSpatialIndex } from "../../core/spatial/SpatialIndex";
-import { CanvasRenderer } from "./CanvasRenderer";
+import { CanvasRenderer, fadeColor } from "./CanvasRenderer";
 import type { RenderParams } from "./Renderer";
 
 type Op = [string, ...number[]];
@@ -93,6 +93,17 @@ function camera(scale = 1, offsetX = 0, offsetY = 100): Camera {
   c.offsetY = offsetY;
   return c;
 }
+
+describe("locked layers (Phase 19)", () => {
+  it("draws figures on a locked layer with the color halved toward the black background; other layers keep their color", () => {
+    const entities: CadEntity[] = [{ ...line("a", 0, 5, 30, 5, "#ff0000"), layer: "LOCK" } as CadEntity, line("b", 0, 40, 30, 40, "#ff0000")];
+    const ctx = render(makeModel(entities), camera(), { visibleLayerNames: new Set(["A", "LOCK"]), lockedLayerNames: new Set(["LOCK"]) });
+    expect(ctx.strokes.map((s) => s.style).sort()).toEqual(["#800000", "#ff0000"]);
+    expect(fadeColor("#ffffff")).toBe("#808080");
+    expect(fadeColor("#0a0b0c")).toBe("#050606"); // 0x0b / 2 = 5.5 は 6 に丸める
+    expect(fadeColor("red")).toBe("red");
+  });
+});
 
 describe("CanvasRenderer batching", () => {
   it("strokes all entities of one color with a single stroke call", () => {

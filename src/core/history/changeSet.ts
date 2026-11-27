@@ -6,7 +6,7 @@
 import type { CadDocument } from "../model/document";
 import { getEntity, indexOfEntity } from "../model/document";
 import type { EntityId } from "../model/ids";
-import type { CadEntity, CadLayer } from "../../types/cad";
+import type { CadEntity, CadGroup, CadLayer } from "../../types/cad";
 
 /**
  * 図形の変更1つ。位置(index)は、「その変更を適用する直前の、描画順の配列」での位置。
@@ -39,7 +39,13 @@ export type LayerChange =
   /** index の位置にあるレイヤー(before)を、after に置き換える(名前・色・線種・線の太さ。位置は変わらない) */
   | { kind: "layerReplace"; before: CadLayer; after: CadLayer; index: number }
   /** 全体の線種尺度を、before から after に変える */
-  | { kind: "ltScale"; before: number; after: number };
+  | { kind: "ltScale"; before: number; after: number }
+  /** グループを、グループ表の index の位置に足す(Phase 19) */
+  | { kind: "groupAdd"; group: CadGroup; index: number }
+  /** index の位置のグループ(group)を削除する。group は、削除前のグループそのもの */
+  | { kind: "groupRemove"; group: CadGroup; index: number }
+  /** index の位置のグループ(before)を、after に置き換える(名前・図形の一覧) */
+  | { kind: "groupReplace"; before: CadGroup; after: CadGroup; index: number };
 
 export type Change = EntityChange | LayerChange;
 
@@ -78,6 +84,15 @@ export function invertChangeSet(changeSet: ChangeSet): ChangeSet {
         break;
       case "ltScale":
         inverted.push({ kind: "ltScale", before: change.after, after: change.before });
+        break;
+      case "groupAdd":
+        inverted.push({ kind: "groupRemove", group: change.group, index: change.index });
+        break;
+      case "groupRemove":
+        inverted.push({ kind: "groupAdd", group: change.group, index: change.index });
+        break;
+      case "groupReplace":
+        inverted.push({ kind: "groupReplace", before: change.after, after: change.before, index: change.index });
         break;
     }
   }
@@ -167,5 +182,39 @@ export function moveToBackChangeSet(document: CadDocument, ids: readonly EntityI
     const target = targets[count - 1 - i];
     changes.push({ kind: "move", entity: target.entity, from: target.index + i, to: 0 });
   }
+  return { label, changes };
+}
+
+/** 描画順の置き場所(Phase 19): 最前面・最背面・基準の図形の上(すぐ前面)・下(すぐ背面) */
+export type DrawOrderPlacement = { kind: "front" } | { kind: "back" } | { kind: "above"; referenceId: EntityId } | { kind: "below"; referenceId: EntityId };
+
+/**
+ * 図形の描画順を変える変更を作る(Phase 19)。指定した図形どうしの前後関係は保つ。
+ * 「取り出して(削除、位置の大きい順)、入れ直す(追加、位置の小さい順)」の形にする。適用は、どちらも1回の走査で済む
+ * (1件ずつの move は、動かす数 × 図形数の時間になるため。大きな選択でも、速く)。図形は同じオブジェクトのまま。
+ * すでにその並びになっているときは null。存在しない ID・基準が指定した図形に含まれるときは、エラー。
+ */
+export function drawOrderChangeSet(document: CadDocument, ids: readonly EntityId[], placement: DrawOrderPlacement, label: string): ChangeSet | null {
+  const targets = sortedTargets(document, ids);
+  const count = targets.length;
+  if (count === 0) return null;
+  const total = document.entities.length;
+  let start: number;
+  if (placement.kind === "front") start = total - count;
+  else if (placement.kind === "back") start = 0;
+  else {
+    const reference = indexOfEntity(document, placement.referenceId);
+    if (reference < 0) throw new Error(`基準の図形が見つかりません: ${placement.referenceId}`);
+    if (targets.some((t) => t.entity.id === placement.referenceId)) throw new Error("基準の図形は、動かす図形に含められません");
+    // 取り出したあとの、基準の図形の位置
+    const before = targets.filter((t) => t.index < reference).length;
+    const at = reference - before;
+    start = placement.kind === "above" ? at + 1 : at;
+  }
+  // 入れ直したあとの位置が、元の位置と全部同じなら、並びは変わらない
+  if (targets.every((t, j) => t.index === start + j)) return null;
+  const changes: EntityChange[] = [];
+  for (let j = count - 1; j >= 0; j--) changes.push({ kind: "remove", entity: targets[j].entity, index: targets[j].index });
+  for (let j = 0; j < count; j++) changes.push({ kind: "add", entity: targets[j].entity, index: start + j });
   return { label, changes };
 }

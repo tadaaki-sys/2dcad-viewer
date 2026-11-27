@@ -8,9 +8,10 @@ import { getEntity } from "../../core/model";
 import type { EntityId } from "../../core/model";
 import type { CadEntity } from "../../types/cad";
 import { createGripPreview } from "../../core/grip/gripPreview";
+import { groupOf } from "../../core/group/groups";
 import type { AppEditing, GripTarget } from "../commands/types";
 import { resolveEditTargets } from "./editability";
-import { pickEntityAt, pickTargetOf } from "./picking";
+import { ANY_EDITABILITY, pickEntityAt, pickTargetOf } from "./picking";
 import type { Editability } from "./editability";
 import type { DocumentSession } from "./documentSession";
 
@@ -71,7 +72,9 @@ export function createAppEditing(sources: AppEditingSources): AppEditing {
       const session = sources.getSession();
       if (session === null) return { ok: false, message: "図面の準備中です" };
       const target = pickTargetOf(kind);
-      const picked = pickEntityAt(session, sources.getEditability(), point, sources.getPickTolerance(), sources.getVisibleLayerNames(), target.types, name, undefined, target.label);
+      // 基準の指定(reference)は、図形を変えないので、ロック・読み取り専用の図形も選べる
+      const editability = kind === "reference" ? ANY_EDITABILITY : sources.getEditability();
+      const picked = pickEntityAt(session, editability, point, sources.getPickTolerance(), sources.getVisibleLayerNames(), target.types, name, undefined, target.label);
       return picked.ok ? { ok: true, id: picked.entity.id } : picked;
     },
     createOffsetPreview: (id) => {
@@ -87,6 +90,10 @@ export function createAppEditing(sources: AppEditingSources): AppEditing {
       return session === null ? points.map(() => null) : findAnchorsAt(session.document.entities, sources.getVisibleLayerNames(), points);
     },
     takePendingGrip: () => sources.takePendingGrip(),
+    groupNameOf: (id) => {
+      const session = sources.getSession();
+      return session === null ? null : (groupOf(session.document.groups, id)?.name ?? null);
+    },
     createGripPreview: (id, index) => {
       const session = sources.getSession();
       const entity = session === null ? undefined : getEntity(session.document, id);

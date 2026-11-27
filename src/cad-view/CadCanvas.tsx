@@ -21,6 +21,7 @@ import { isTypingTarget } from "../utils/dom";
 import type { PreviewShape } from "../core/commands";
 import { findGripAt } from "./renderer/gripRender";
 import type { GripMark } from "./renderer/gripRender";
+import type { SelectionChangeMode } from "../core/group/groups";
 
 const MIDDLE_MOUSE_BUTTON = 1;
 const LEFT_MOUSE_BUTTON = 0;
@@ -75,7 +76,8 @@ type CadCanvasProps = {
   pointPickRaw?: boolean;
   measurements: readonly Measurement[];
   selectedMeasurementId: string | null;
-  onSelectionChange: (entityIds: ReadonlySet<string>) => void;
+  /** 選択が変わった。mode は、操作の種類(グループ単位の選択に広げるときに使う。Phase 19) */
+  onSelectionChange: (entityIds: ReadonlySet<string>, mode?: SelectionChangeMode) => void;
   onMeasurementComplete: (measurement: Measurement) => void;
   onMeasurementSelect: (measurementId: string | null) => void;
   /** 点が指示された。pickToleranceWorld は、図形を指すときの許容距離(図面上の長さ。画面の拡大率による) */
@@ -191,6 +193,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     () => new Set(layers.filter((layer) => layer.visible).map((layer) => layer.name)),
     [layers],
   );
+  // ロックされたレイヤー(Phase 19)。図形は薄く描き、クリック・窓では選ばない(スナップの対象には残す)
+  const lockedLayerNames = useMemo(() => new Set(layers.filter((layer) => layer.locked === true).map((layer) => layer.name)), [layers]);
+  const selectableLayerNames = useMemo(() => new Set(layers.filter((layer) => layer.visible && layer.locked !== true).map((layer) => layer.name)), [layers]);
 
   // 図面を読み込んだ時に1回だけ作る。選択・スナップ・描画が全図形の総当たりにならないようにするための索引。
   const spatialIndex = useMemo(() => (model ? buildSpatialIndex(model) : null), [model]);
@@ -203,6 +208,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     model,
     spatialIndex,
     visibleLayerNames,
+    selectableLayerNames,
+    lockedLayerNames,
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
@@ -228,6 +235,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     model,
     spatialIndex,
     visibleLayerNames,
+    selectableLayerNames,
+    lockedLayerNames,
     selectedEntityIds,
     selectionEnabled,
     measurementModeEnabled,
@@ -292,6 +301,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       grips: stateRef.current.grips,
       hoverGripKey: hoverGripKeyRef.current,
       hotGrip: stateRef.current.hotGrip,
+      lockedLayerNames: stateRef.current.lockedLayerNames,
     });
 
     const renderEnd = performance.now();
@@ -584,7 +594,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
     }
 
     function applySingleClickSelection(event: MouseEvent) {
-      const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected, measurements: currentMeasurements } =
+      const { model: currentModel, selectableLayerNames: currentVisible, selectedEntityIds: currentSelected, measurements: currentMeasurements } =
         stateRef.current;
 
       const screenPoint = getCanvasRelativePoint(canvas!, event.clientX, event.clientY);
@@ -610,7 +620,7 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         } else {
           next.add(hitEntity.id);
         }
-        stateRef.current.onSelectionChange(next);
+        stateRef.current.onSelectionChange(next, "toggle");
         return;
       }
 
@@ -652,14 +662,14 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
 
       const nextIndex = isSameSpotAsLastClick ? (previous!.index + 1) % candidates.length : 0;
       overlapCycleRef.current = { screenPoint, candidateIds, index: nextIndex };
-      stateRef.current.onSelectionChange(new Set([candidateIds[nextIndex]]));
+      stateRef.current.onSelectionChange(new Set([candidateIds[nextIndex]]), "replace");
     }
 
     function applyBoxSelection(event: MouseEvent) {
       if (!leftDragStartClient) return;
       overlapCycleRef.current = null;
       stateRef.current.onMeasurementSelect(null);
-      const { model: currentModel, visibleLayerNames: currentVisible, selectedEntityIds: currentSelected } =
+      const { model: currentModel, selectableLayerNames: currentVisible, selectedEntityIds: currentSelected } =
         stateRef.current;
       if (!currentModel) return;
 
@@ -677,9 +687,9 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
       const hitIds = hitEntities.map((entity) => entity.id);
 
       if (event.ctrlKey || event.metaKey) {
-        stateRef.current.onSelectionChange(new Set([...currentSelected, ...hitIds]));
+        stateRef.current.onSelectionChange(new Set([...currentSelected, ...hitIds]), "add");
       } else {
-        stateRef.current.onSelectionChange(new Set(hitIds));
+        stateRef.current.onSelectionChange(new Set(hitIds), "replace");
       }
     }
 
@@ -692,7 +702,8 @@ export const CadCanvas = forwardRef<CadCanvasHandle, CadCanvasProps>(function Ca
         return;
       }
       // グリップをクリックしたら、そのグリップを動かすコマンドを始める(選択の操作は始めない)。グリップは、コマンド・測定の最中は、出ない
-      if (event.button === LEFT_MOUSE_BUTTON && !stateRef.current.pointPickEnabled && !stateRef.current.measurementModeEnabled) {
+      // Ctrl・Shift を押しながらのクリックは、選択の追加・切り替えの操作(グリップの上でも、グリップは始めない。Phase 19)
+      if (event.button === LEFT_MOUSE_BUTTON && !stateRef.current.pointPickEnabled && !stateRef.current.measurementModeEnabled && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
         const gripList = stateRef.current.grips;
         if (gripList !== undefined && gripList.length > 0 && stateRef.current.onGripClick !== undefined) {
           const hit = findGripAt(gripList, cameraRef.current, getCanvasRelativePoint(canvas!, event.clientX, event.clientY));

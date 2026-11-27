@@ -94,6 +94,8 @@ export type PromptStep<R> =
        * (点の指示としては、受け付けない)。Esc で取り消し。
        */
       expect: "selection";
+      /** true なら、この段階の選択は、グループ単位に広げず、クリックした図形そのものを選ぶ(グループから図形を外す操作など) */
+      individualSelection?: boolean;
       onInput: (input: SelectionInput) => CommandStep<R>;
     })
   | (PromptBase<R> & {

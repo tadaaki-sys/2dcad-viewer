@@ -1094,3 +1094,20 @@ describe("DxfParserAdapter - ByLayer marks, layer styles and linetype table (Pha
     }
   });
 });
+describe("DxfParserAdapter - layer lock (Phase 19)", () => {
+  const tables = (flags: string) =>
+    ["0", "TABLE", "2", "LAYER", "70", "2", "0", "LAYER", "2", "LOCKED", "70", flags, "62", "1", "0", "LAYER", "2", "0", "70", "0", "62", "7", "0", "ENDTAB"].join("\n");
+  const lineOn = (layer: string) => ["0", "LINE", "8", layer, "10", "0.0", "20", "0.0", "11", "1.0", "21", "0.0"].join("\n");
+
+  it("reads the lock flag (bit 4 of the layer flags); other layers carry no lock", () => {
+    const layers = parseDxfText(buildDxf(lineOn("LOCKED"), tables("4"))).layers;
+    expect(layers.find((l) => l.name === "LOCKED")?.locked).toBe(true);
+    expect(layers.find((l) => l.name === "0")?.locked).toBeUndefined();
+  });
+
+  it("frozen + locked (5) is both; frozen only (1) is not locked", () => {
+    const both = parseDxfText(buildDxf(lineOn("LOCKED"), tables("5"))).layers.find((l) => l.name === "LOCKED")!;
+    expect([both.locked, both.visible]).toEqual([true, false]);
+    expect(parseDxfText(buildDxf(lineOn("LOCKED"), tables("1"))).layers.find((l) => l.name === "LOCKED")?.locked).toBeUndefined();
+  });
+});

@@ -43,6 +43,7 @@ function start(selection: string[], overrides: Partial<AppEditing> = {}) {
     anchorsAt: NO_EDITING.anchorsAt,
 takePendingGrip: NO_EDITING.takePendingGrip,
 createGripPreview: NO_EDITING.createGripPreview,
+groupNameOf: NO_EDITING.groupNameOf,
     ...overrides,
   };
   return createAppCommandSession(() => makeContext({ editing }));

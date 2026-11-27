@@ -9,9 +9,11 @@ type LayerPanelProps = {
   onSelectCurrent: (layerName: string) => void;
   /** レイヤー管理パネルを開く(図面が編集できる状態のときだけ渡す。無ければ、ボタンを出さない) */
   onManage?: () => void;
+  /** レイヤーのロックを切り替える(Phase 19。図面が編集できる状態のときだけ渡す。無ければ、鍵を出さない) */
+  onToggleLock?: (layerName: string) => void;
 };
 
-export function LayerPanel({ layers, currentLayerName, onToggleVisibility, onSelectCurrent, onManage }: LayerPanelProps) {
+export function LayerPanel({ layers, currentLayerName, onToggleVisibility, onSelectCurrent, onManage, onToggleLock }: LayerPanelProps) {
   return (
     <div className="layer-panel">
       <div className="layer-panel__title">
@@ -44,7 +46,18 @@ export function LayerPanel({ layers, currentLayerName, onToggleVisibility, onSel
                 onChange={() => onSelectCurrent(layer.name)}
               />
               <span className="layer-panel__color-chip" style={{ backgroundColor: layer.color }} />
-              <span className="layer-panel__name">{layer.name}</span>
+              <span className={layer.locked === true ? "layer-panel__name layer-panel__name--locked" : "layer-panel__name"}>{layer.name}</span>
+              {onToggleLock !== undefined && (
+                <button
+                  type="button"
+                  className={layer.locked === true ? "layer-panel__lock layer-panel__lock--on" : "layer-panel__lock"}
+                  data-testid={`layer-lock-toggle-${layer.name}`}
+                  aria-pressed={layer.locked === true}
+                  aria-label={`${layer.name} を${layer.locked === true ? "ロック解除" : "ロック"}する`}
+                  title={layer.locked === true ? "ロック中(クリックで解除)。図形は選べず、編集できません" : "ロックする(図形を選べなく、編集できなくする)"}
+                  onClick={() => onToggleLock(layer.name)}
+                />
+              )}
             </li>
           ))}
         </ul>

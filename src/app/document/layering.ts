@@ -135,6 +135,7 @@ export function editLayer(session: DocumentSession, name: string, patch: LayerPa
     visible: before.visible,
     ...(lineType === undefined ? {} : { lineType }),
     ...(lineWeight === undefined ? {} : { lineWeight }),
+    ...(before.locked === true ? { locked: true } : {}),
   };
   const dashes = createDashFactory(session.document.lineTypes, session.document.ltScale);
   const followers = replacesOnLayer(session, name, (entity) => restyleEntityToLayer(entity, after, dashes, bits));
@@ -156,6 +157,23 @@ export function editLayer(session: DocumentSession, name: string, patch: LayerPa
           ? `(追従する図形はありません: このレイヤーの図形 ${onLayer} 個は、${what}を図形自身で指定しています。DWG から変換した図面では、元の ByLayer の指定が失われています)`
           : "";
   return { ok: true, message: `レイヤー「${name}」の${what}を変更しました${note}` };
+}
+
+/**
+ * レイヤーをロックする・ロックを解除する(Phase 19)。ロックしたレイヤーの図形は、選べず、編集できない(薄く表示し、スナップはできる)。
+ * レイヤーの定義の変更なので、Undo の対象(表示・非表示とは違う)。図形は変わらない。現在のレイヤーでも、ロックできる(描くことはできる)。
+ */
+export function setLayerLocked(session: DocumentSession, name: string, locked: boolean): EditOutcome {
+  const before = layerOf(session, name);
+  if (before === undefined) return fail(`レイヤー「${name}」がありません`);
+  if ((before.locked === true) === locked) return fail(locked ? `レイヤー「${name}」は、すでにロックされています` : `レイヤー「${name}」は、ロックされていません`);
+  const { locked: _old, ...rest } = before;
+  void _old;
+  const after: CadLayer = locked ? { ...rest, locked: true } : rest;
+  const index = session.document.layerIndexByName.get(name)!;
+  const outcome = session.apply({ label: `レイヤー「${name}」の${locked ? "ロック" : "ロック解除"}`, changes: [{ kind: "layerReplace", before, after, index }] });
+  if (!outcome.ok) return fail(`変更できませんでした: ${outcome.error}`);
+  return { ok: true, message: locked ? `レイヤー「${name}」をロックしました(図形は選べず、編集できません)` : `レイヤー「${name}」のロックを解除しました` };
 }
 
 /** レイヤーの名前を変える。そのレイヤーの図形も、同じ変更の中で、新しい名前に付け替える。レイヤー 0 は変えられない */
